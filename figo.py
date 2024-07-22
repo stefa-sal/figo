@@ -3,8 +3,7 @@ import pylxd
 import subprocess
 
 # Helper function to get VM profiles
-def get_vm_profiles():
-    client = pylxd.Client()
+def get_vm_profiles(client):
     vm_profiles = {}
     running_vms = {}
     stopped_vms = []
@@ -20,14 +19,12 @@ def get_vm_profiles():
     return vm_profiles, running_vms, stopped_vms
 
 # Function to get all profiles
-def get_all_profiles():
-    client = pylxd.Client()
+def get_all_profiles(client):
     profiles = client.profiles.all()
     return [profile.name for profile in profiles]
 
 # Function to print VM profiles
-def print_vm_profiles(vm_profiles):
-    client = pylxd.Client()  # Initialize the LXD client
+def print_vm_profiles(vm_profiles, client):
     print("{:<20} {:<10} {:<30}".format("INSTANCE", "STATE", "PROFILES"))
     for name, profiles in vm_profiles.items():
         instance = client.instances.get(name)
@@ -36,8 +33,7 @@ def print_vm_profiles(vm_profiles):
         print("{:<20} {:<10} {:<30}".format(name, state, profiles_str))
 
 # Function to print GPU profiles
-def print_gpu_profiles(vm_profiles):
-    client = pylxd.Client()  # Initialize the LXD client
+def print_gpu_profiles(vm_profiles, client):
     print("{:<20} {:<10} {:<30}".format("INSTANCE", "STATE", "PROFILES"))
     for name, profiles in vm_profiles.items():
         instance = client.instances.get(name)
@@ -47,8 +43,7 @@ def print_gpu_profiles(vm_profiles):
         print("{:<20} {:<10} {:<30}".format(name, state, profiles_str))
 
 # Function to stop a specific instance
-def stop_instance(instance_name):
-    client = pylxd.Client()
+def stop_instance(instance_name, client):
     try:
         instance = client.instances.get(instance_name)
         if instance.status != "Running":
@@ -60,9 +55,7 @@ def stop_instance(instance_name):
         print(f"Failed to stop instance '{instance_name}': {e}")
 
 # Function to start a specific instance
-def start_instance(instance_name):
-    client = pylxd.Client()
-
+def start_instance(instance_name, client):
     instance = client.instances.get(instance_name)
 
     if instance.status != "Stopped":
@@ -105,7 +98,7 @@ def start_instance(instance_name):
                 ][0].name
                 instance_profiles.append(new_profile)
                 print(f"Replaced GPU profile '{gpu_profile}' with '{new_profile}' "
-                        f"for instance '{instance_name}'")
+                      f"for instance '{instance_name}'")
                 break
 
     if conflict:
@@ -123,8 +116,7 @@ def start_instance(instance_name):
         print(f"Failed to start instance '{instance_name}': {e}")
 
 # Function to add a GPU profile to an instance
-def add_gpu_profile(instance_name):
-    client = pylxd.Client()
+def add_gpu_profile(instance_name, client):
     try:
         instance = client.instances.get(instance_name)
         if instance.status != "Stopped":
@@ -145,7 +137,7 @@ def add_gpu_profile(instance_name):
             print(f"Error: Instance '{instance_name}' already has the maximum number of GPU profiles.")
             return
 
-        all_profiles = get_all_profiles()
+        all_profiles = get_all_profiles(client)
         available_gpu_profiles = [
             profile for profile in all_profiles if profile.startswith("gpu-") 
             and profile not in instance_profiles
@@ -166,8 +158,7 @@ def add_gpu_profile(instance_name):
         print(f"Failed to add GPU profile to instance '{instance_name}': {e}")
 
 # Function to remove a GPU profile from an instance
-def remove_gpu_profile(instance_name):
-    client = pylxd.Client()
+def remove_gpu_profile(instance_name, client):
     try:
         instance = client.instances.get(instance_name)
         if instance.status != "Stopped":
@@ -195,8 +186,7 @@ def remove_gpu_profile(instance_name):
         print(f"Failed to remove GPU profile from instance '{instance_name}': {e}")
 
 # Function to remove all GPU profiles from an instance
-def remove_gpu_all_profiles(instance_name):
-    client = pylxd.Client()
+def remove_gpu_all_profiles(instance_name, client):
     try:
         instance = client.instances.get(instance_name)
         if instance.status != "Stopped":
@@ -225,8 +215,7 @@ def remove_gpu_all_profiles(instance_name):
         print(f"Failed to remove GPU profiles from instance '{instance_name}': {e}")
 
 # Function to show GPU status
-def show_gpu_status():
-    client = pylxd.Client()
+def show_gpu_status(client):
     result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
     total_gpus = len(result.stdout.strip().split('\n'))
 
@@ -247,8 +236,7 @@ def show_gpu_status():
         total_gpus, len(active_gpu_profiles), gpu_profiles_str, available_gpus))
 
 # Function to list GPU profiles
-def list_gpu_profiles():
-    client = pylxd.Client()
+def list_gpu_profiles(client):
     gpu_profiles = [
         profile.name for profile in client.profiles.all() if profile.name.startswith("gpu-")
     ]
@@ -296,28 +284,29 @@ def main():
                                        help="Name of the instance to remove all GPU profiles from")
 
     args = parser.parse_args()
+    client = pylxd.Client()
 
     if args.command == "show":
-        vm_profiles, _, _ = get_vm_profiles()
+        vm_profiles, _, _ = get_vm_profiles(client)
         if args.show_command == "profile":
-            print_vm_profiles(vm_profiles)
+            print_vm_profiles(vm_profiles, client)
         elif args.show_command == "gpu":
-            print_gpu_profiles(vm_profiles)
+            print_gpu_profiles(vm_profiles, client)
     elif args.command == "stop":
-        stop_instance(args.instance_name)
+        stop_instance(args.instance_name, client)
     elif args.command == "start":
-        start_instance(args.instance_name)
+        start_instance(args.instance_name, client)
     elif args.command == "gpu":
         if args.gpu_command == "status":
-            show_gpu_status()
+            show_gpu_status(client)
         elif args.gpu_command == "list":
-            list_gpu_profiles()
+            list_gpu_profiles(client)
     elif args.command == "add_gpu":
-        add_gpu_profile(args.instance_name)
+        add_gpu_profile(args.instance_name, client)
     elif args.command == "remove_gpu":
-        remove_gpu_profile(args.instance_name)
+        remove_gpu_profile(args.instance_name, client)
     elif args.command == "remove_gpu_all":
-        remove_gpu_all_profiles(args.instance_name)
+        remove_gpu_all_profiles(args.instance_name, client)
 
 if __name__ == "__main__":
     main()
