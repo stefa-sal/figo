@@ -226,22 +226,19 @@ def show_gpu_status(client):
     ]
 
     available_gpus = total_gpus - len(active_gpu_profiles)
-    gpu_profiles = [
-        profile for profile in client.profiles.all() if profile.name.startswith("gpu-")
-    ]
 
-    gpu_profiles_str = ", ".join(gpu_profiles)
-    print("{:<10} {:<10} {:<40} {:<10}".format("TOTAL", "ACTIVE", "PROFILES", "AVAILABLE"))
-    print("{:<10} {:<10} {:<40} {:<10}".format(
-        total_gpus, len(active_gpu_profiles), gpu_profiles_str, available_gpus))
+    gpu_profiles_str = ", ".join(active_gpu_profiles)
+    print("{:<10} {:<10} {:<10} {:<40}".format("TOTAL", "AVAILABLE", "ACTIVE", "PROFILES"))
+    print("{:<10} {:<10} {:<10} {:<40}".format(
+        total_gpus, available_gpus, len(active_gpu_profiles), gpu_profiles_str))
 
 # Function to list GPU profiles
 def list_gpu_profiles(client):
     gpu_profiles = [
         profile.name for profile in client.profiles.all() if profile.name.startswith("gpu-")
     ]
-    print("{:<20} {:<30}".format("TOTAL", "PROFILES"))
-    print("{:<20} {:<30}".format(len(gpu_profiles), ", ".join(gpu_profiles)))
+    print("{:<10} {:<30}".format("TOTAL", "PROFILES"))
+    print("{:<10} {:<30}".format(len(gpu_profiles), ", ".join(gpu_profiles)))
 
 # Main function to parse command-line arguments and execute corresponding commands
 def main():
