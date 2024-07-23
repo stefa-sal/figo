@@ -286,18 +286,25 @@ def main():
     args = parser.parse_args()
     client = pylxd.Client()
 
-    if args.command == "show":
-        vm_profiles, _, _ = get_vm_profiles(client)
-        if args.show_command == "profile":
-            print_vm_profiles(vm_profiles, client)
-        elif args.show_command == "gpu":
-            print_gpu_profiles(vm_profiles, client)
+    if not args.command:
+        parser.print_help()
+    elif args.command == "show":
+        if not args.show_command:
+            show_parser.print_help()
+        else:
+            vm_profiles, _, _ = get_vm_profiles(client)
+            if args.show_command == "profile":
+                print_vm_profiles(vm_profiles, client)
+            elif args.show_command == "gpu":
+                print_gpu_profiles(vm_profiles, client)
     elif args.command == "stop":
         stop_instance(args.instance_name, client)
     elif args.command == "start":
         start_instance(args.instance_name, client)
     elif args.command == "gpu":
-        if args.gpu_command == "status":
+        if not args.gpu_command:
+            gpu_parser.print_help()
+        elif args.gpu_command == "status":
             show_gpu_status(client)
         elif args.gpu_command == "list":
             list_gpu_profiles(client)
