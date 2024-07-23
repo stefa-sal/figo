@@ -1,0 +1,12 @@
+config:
+  raw.qemu: '-global q35-pcihost.pci-hole64-size=1024G
+
+    '
+  security.secureboot: 'false'
+description: GPU Profile allowing GPU@21:00.0 to be assigned to a VM
+devices:
+  gpu-device1:
+    gputype: physical
+    pci: '21:00.0'
+    type: gpu
+name: gpu-1-21000

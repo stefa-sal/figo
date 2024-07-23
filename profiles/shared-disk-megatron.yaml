@@ -1,0 +1,8 @@
+config: {}
+description: adding shared-data folder from host
+devices:
+  shared-folder:
+    path: /home/mpi/megatron/shared-data
+    source: /home/gpuserver/megatron/shared-data
+    type: disk
+name: shared-disk-megatron

@@ -1,0 +1,15 @@
+config:
+  limits.cpu: '32'
+  limits.memory: 32GB
+description: Simple VM with 32 VCPUs, 32 GB RAM, 128GB root disk
+devices:
+  eth0:
+    name: eth0
+    network: lxdbr0
+    type: nic
+  root:
+    path: /
+    pool: default
+    size: 128GB
+    type: disk
+name: vm-profile-medium-32core
