@@ -4,6 +4,11 @@ import subprocess
 import logging
 import os
 import yaml
+import re
+
+NET_PROFILE = "net-bridged-br0"
+NAME_SERVER_IP_ADDR = "160.80.1.8"
+NAME_SERVER_IP_ADDR_2 = "8.8.8.8"
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -274,6 +279,63 @@ def dump_profiles(client):
             yaml.dump(profile_data, file)
         print(f"Profile '{profile.name}' saved to '{file_name}'.")
 
+def is_valid_ip(ip):
+    """Check if the provided string is a valid IPv4 address."""
+    pattern = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
+    if pattern.match(ip):
+        octets = ip.split('.')
+        if all(0 <= int(octet) <= 255 for octet in octets):
+            return True
+    return False
+
+def set_ip(instance_name, ip_address, gw_address, client):
+    """Set a static IP address and gateway for a stopped instance."""
+    if not is_valid_ip(ip_address):
+        print(f"Error: '{ip_address}' is not a valid IP address.")
+        return
+    
+    if not is_valid_ip(gw_address):
+        print(f"Error: '{gw_address}' is not a valid IP address.")
+        return
+
+    try:
+        instance = client.instances.get(instance_name)
+        if instance.status != "Stopped":
+            print(f"Error: Instance '{instance_name}' is not stopped.")
+            return
+        
+        # Check if a profile starting with "net-" is associated with the instance
+        net_profiles = [profile for profile in instance.profiles if profile.startswith("net-")]
+        if not net_profiles:
+            print(f"Instance '{instance_name}' does not have a 'net-' profile associated. Adding '{NET_PROFILE}' profile.")
+            # Add the NET_PROFILE profile to the instance
+            instance.profiles.append(NET_PROFILE)
+            instance.save(wait=True)
+
+        network_config = f"""
+version: 1
+config:
+  - type: physical
+    name: enp5s0
+    subnets:
+      - type: static
+        ipv4: true
+        address: {ip_address}
+        netmask: 255.255.255.0
+        gateway: {gw_address}
+        control: auto
+  - type: nameserver
+    address: {NAME_SERVER_IP_ADDR}
+  - type: nameserver
+    address: {NAME_SERVER_IP_ADDR_2}
+"""
+
+        instance.config['cloud-init.network-config'] = network_config
+        instance.save(wait=True)
+        print(f"IP address '{ip_address}' and gateway '{gw_address}' assigned to instance '{instance_name}'.")
+    except pylxd.exceptions.LXDAPIException as e:
+        print(f"Failed to set IP address for instance '{instance_name}': {e}")
+
 def main():
     parser = argparse.ArgumentParser(description="Manage LXD instances and GPU profiles")
     subparsers = parser.add_subparsers(dest="command")
@@ -304,6 +366,11 @@ def main():
     remove_gpu_all_parser.add_argument("instance_name", help="Name of the instance to remove all GPU profiles from")
 
     dump_profiles_parser = subparsers.add_parser("dump_profiles", help="Dump all profiles to .yaml files")
+
+    set_ip_parser = subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance")
+    set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for")
+    set_ip_parser.add_argument("ip_address", help="Static IP address to assign to the instance")
+    set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
 
     args = parser.parse_args()
     client = pylxd.Client()
@@ -338,6 +405,8 @@ def main():
         remove_gpu_all_profiles(args.instance_name, client)
     elif args.command == "dump_profiles":
         dump_profiles(client)
+    elif args.command == "set_ip":
+        set_ip(args.instance_name, args.ip_address, args.gw_address, client)
 
 if __name__ == "__main__":
     main()
