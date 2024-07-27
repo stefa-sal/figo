@@ -14,5 +14,8 @@ cd "$HOME/figo"
 # Activate the virtual environment
 source venv/bin/activate
 
+# Export incus dir for unix socket connection
+export LXD_DIR=/var/lib/incus
+
 # Run the Python script with all passed arguments
 python3 figo.py "$@"
