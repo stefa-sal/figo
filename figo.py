@@ -346,6 +346,11 @@ def set_user_key(instance_name, key_filename, client):
         # Get the instance
         instance = client.instances.get(instance_name)
 
+        # Check if the instance is running
+        if instance.status != "Running":
+            print(f"Error: Instance '{instance_name}' is not running.")
+            return
+
         # Connect to the instance using LXD's exec
         def exec_command(command):
             try:
@@ -378,6 +383,7 @@ def set_user_key(instance_name, key_filename, client):
         print(f"File '{key_filename}' not found.")
     except Exception as e:
         print(f"An error occurred: {e}")
+
 
 
 def main():
