@@ -392,8 +392,8 @@ def main():
 
     show_parser = subparsers.add_parser("show", help="Show instance information")
     show_subparsers = show_parser.add_subparsers(dest="show_command")
-    show_profile_parser = show_subparsers.add_parser("profile", help="Show instance profiles")
-    show_gpu_parser = show_subparsers.add_parser("gpu", help="Show GPU profiles")
+    show_profile_parser = show_subparsers.add_parser("profiles", help="Show instance profiles")
+    show_gpu_parser = show_subparsers.add_parser("gpus", help="Show GPU profiles")
 
     stop_parser = subparsers.add_parser("stop", help="Stop a specific instance")
     stop_parser.add_argument("instance_name", help="Name of the instance to stop")
@@ -436,9 +436,9 @@ def main():
             show_parser.print_help()
         else:
             vm_profiles, _, _ = get_vm_profiles(client)
-            if args.show_command == "profile":
+            if args.show_command == "profiles":
                 print_vm_profiles(vm_profiles, client)
-            elif args.show_command == "gpu":
+            elif args.show_command == "gpus":
                 print_gpu_profiles(vm_profiles, client)
     elif args.command == "stop":
         stop_instance(args.instance_name, client)
