@@ -336,6 +336,50 @@ config:
     except pylxd.exceptions.LXDAPIException as e:
         print(f"Failed to set IP address for instance '{instance_name}': {e}")
 
+def set_user_key(instance_name, key_filename, client):
+    """Set a public key in the /home/mpi/.ssh/authorized_keys of the specified instance."""
+    try:
+        # Read the public key from the file
+        with open(key_filename, 'r') as key_file:
+            public_key = key_file.read().strip()
+
+        # Get the instance
+        instance = client.instances.get(instance_name)
+
+        # Connect to the instance using LXD's exec
+        def exec_command(command):
+            try:
+                exec_result = instance.execute(command)
+                output, error = exec_result
+                if error:
+                    print(f"Error executing command '{' '.join(command)}': {error}")
+                return output
+            except Exception as e:
+                print(f"Exception while executing command '{' '.join(command)}': {e}")
+                return None
+
+        # Create .ssh directory
+        exec_command(['mkdir', '-p', '/home/mpi/.ssh'])
+
+        # Create authorized_keys file
+        exec_command(['touch', '/home/mpi/.ssh/authorized_keys'])
+
+        # Set permissions
+        exec_command(['chmod', '600', '/home/mpi/.ssh/authorized_keys'])
+        exec_command(['chown', 'mpi:mpi', '/home/mpi/.ssh/authorized_keys'])
+
+        # Add the public key
+        exec_command(['sh', '-c', f'echo "{public_key}" >> /home/mpi/.ssh/authorized_keys'])
+
+        print(f"Public key from '{key_filename}' added to /home/mpi/.ssh/authorized_keys in instance '{instance_name}'.")
+    except pylxd.exceptions.LXDAPIException as e:
+        print(f"Failed to set user key for instance '{instance_name}': {e}")
+    except FileNotFoundError:
+        print(f"File '{key_filename}' not found.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Manage LXD instances and GPU profiles")
     subparsers = parser.add_subparsers(dest="command")
@@ -372,6 +416,10 @@ def main():
     set_ip_parser.add_argument("ip_address", help="Static IP address to assign to the instance")
     set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
 
+    set_user_key_parser = subparsers.add_parser("set_user_key", help="Set a public key for a user in an instance")
+    set_user_key_parser.add_argument("instance_name", help="Name of the instance")
+    set_user_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
+
     args = parser.parse_args()
     client = pylxd.Client()
 
@@ -407,6 +455,8 @@ def main():
         dump_profiles(client)
     elif args.command == "set_ip":
         set_ip(args.instance_name, args.ip_address, args.gw_address, client)
+    elif args.command == "set_user_key":
+        set_user_key(args.instance_name, args.key_filename, client)
 
 if __name__ == "__main__":
     main()
