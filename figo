@@ -1,0 +1,18 @@
+#!/bin/bash
+# This script is a wrapper for the figo.py script. It activates the virtual
+# environment and runs the Python script with all passed arguments.
+
+# make a simlink of this script to /usr/local/bin/figo
+# sudo ln -s $HOME/figo/figo /usr/local/bin/figo
+# or copy the script to /usr/local/bin
+# sudo cp figo /usr/local/bin/
+
+
+# Navigate to the directory containing the script
+cd "$HOME/figo"
+
+# Activate the virtual environment
+source venv/bin/activate
+
+# Run the Python script with all passed arguments
+python3 figo.py "$@"
