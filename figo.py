@@ -10,7 +10,7 @@ import os
 import yaml
 import re
 
-NET_PROFILE = "net-bridged-br0"
+NET_PROFILE = "net-bridged-br-200-3"
 NAME_SERVER_IP_ADDR = "160.80.1.8"
 NAME_SERVER_IP_ADDR_2 = "8.8.8.8"
 
