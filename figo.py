@@ -1,4 +1,8 @@
+# # PYTHON_ARGCOMPLETE_OK
+#!/home/gpuserver/figo/venv/bin/python
+
 import argparse
+import argcomplete
 import pylxd
 import subprocess
 import logging
@@ -404,8 +408,6 @@ def set_user_key(instance_name, key_filename, client):
     except Exception as e:
         print(f"An error occurred: {e}")
 
-
-
 def main():
     parser = argparse.ArgumentParser(description="Manage LXD instances and GPU profiles")
     subparsers = parser.add_subparsers(dest="command")
@@ -445,6 +447,8 @@ def main():
     set_user_key_parser = subparsers.add_parser("set_user_key", help="Set a public key for a user in an instance")
     set_user_key_parser.add_argument("instance_name", help="Name of the instance")
     set_user_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
+
+    argcomplete.autocomplete(parser)
 
     args = parser.parse_args()
     client = pylxd.Client()
