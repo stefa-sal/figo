@@ -408,6 +408,12 @@ def set_user_key(instance_name, key_filename, client):
     except Exception as e:
         print(f"An error occurred: {e}")
 
+def list_users(client):
+    """List all certificates with their names and fingerprints."""
+    print("{:<30} {:<12}".format("NAME", "FINGERPRINT"))
+    for cert in client.certificates.all():
+        print("{:<30} {:<12}".format(cert.name, cert.fingerprint[:12]))
+        
 def main():
     parser = argparse.ArgumentParser(description="Manage LXD instances and GPU profiles")
     subparsers = parser.add_subparsers(dest="command")
@@ -448,6 +454,10 @@ def main():
     set_user_key_parser.add_argument("instance_name", help="Name of the instance")
     set_user_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
 
+    users_parser = subparsers.add_parser("users", help="Manage users")
+    users_subparsers = users_parser.add_subparsers(dest="users_command")
+    list_users_parser = users_subparsers.add_parser("list", help="List all installed certificates")
+
     argcomplete.autocomplete(parser)
 
     args = parser.parse_args()
@@ -487,6 +497,12 @@ def main():
         set_ip(args.instance_name, args.ip_address, args.gw_address, client)
     elif args.command == "set_user_key":
         set_user_key(args.instance_name, args.key_filename, client)
+    elif args.command == "users":
+        if not args.users_command:
+            users_parser.print_help()
+        elif args.users_command == "list":
+            list_users(client)
 
 if __name__ == "__main__":
     main()
+
