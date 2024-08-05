@@ -413,7 +413,16 @@ def list_users(client):
     print("{:<30} {:<12}".format("NAME", "FINGERPRINT"))
     for cert in client.certificates.all():
         print("{:<30} {:<12}".format(cert.name, cert.fingerprint[:12]))
-        
+
+def list_users_full(client):
+    """List all certificates with their names, fingerprints, types, and projects."""
+    print("{:<30} {:<12} {:<10} {:<20}".format("NAME", "FINGERPRINT", "TYPE", "PROJECTS"))
+    for cert in client.certificates.all():
+        projects = ', '.join(cert.projects) if cert.projects else 'None'
+        print("{:<30} {:<12} {:<10} {:<20}".format(
+            cert.name, cert.fingerprint[:12], cert.type, projects
+        ))
+
 def main():
     parser = argparse.ArgumentParser(description="Manage LXD instances and GPU profiles")
     subparsers = parser.add_subparsers(dest="command")
@@ -454,11 +463,10 @@ def main():
     set_user_key_parser.add_argument("instance_name", help="Name of the instance")
     set_user_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
 
-    users_parser = subparsers.add_parser("users", help="Manage users")
+    users_parser = subparsers.add_parser("users", help="User information")
     users_subparsers = users_parser.add_subparsers(dest="users_command")
-    list_users_parser = users_subparsers.add_parser("list", help="List all installed certificates")
-
-    argcomplete.autocomplete(parser)
+    users_list_parser = users_subparsers.add_parser("list", help="List user certificates")
+    users_list_full_parser = users_subparsers.add_parser("list_full", help="List user certificates with full details")
 
     args = parser.parse_args()
     client = pylxd.Client()
@@ -502,7 +510,8 @@ def main():
             users_parser.print_help()
         elif args.users_command == "list":
             list_users(client)
+        elif args.users_command == "list_full":
+            list_users_full(client)
 
 if __name__ == "__main__":
     main()
-
