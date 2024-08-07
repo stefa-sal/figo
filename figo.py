@@ -9,6 +9,7 @@ import logging
 import os
 import yaml
 import re
+import socket
 
 NET_PROFILE = "net-bridged-br-200-3"
 NAME_SERVER_IP_ADDR = "160.80.1.8"
@@ -423,8 +424,76 @@ def list_users_full(client):
             cert.name, cert.fingerprint[:12], cert.type, projects
         ))
 
+def resolve_hostname(hostname):
+    """Resolve the hostname to an IP address."""
+    try:
+        return socket.gethostbyname(hostname)
+    except socket.error:
+        return None
+
+def enroll(remote_server, ip_address_port, cert_filename="~/.config/incus/client.crt",
+           user="ubuntu", loc_name="main"):
+    """Enroll a remote server by transferring the client certificate and adding it to the Incus daemon."""
+    ip_address, port = (ip_address_port.split(":") + ["8443"])[:2]
+
+    if not is_valid_ip(ip_address):
+        resolved_ip = resolve_hostname(ip_address)
+        if resolved_ip:
+            ip_address = resolved_ip
+        else:
+            print(f"Invalid IP address or hostname: {ip_address}")
+            return
+
+    cert_filename = os.path.expanduser(cert_filename)
+    remote_cert_path = f"{user}@{ip_address}:~/figo/certs/{loc_name}.crt"
+
+    try:
+        # Ensure the destination directory exists
+        subprocess.run(
+            ["ssh", f"{user}@{ip_address}", "mkdir -p ~/figo/certs"],
+            check=True
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"An error occurred while creating the directory on the remote server: {e}")
+        return
+
+    try:
+        # Transfer the certificate to the remote server
+        subprocess.run(
+            ["scp", cert_filename, remote_cert_path],
+            check=True
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"An error occurred while transferring the certificate: {e}")
+        return
+
+    try:
+        # Add the certificate to the Incus daemon
+        add_cert_cmd = (
+            f"incus config trust add-certificate --name incus_{loc_name} ~/figo/certs/{loc_name}.crt"
+        )
+        subprocess.run(
+            ["ssh", f"{user}@{ip_address}", add_cert_cmd],
+            check=True
+        )
+        print(f"Certificate {cert_filename} successfully transferred to {ip_address} and added to Incus.")
+    except subprocess.CalledProcessError as e:
+        print(f"An error occurred while adding the certificate to Incus: {e}")
+        return
+
+    try:
+        # Add the remote server to the client configuration using a subprocess call
+        subprocess.run(
+            ["incus", "remote", "add", remote_server, f"https://{ip_address}:{port}",
+                        "--accept-certificate"],
+            check=True
+        )
+        print(f"Remote server {remote_server} added to client configuration.")
+    except subprocess.CalledProcessError as e:
+        print(f"An error occurred while adding the remote server to the client configuration: {e}")    
+
 def main():
-    parser = argparse.ArgumentParser(description="Manage LXD instances and GPU profiles")
+    parser = argparse.ArgumentParser(description="Manage Incus instances and GPU profiles")
     subparsers = parser.add_subparsers(dest="command")
 
     show_parser = subparsers.add_parser("show", help="Show instance information")
@@ -468,6 +537,14 @@ def main():
     users_list_parser = users_subparsers.add_parser("list", help="List user certificates")
     users_list_full_parser = users_subparsers.add_parser("list_full", help="List user certificates with full details")
 
+    enroll_parser = subparsers.add_parser("enroll", help="Enroll a remote server")
+    enroll_parser.add_argument("remote_server", help="Remote server name")
+    enroll_parser.add_argument("ip_address_port", help="IP address and port of the remote server (port defaults to 8443)")
+    enroll_parser.add_argument("--cert", default="~/.config/incus/client.crt", help="Client certificate file to transfer (default: ~/.config/incus/client.crt)")
+    enroll_parser.add_argument("--user", default="ubuntu", help="Remote username (default: ubuntu)")
+    enroll_parser.add_argument("--loc_name", default="main", help="Local name for the certificate (default: main)")
+
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
     client = pylxd.Client()
 
@@ -512,6 +589,8 @@ def main():
             list_users(client)
         elif args.users_command == "list_full":
             list_users_full(client)
+    elif args.command == "enroll":
+        enroll(args.remote_server, args.ip_address_port, args.cert, args.user, args.loc_name)
 
 if __name__ == "__main__":
     main()
