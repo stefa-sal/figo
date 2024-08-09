@@ -10,6 +10,7 @@ import os
 import yaml
 import re
 import socket
+import json 
 
 NET_PROFILE = "net-bridged-br-200-3"
 NAME_SERVER_IP_ADDR = "160.80.1.8"
@@ -431,6 +432,36 @@ def resolve_hostname(hostname):
     except socket.error:
         return None
 
+def get_incus_remotes():
+    """Fetches and returns the list of Incus remotes as a JSON object."""
+    result = subprocess.run(['incus', 'remote', 'list', '--format', 'json'], capture_output=True, text=True)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to retrieve Incus remotes: {result.stderr}")
+
+    try:
+        remotes = json.loads(result.stdout)
+        return remotes
+    except json.JSONDecodeError:
+        raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
+
+
+def list_remotes():
+    """Lists the available Incus remotes and their addresses."""
+    remotes = get_incus_remotes()
+    print("{:<20} {:<40}".format("REMOTE NAME", "ADDRESS"))
+    for remote_name, remote_info in remotes.items():
+        print("{:<20} {:<40}".format(remote_name, remote_info['Addr']))
+
+def list_remotes_full():
+    """Shows all fields for the available Incus remotes."""
+    remotes = get_incus_remotes()
+    for remote_name, remote_info in remotes.items():
+        print(f"REMOTE NAME: {remote_name}")
+        for key, value in remote_info.items():
+            print(f"  {key}: {value}")
+        print("-" * 60)
+
 def enroll(remote_server, ip_address_port, cert_filename="~/.config/incus/client.crt",
            user="ubuntu", loc_name="main"):
     """Enroll a remote server by transferring the client certificate and adding it to the Incus daemon."""
@@ -448,101 +479,143 @@ def enroll(remote_server, ip_address_port, cert_filename="~/.config/incus/client
     remote_cert_path = f"{user}@{ip_address}:~/figo/certs/{loc_name}.crt"
 
     try:
-        # Ensure the destination directory exists
-        subprocess.run(
-            ["ssh", f"{user}@{ip_address}", "mkdir -p ~/figo/certs"],
-            check=True
-        )
+        # Check if the certificate already exists on the remote server
+        check_cmd = f"ssh {user}@{ip_address} '[ -f ~/figo/certs/{loc_name}.crt ]'"
+        result = subprocess.run(check_cmd, shell=True)
+
+        if result.returncode == 0:
+            print(f"Warning: Certificate {loc_name}.crt already exists on {ip_address}.")
+        else:
+            # Ensure the destination directory exists
+            subprocess.run(
+                ["ssh", f"{user}@{ip_address}", "mkdir -p ~/figo/certs"],
+                check=True
+            )
+
+            # Transfer the certificate to the remote server
+            subprocess.run(
+                ["scp", cert_filename, remote_cert_path],
+                check=True
+            )
+            print(f"Certificate {cert_filename} successfully transferred to {ip_address}.")
+
+            # Add the certificate to the Incus daemon on the remote server
+            try:
+                add_cert_cmd = (
+                    f"incus config trust add-certificate --name incus_{loc_name} ~/figo/certs/{loc_name}.crt"
+                )
+                subprocess.run(
+                    ["ssh", f"{user}@{ip_address}", add_cert_cmd],
+                    check=True
+                )
+                print(f"Certificate {loc_name}.crt added to Incus on {ip_address}.")
+            except subprocess.CalledProcessError as e:
+                if "already exists" in str(e):
+                    print(f"Warning: Certificate incus_{loc_name} already added to Incus on {ip_address}.")
+                else:
+                    print(f"An error occurred while adding the certificate to Incus: {e}")
+                    return
+
     except subprocess.CalledProcessError as e:
-        print(f"An error occurred while creating the directory on the remote server: {e}")
+        print(f"An error occurred while processing the certificate: {e}")
         return
 
+    # Check if the remote server already exists
     try:
-        # Transfer the certificate to the remote server
-        subprocess.run(
-            ["scp", cert_filename, remote_cert_path],
-            check=True
-        )
+        remotes = get_incus_remotes()
+        if remote_server in remotes:
+            print(f"Warning: Remote server {remote_server} is already configured.")
+        else:
+            # Add the remote server to the client configuration
+            subprocess.run(
+                ["incus", "remote", "add", remote_server, f"https://{ip_address}:{port}", "--accept-certificate"],
+                check=True
+            )
+            print(f"Remote server {remote_server} added to client configuration.")
     except subprocess.CalledProcessError as e:
-        print(f"An error occurred while transferring the certificate: {e}")
-        return
-
-    try:
-        # Add the certificate to the Incus daemon
-        add_cert_cmd = (
-            f"incus config trust add-certificate --name incus_{loc_name} ~/figo/certs/{loc_name}.crt"
-        )
-        subprocess.run(
-            ["ssh", f"{user}@{ip_address}", add_cert_cmd],
-            check=True
-        )
-        print(f"Certificate {cert_filename} successfully transferred to {ip_address} and added to Incus.")
-    except subprocess.CalledProcessError as e:
-        print(f"An error occurred while adding the certificate to Incus: {e}")
-        return
-
-    try:
-        # Add the remote server to the client configuration using a subprocess call
-        subprocess.run(
-            ["incus", "remote", "add", remote_server, f"https://{ip_address}:{port}",
-                        "--accept-certificate"],
-            check=True
-        )
-        print(f"Remote server {remote_server} added to client configuration.")
-    except subprocess.CalledProcessError as e:
-        print(f"An error occurred while adding the remote server to the client configuration: {e}")    
+        print(f"An error occurred while adding the remote server to the client configuration: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description="Manage Incus instances and GPU profiles")
     subparsers = parser.add_subparsers(dest="command")
 
+    # "show" command
     show_parser = subparsers.add_parser("show", help="Show instance information")
     show_subparsers = show_parser.add_subparsers(dest="show_command")
     show_profile_parser = show_subparsers.add_parser("profiles", help="Show instance profiles")
     show_gpu_parser = show_subparsers.add_parser("gpus", help="Show GPU profiles")
 
+    # "stop" command
     stop_parser = subparsers.add_parser("stop", help="Stop a specific instance")
     stop_parser.add_argument("instance_name", help="Name of the instance to stop")
 
+    # "start" command
     start_parser = subparsers.add_parser("start", help="Start a specific instance")
     start_parser.add_argument("instance_name", help="Name of the instance to start")
 
+    # "gpu" command
     gpu_parser = subparsers.add_parser("gpu", help="GPU information")
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
     gpu_status_parser = gpu_subparsers.add_parser("status", help="Show GPU status")
     gpu_list_parser = gpu_subparsers.add_parser("list", help="List GPU profiles")
 
+    # "add_gpu" command
     add_gpu_parser = subparsers.add_parser("add_gpu", help="Add a GPU profile to a specific instance")
     add_gpu_parser.add_argument("instance_name", help="Name of the instance to add a GPU profile to")
 
+    # "remove_gpu" command
     remove_gpu_parser = subparsers.add_parser("remove_gpu", help="Remove a GPU profile from a specific instance")
     remove_gpu_parser.add_argument("instance_name", help="Name of the instance to remove a GPU profile from")
 
+    # "remove_gpu_all" command
     remove_gpu_all_parser = subparsers.add_parser("remove_gpu_all", help="Remove all GPU profiles from a specific instance")
     remove_gpu_all_parser.add_argument("instance_name", help="Name of the instance to remove all GPU profiles from")
 
+    # "dump_profiles" command
     dump_profiles_parser = subparsers.add_parser("dump_profiles", help="Dump all profiles to .yaml files")
 
+    # "set_ip" command
     set_ip_parser = subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance")
     set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for")
     set_ip_parser.add_argument("ip_address", help="Static IP address to assign to the instance")
     set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
 
+    # "set_user_key" command
     set_user_key_parser = subparsers.add_parser("set_user_key", help="Set a public key for a user in an instance")
     set_user_key_parser.add_argument("instance_name", help="Name of the instance")
     set_user_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
 
-    users_parser = subparsers.add_parser("users", help="User information")
+    # "users" command
+    users_parser = subparsers.add_parser("users", help="Manage users")
     users_subparsers = users_parser.add_subparsers(dest="users_command")
-    users_list_parser = users_subparsers.add_parser("list", help="List user certificates")
-    users_list_full_parser = users_subparsers.add_parser("list_full", help="List user certificates with full details")
+    users_list_parser = users_subparsers.add_parser(
+        "list", 
+        help="List installed certificates (use --full for more details)"
+    )
+    users_list_parser.add_argument("--full", action="store_true", help="Show full details of installed certificates")
 
-    enroll_parser = subparsers.add_parser("enroll", help="Enroll a remote server")
-    enroll_parser.add_argument("remote_server", help="Remote server name")
-    enroll_parser.add_argument("ip_address_port", help="IP address and port of the remote server (port defaults to 8443)")
-    enroll_parser.add_argument("--cert", default="~/.config/incus/client.crt", help="Client certificate file to transfer (default: ~/.config/incus/client.crt)")
-    enroll_parser.add_argument("--user", default="ubuntu", help="Remote username (default: ubuntu)")
-    enroll_parser.add_argument("--loc_name", default="main", help="Local name for the certificate (default: main)")
+    # "remotes" command
+    remotes_parser = subparsers.add_parser("remotes", help="Manage Incus remotes")
+    remotes_subparsers = remotes_parser.add_subparsers(dest="remotes_command")
+    remotes_list_parser = remotes_subparsers.add_parser(
+        "list", 
+        help="List available remotes (use --full for more details)"
+    )
+    remotes_list_parser.add_argument("--full", action="store_true", help="Show full details of available remotes")
+    remotes_enroll_parser = remotes_subparsers.add_parser("enroll", help="Enroll a remote server")
+    remotes_enroll_parser.add_argument("remote_server", help="Name of the remote server to assign")
+    remotes_enroll_parser.add_argument("ip_address", help="IP address or domain name and port (port defaults to 8443)")
+    remotes_enroll_parser.add_argument("--user", default="ubuntu", help="Remote user name (default: ubuntu)")
+    remotes_enroll_parser.add_argument(
+        "--cert_filename", 
+        default="~/.config/incus/client.cr", 
+        help="Client certificate to transfer (default: ~/.config/incus/client.cr)"
+    )
+    remotes_enroll_parser.add_argument(
+        "--loc_name", 
+        default="main", 
+        help="Name for the certificate location on the remote server (default: main)"
+    )
 
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
@@ -586,11 +659,20 @@ def main():
         if not args.users_command:
             users_parser.print_help()
         elif args.users_command == "list":
-            list_users(client)
-        elif args.users_command == "list_full":
-            list_users_full(client)
-    elif args.command == "enroll":
-        enroll(args.remote_server, args.ip_address_port, args.cert, args.user, args.loc_name)
+            if args.full:
+                list_users_full(client)
+            else:
+                list_users(client)
+    elif args.command == "remotes":
+        if not args.remotes_command:
+            remotes_parser.print_help()
+        elif args.remotes_command == "list":
+            if args.full:
+                list_remotes_full()
+            else:
+                list_remotes()
+        elif args.remotes_command == "enroll":
+            enroll(args.remote_server, args.ip_address, args.user, args.cert_filename, args.loc_name)
 
 if __name__ == "__main__":
     main()
