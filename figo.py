@@ -410,20 +410,27 @@ def set_user_key(instance_name, key_filename, client):
     except Exception as e:
         print(f"An error occurred: {e}")
 
-def list_users(client):
-    """List all certificates with their names and fingerprints."""
-    print("{:<30} {:<12}".format("NAME", "FINGERPRINT"))
-    for cert in client.certificates.all():
-        print("{:<30} {:<12}".format(cert.name, cert.fingerprint[:12]))
-
-def list_users_full(client):
-    """List all certificates with their names, fingerprints, types, and projects."""
-    print("{:<30} {:<12} {:<10} {:<20}".format("NAME", "FINGERPRINT", "TYPE", "PROJECTS"))
-    for cert in client.certificates.all():
-        projects = ', '.join(cert.projects) if cert.projects else 'None'
-        print("{:<30} {:<12} {:<10} {:<20}".format(
-            cert.name, cert.fingerprint[:12], cert.type, projects
+def list_users(client, full=False):
+    """List all installed certificates with optional full details."""
+    
+    if full:
+        print("{:<20} {:<12} {:<10} {:<10} {:<20}".format(
+            "NAME", "FINGERPRINT", "TYPE", "RESTRICTED", "PROJECTS"
         ))
+    else:
+        print("{:<20} {:<12}".format("NAME", "FINGERPRINT"))
+
+    for certificate in client.certificates.all():
+        name = certificate.name or "N/A"
+        fingerprint = certificate.fingerprint[:12]
+
+        if full:
+            projects = ", ".join(certificate.projects)
+            print("{:<20} {:<12} {:<10} {:<10} {:<20}".format(
+                name, fingerprint, certificate.type, str(certificate.restricted), projects
+            ))
+        else:
+            print(f"{name:<20} {fingerprint:<12}")
 
 def resolve_hostname(hostname):
     """Resolve the hostname to an IP address."""
@@ -446,12 +453,15 @@ def get_incus_remotes():
         raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
 
 
-def list_remotes():
+def list_remotes(client, full=False):
     """Lists the available Incus remotes and their addresses."""
-    remotes = get_incus_remotes()
-    print("{:<20} {:<40}".format("REMOTE NAME", "ADDRESS"))
-    for remote_name, remote_info in remotes.items():
-        print("{:<20} {:<40}".format(remote_name, remote_info['Addr']))
+    if full:
+        list_remotes_full()
+    else:
+        remotes = get_incus_remotes()
+        print("{:<20} {:<40}".format("REMOTE NAME", "ADDRESS"))
+        for remote_name, remote_info in remotes.items():
+            print("{:<20} {:<40}".format(remote_name, remote_info['Addr']))
 
 def list_remotes_full():
     """Shows all fields for the available Incus remotes."""
@@ -554,22 +564,19 @@ def main():
     start_parser.add_argument("instance_name", help="Name of the instance to start")
 
     # "gpu" command
-    gpu_parser = subparsers.add_parser("gpu", help="GPU information")
+    gpu_parser = subparsers.add_parser("gpu", help="GPU management")
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
     gpu_status_parser = gpu_subparsers.add_parser("status", help="Show GPU status")
     gpu_list_parser = gpu_subparsers.add_parser("list", help="List GPU profiles")
 
-    # "add_gpu" command
-    add_gpu_parser = subparsers.add_parser("add_gpu", help="Add a GPU profile to a specific instance")
+    # "gpu add" command
+    add_gpu_parser = gpu_subparsers.add_parser("add", help="Add a GPU profile to a specific instance")
     add_gpu_parser.add_argument("instance_name", help="Name of the instance to add a GPU profile to")
 
-    # "remove_gpu" command
-    remove_gpu_parser = subparsers.add_parser("remove_gpu", help="Remove a GPU profile from a specific instance")
+    # "gpu remove" command
+    remove_gpu_parser = gpu_subparsers.add_parser("remove", help="Remove GPU profiles from a specific instance")
     remove_gpu_parser.add_argument("instance_name", help="Name of the instance to remove a GPU profile from")
-
-    # "remove_gpu_all" command
-    remove_gpu_all_parser = subparsers.add_parser("remove_gpu_all", help="Remove all GPU profiles from a specific instance")
-    remove_gpu_all_parser.add_argument("instance_name", help="Name of the instance to remove all GPU profiles from")
+    remove_gpu_parser.add_argument("--all", action="store_true", help="Remove all GPU profiles from the instance")
 
     # "dump_profiles" command
     dump_profiles_parser = subparsers.add_parser("dump_profiles", help="Dump all profiles to .yaml files")
@@ -585,39 +592,32 @@ def main():
     set_user_key_parser.add_argument("instance_name", help="Name of the instance")
     set_user_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
 
-    # "users" command
-    users_parser = subparsers.add_parser("users", help="Manage users")
-    users_subparsers = users_parser.add_subparsers(dest="users_command")
-    users_list_parser = users_subparsers.add_parser(
+    # "user" command
+    user_parser = subparsers.add_parser("user", help="Manage users")
+    user_subparsers = user_parser.add_subparsers(dest="user_command")
+    user_list_parser = user_subparsers.add_parser(
         "list", 
         help="List installed certificates (use --full for more details)"
     )
-    users_list_parser.add_argument("--full", action="store_true", help="Show full details of installed certificates")
+    user_list_parser.add_argument("--full", action="store_true", help="Show full details of installed certificates")
 
-    # "remotes" command
-    remotes_parser = subparsers.add_parser("remotes", help="Manage Incus remotes")
-    remotes_subparsers = remotes_parser.add_subparsers(dest="remotes_command")
-    remotes_list_parser = remotes_subparsers.add_parser(
+    # "remote" command
+    remote_parser = subparsers.add_parser("remote", help="Manage Incus remotes")
+    remote_subparsers = remote_parser.add_subparsers(dest="remote_command")
+    remote_list_parser = remote_subparsers.add_parser(
         "list", 
         help="List available remotes (use --full for more details)"
     )
-    remotes_list_parser.add_argument("--full", action="store_true", help="Show full details of available remotes")
-    remotes_enroll_parser = remotes_subparsers.add_parser("enroll", help="Enroll a remote server")
-    remotes_enroll_parser.add_argument("remote_server", help="Name of the remote server to assign")
-    remotes_enroll_parser.add_argument("ip_address", help="IP address or domain name and port (port defaults to 8443)")
-    remotes_enroll_parser.add_argument("--user", default="ubuntu", help="Remote user name (default: ubuntu)")
-    remotes_enroll_parser.add_argument(
-        "--cert_filename", 
-        default="~/.config/incus/client.cr", 
-        help="Client certificate to transfer (default: ~/.config/incus/client.cr)"
-    )
-    remotes_enroll_parser.add_argument(
-        "--loc_name", 
-        default="main", 
-        help="Name for the certificate location on the remote server (default: main)"
-    )
+    remote_list_parser.add_argument("--full", action="store_true", help="Show full details of available remotes")
+    remote_enroll_parser = remote_subparsers.add_parser("enroll", help="Enroll a remote Incus server")
+    remote_enroll_parser.add_argument("remote_server", help="Name to assign to the remote server")
+    remote_enroll_parser.add_argument("ip_address", help="IP address or domain name of the remote server")
+    remote_enroll_parser.add_argument("port", nargs="?", default="8443", help="Port of the remote server (default: 8443)")
+    remote_enroll_parser.add_argument("user", nargs="?", default="ubuntu", help="Username for SSH (default: ubuntu)")
+    remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.cr", 
+                                      help="Client certificate file to transfer (default: ~/.config/incus/client.cr)")
+    remote_enroll_parser.add_argument("--loc_name", default="main", help="Name to use for local storage (default: main)")
 
-    argcomplete.autocomplete(parser)
     args = parser.parse_args()
     client = pylxd.Client()
 
@@ -643,36 +643,32 @@ def main():
             show_gpu_status(client)
         elif args.gpu_command == "list":
             list_gpu_profiles(client)
-    elif args.command == "add_gpu":
-        add_gpu_profile(args.instance_name, client)
-    elif args.command == "remove_gpu":
-        remove_gpu_profile(args.instance_name, client)
-    elif args.command == "remove_gpu_all":
-        remove_gpu_all_profiles(args.instance_name, client)
+        elif args.gpu_command == "add":
+            add_gpu_profile(args.instance_name, client)
+        elif args.gpu_command == "remove":
+            if args.all:
+                remove_gpu_all_profiles(args.instance_name, client)
+            else:
+                remove_gpu_profile(args.instance_name, client)
     elif args.command == "dump_profiles":
         dump_profiles(client)
     elif args.command == "set_ip":
         set_ip(args.instance_name, args.ip_address, args.gw_address, client)
     elif args.command == "set_user_key":
         set_user_key(args.instance_name, args.key_filename, client)
-    elif args.command == "users":
-        if not args.users_command:
-            users_parser.print_help()
-        elif args.users_command == "list":
-            if args.full:
-                list_users_full(client)
-            else:
-                list_users(client)
-    elif args.command == "remotes":
-        if not args.remotes_command:
-            remotes_parser.print_help()
-        elif args.remotes_command == "list":
-            if args.full:
-                list_remotes_full()
-            else:
-                list_remotes()
-        elif args.remotes_command == "enroll":
-            enroll(args.remote_server, args.ip_address, args.user, args.cert_filename, args.loc_name)
+    elif args.command == "user":
+        if not args.user_command:
+            user_parser.print_help()
+        elif args.user_command == "list":
+            list_users(client, full=args.full)
+    elif args.command == "remote":
+        if not args.remote_command:
+            remote_parser.print_help()
+        elif args.remote_command == "list":
+            list_remotes(client, full=args.full)
+        elif args.remote_command == "enroll":
+            enroll(args.remote_server, args.ip_address, args.port, args.user, 
+                        args.cert_filename, args.loc_name)
 
 if __name__ == "__main__":
     main()
