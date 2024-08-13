@@ -568,6 +568,11 @@ def main():
         stop_parser = instance_subparsers.add_parser("stop", help="Stop a specific instance")
         stop_parser.add_argument("instance_name", help="Name of the instance to stop")
 
+        # "set_key" subcommand
+        set_key_parser = instance_subparsers.add_parser("set_key", help="Set a public key for a user in an instance")
+        set_key_parser.add_argument("instance_name", help="Name of the instance")
+        set_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
+
     # "gpu" command
     gpu_parser = subparsers.add_parser("gpu", help="GPU management")
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
@@ -591,11 +596,6 @@ def main():
     set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for")
     set_ip_parser.add_argument("ip_address", help="Static IP address to assign to the instance")
     set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
-
-    # "set_user_key" command
-    set_user_key_parser = subparsers.add_parser("set_user_key", help="Set a public key for a user in an instance")
-    set_user_key_parser.add_argument("instance_name", help="Name of the instance")
-    set_user_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
 
     # "user" command
     user_parser = subparsers.add_parser("user", help="Manage users")
@@ -641,6 +641,8 @@ def main():
             start_instance(args.instance_name, client)
         elif args.instance_command == "stop":
             stop_instance(args.instance_name, client)
+        elif args.instance_command == "set_key":
+            set_user_key(args.instance_name, args.key_filename, client)
     elif args.command == "gpu":
         if not args.gpu_command:
             gpu_parser.print_help()
@@ -659,8 +661,6 @@ def main():
         dump_profiles(client)
     elif args.command == "set_ip":
         set_ip(args.instance_name, args.ip_address, args.gw_address, client)
-    elif args.command == "set_user_key":
-        set_user_key(args.instance_name, args.key_filename, client)
     elif args.command == "user":
         if not args.user_command:
             user_parser.print_help()
