@@ -573,6 +573,12 @@ def main():
         set_key_parser.add_argument("instance_name", help="Name of the instance")
         set_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
 
+        # "set_ip" subcommand
+        set_ip_parser = instance_subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance")
+        set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for")
+        set_ip_parser.add_argument("ip_address", help="Static IP address to assign to the instance")
+        set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
+
     # "gpu" command
     gpu_parser = subparsers.add_parser("gpu", help="GPU management")
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
@@ -590,12 +596,6 @@ def main():
 
     # "dump_profiles" command
     dump_profiles_parser = subparsers.add_parser("dump_profiles", help="Dump all profiles to .yaml files")
-
-    # "set_ip" command
-    set_ip_parser = subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance")
-    set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for")
-    set_ip_parser.add_argument("ip_address", help="Static IP address to assign to the instance")
-    set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
 
     # "user" command
     user_parser = subparsers.add_parser("user", help="Manage users")
@@ -643,6 +643,8 @@ def main():
             stop_instance(args.instance_name, client)
         elif args.instance_command == "set_key":
             set_user_key(args.instance_name, args.key_filename, client)
+        elif args.instance_command == "set_ip":
+            set_ip(args.instance_name, args.ip_address, args.gw_address, client)
     elif args.command == "gpu":
         if not args.gpu_command:
             gpu_parser.print_help()
@@ -659,8 +661,6 @@ def main():
                 remove_gpu_profile(args.instance_name, client)
     elif args.command == "dump_profiles":
         dump_profiles(client)
-    elif args.command == "set_ip":
-        set_ip(args.instance_name, args.ip_address, args.gw_address, client)
     elif args.command == "user":
         if not args.user_command:
             user_parser.print_help()
