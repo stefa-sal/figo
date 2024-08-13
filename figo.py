@@ -600,7 +600,7 @@ def main():
         set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
 
     # "gpu" command
-    gpu_parser = subparsers.add_parser("gpu", help="GPU management")
+    gpu_parser = subparsers.add_parser("gpu", help="Manage GPUs")
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
     gpu_status_parser = gpu_subparsers.add_parser("status", help="Show GPU status")
     gpu_list_parser = gpu_subparsers.add_parser("list", help="List GPU profiles")
@@ -615,7 +615,7 @@ def main():
     remove_gpu_parser.add_argument("--all", action="store_true", help="Remove all GPU profiles from the instance")
 
     # "profile" command
-    profile_parser = subparsers.add_parser("profile", help="Profile management")
+    profile_parser = subparsers.add_parser("profile", help="Manage profiles")
     profile_subparsers = profile_parser.add_subparsers(dest="profile_command")
 
     # "dump" subcommand under "profile"
