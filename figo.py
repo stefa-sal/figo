@@ -287,6 +287,21 @@ def list_gpu_profiles(client):
     print("{:<10} {:<30}".format("TOTAL", "PROFILES"))
     print("{:<10} {:<30}".format(len(gpu_profiles), ", ".join(gpu_profiles)))
 
+def list_profiles(client):
+    """List all profiles and their associated instances."""
+    profiles = client.profiles.all()
+
+    print(f"{'PROFILE':<24}{'INSTANCES'}")
+
+    for profile in profiles:
+        instances = client.instances.all()
+        associated_instances = [
+            instance.name for instance in instances
+            if profile.name in instance.profiles
+        ]
+        associated_instances_str = ', '.join(associated_instances) if associated_instances else 'None'
+        print(f"{profile.name:<24}{associated_instances_str}")
+
 def dump_profile_to_file(profile, directory):
     """Helper function to write a profile to a .yaml file."""
     profile_data = {
@@ -630,6 +645,9 @@ def main():
     dump_profiles_parser.add_argument("-a", "--all", action="store_true", help="Dump all profiles to .yaml files")
     dump_profiles_parser.add_argument("profile_name", nargs="?", help="Name of the profile to dump")
 
+    # Add "list" subcommand under "profile"
+    profile_list_parser = profile_subparsers.add_parser("list", help="List profiles and associated instances")
+
     # Manually add aliases for "profile"
     subparsers._name_parser_map["pr"] = profile_parser
     subparsers._name_parser_map["p"] = profile_parser
@@ -718,6 +736,8 @@ def main():
                 dump_profile(client, args.profile_name)
             else:
                 print("You must provide a profile name or use the --all option.")
+        elif args.profile_command == "list":
+            list_profiles(client)
     elif args.command in ["user", "us", "u"]:
         if not args.user_command:
             user_parser.print_help()
