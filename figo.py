@@ -567,74 +567,93 @@ def enroll(remote_server, ip_address_port, cert_filename="~/.config/incus/client
         print(f"An error occurred while adding the remote server to the client configuration: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Manage a federated testbed with CPUs and GPUs")
+    parser = argparse.ArgumentParser(
+        description="Manage a federated testbed with CPUs and GPUs",
+        prog="figo"
+    )
     subparsers = parser.add_subparsers(dest="command")
 
-    # Aliases for the "instance" command
-    instance_aliases = ['instance', 'in', 'i']
-    for alias in instance_aliases:
-        instance_parser = subparsers.add_parser(alias, help="Manage instances")
-        instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
-        
-        # "list" subcommand
-        instance_list_parser = instance_subparsers.add_parser("list", help="List instances (use -f or --full for more details)")
-        instance_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of instance profiles")
+    # "instance" command without aliases in the help text
+    instance_parser = subparsers.add_parser("instance", help="Manage instances")
+    instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
 
-        # "start" subcommand
-        start_parser = instance_subparsers.add_parser("start", help="Start a specific instance")
-        start_parser.add_argument("instance_name", help="Name of the instance to start")
+    # Add "list" subcommand under "instance"
+    instance_list_parser = instance_subparsers.add_parser("list", help="List instances (use -f or --full for more details)")
+    instance_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of instance profiles")
 
-        # "stop" subcommand
-        stop_parser = instance_subparsers.add_parser("stop", help="Stop a specific instance")
-        stop_parser.add_argument("instance_name", help="Name of the instance to stop")
+    # Add "start" subcommand under "instance"
+    start_parser = instance_subparsers.add_parser("start", help="Start a specific instance")
+    start_parser.add_argument("instance_name", help="Name of the instance to start")
 
-        # "set_key" subcommand
-        set_key_parser = instance_subparsers.add_parser("set_key", help="Set a public key for a user in an instance")
-        set_key_parser.add_argument("instance_name", help="Name of the instance")
-        set_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
+    # Add "stop" subcommand under "instance"
+    stop_parser = instance_subparsers.add_parser("stop", help="Stop a specific instance")
+    stop_parser.add_argument("instance_name", help="Name of the instance to stop")
 
-        # "set_ip" subcommand
-        set_ip_parser = instance_subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance")
-        set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for")
-        set_ip_parser.add_argument("ip_address", help="Static IP address to assign to the instance")
-        set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
+    # Add "set_key" subcommand under "instance"
+    set_key_parser = instance_subparsers.add_parser("set_key", help="Set a public key for a user in an instance")
+    set_key_parser.add_argument("instance_name", help="Name of the instance")
+    set_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
 
-    # "gpu" command
+    # Add "set_ip" subcommand under "instance"
+    set_ip_parser = instance_subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance")
+    set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for")
+    set_ip_parser.add_argument("ip_address", help="Static IP address to assign to the instance")
+    set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
+
+    # Manually add aliases for "instance"
+    subparsers._name_parser_map["in"] = instance_parser
+    subparsers._name_parser_map["i"] = instance_parser
+
+    # "gpu" command without aliases in the help text
     gpu_parser = subparsers.add_parser("gpu", help="Manage GPUs")
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
+
+    # Add GPU subcommands
     gpu_status_parser = gpu_subparsers.add_parser("status", help="Show GPU status")
     gpu_list_parser = gpu_subparsers.add_parser("list", help="List GPU profiles")
-
-    # "gpu add" command
     add_gpu_parser = gpu_subparsers.add_parser("add", help="Add a GPU profile to a specific instance")
     add_gpu_parser.add_argument("instance_name", help="Name of the instance to add a GPU profile to")
-
-    # "gpu remove" command
     remove_gpu_parser = gpu_subparsers.add_parser("remove", help="Remove GPU profiles from a specific instance")
     remove_gpu_parser.add_argument("instance_name", help="Name of the instance to remove a GPU profile from")
     remove_gpu_parser.add_argument("--all", action="store_true", help="Remove all GPU profiles from the instance")
 
-    # "profile" command
+    # Manually add aliases for "gpu"
+    subparsers._name_parser_map["gp"] = gpu_parser
+    subparsers._name_parser_map["g"] = gpu_parser
+
+    # "profile" command without aliases in the help text
     profile_parser = subparsers.add_parser("profile", help="Manage profiles")
     profile_subparsers = profile_parser.add_subparsers(dest="profile_command")
 
-    # "dump" subcommand under "profile"
+    # Add profile subcommands
     dump_profiles_parser = profile_subparsers.add_parser("dump", help="Dump profiles to .yaml files")
     dump_profiles_parser.add_argument("-a", "--all", action="store_true", help="Dump all profiles to .yaml files")
     dump_profiles_parser.add_argument("profile_name", nargs="?", help="Name of the profile to dump")
 
-    # "user" command
+    # Manually add aliases for "profile"
+    subparsers._name_parser_map["pr"] = profile_parser
+    subparsers._name_parser_map["p"] = profile_parser
+
+    # "user" command without aliases in the help text
     user_parser = subparsers.add_parser("user", help="Manage users")
     user_subparsers = user_parser.add_subparsers(dest="user_command")
+
+    # Add user subcommands
     user_list_parser = user_subparsers.add_parser(
         "list", 
         help="List installed certificates (use -f or --full for more details)"
     )
     user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
 
-    # "remote" command
+    # Manually add aliases for "user"
+    subparsers._name_parser_map["us"] = user_parser
+    subparsers._name_parser_map["u"] = user_parser
+
+    # "remote" command without aliases in the help text
     remote_parser = subparsers.add_parser("remote", help="Manage remotes")
     remote_subparsers = remote_parser.add_subparsers(dest="remote_command")
+
+    # Add remote subcommands
     remote_list_parser = remote_subparsers.add_parser(
         "list", 
         help="List available remotes (use -f or --full for more details)"
@@ -648,6 +667,10 @@ def main():
     remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.cr", 
                                       help="Client certificate file to transfer (default: ~/.config/incus/client.cr)")
     remote_enroll_parser.add_argument("--loc_name", default="main", help="Name to use for local storage (default: main)")
+
+    # Manually add aliases for "remote"
+    subparsers._name_parser_map["re"] = remote_parser
+    subparsers._name_parser_map["r"] = remote_parser
 
     args = parser.parse_args()
     client = pylxd.Client()
@@ -671,7 +694,7 @@ def main():
             set_user_key(args.instance_name, args.key_filename, client)
         elif args.instance_command == "set_ip":
             set_ip(args.instance_name, args.ip_address, args.gw_address, client)
-    elif args.command == "gpu":
+    elif args.command in ["gpu", "gp", "g"]:
         if not args.gpu_command:
             gpu_parser.print_help()
         elif args.gpu_command == "status":
@@ -685,7 +708,7 @@ def main():
                 remove_gpu_all_profiles(args.instance_name, client)
             else:
                 remove_gpu_profile(args.instance_name, client)
-    elif args.command == "profile":
+    elif args.command in ["profile", "pr", "p"]:
         if not args.profile_command:
             profile_parser.print_help()
         elif args.profile_command == "dump":
@@ -695,12 +718,12 @@ def main():
                 dump_profile(client, args.profile_name)
             else:
                 print("You must provide a profile name or use the --all option.")
-    elif args.command == "user":
+    elif args.command in ["user", "us", "u"]:
         if not args.user_command:
             user_parser.print_help()
         elif args.user_command == "list":
             list_users(client, full=args.full)
-    elif args.command == "remote":
+    elif args.command in ["remote", "re", "r"]:
         if not args.remote_command:
             remote_parser.print_help()
         elif args.remote_command == "list":
