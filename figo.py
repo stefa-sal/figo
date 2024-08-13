@@ -546,7 +546,7 @@ def enroll(remote_server, ip_address_port, cert_filename="~/.config/incus/client
         print(f"An error occurred while adding the remote server to the client configuration: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Manage Incus instances and GPU profiles")
+    parser = argparse.ArgumentParser(description="Manage a federated testbed with CPUs and GPUs")
     subparsers = parser.add_subparsers(dest="command")
 
     # "show" command
@@ -602,7 +602,7 @@ def main():
     user_list_parser.add_argument("--full", action="store_true", help="Show full details of installed certificates")
 
     # "remote" command
-    remote_parser = subparsers.add_parser("remote", help="Manage Incus remotes")
+    remote_parser = subparsers.add_parser("remote", help="Manage remotes")
     remote_subparsers = remote_parser.add_subparsers(dest="remote_command")
     remote_list_parser = remote_subparsers.add_parser(
         "list", 
