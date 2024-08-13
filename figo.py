@@ -550,19 +550,23 @@ def main():
     parser = argparse.ArgumentParser(description="Manage a federated testbed with CPUs and GPUs")
     subparsers = parser.add_subparsers(dest="command")
 
-    # "show" command
-    show_parser = subparsers.add_parser("show", help="Show instance information")
-    show_subparsers = show_parser.add_subparsers(dest="show_command")
-    show_profile_parser = show_subparsers.add_parser("profiles", help="Show instance profiles")
-    show_gpu_parser = show_subparsers.add_parser("gpus", help="Show GPU profiles")
+    # Aliases for the "instance" command
+    instance_aliases = ['instance', 'in', 'i']
+    for alias in instance_aliases:
+        instance_parser = subparsers.add_parser(alias, help="Manage instances")
+        instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
+        
+        # "list" subcommand
+        instance_list_parser = instance_subparsers.add_parser("list", help="List instances (use -f or --full for more details)")
+        instance_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of instance profiles")
 
-    # "stop" command
-    stop_parser = subparsers.add_parser("stop", help="Stop a specific instance")
-    stop_parser.add_argument("instance_name", help="Name of the instance to stop")
+        # "start" subcommand
+        start_parser = instance_subparsers.add_parser("start", help="Start a specific instance")
+        start_parser.add_argument("instance_name", help="Name of the instance to start")
 
-    # "start" command
-    start_parser = subparsers.add_parser("start", help="Start a specific instance")
-    start_parser.add_argument("instance_name", help="Name of the instance to start")
+        # "stop" subcommand
+        stop_parser = instance_subparsers.add_parser("stop", help="Stop a specific instance")
+        stop_parser.add_argument("instance_name", help="Name of the instance to stop")
 
     # "gpu" command
     gpu_parser = subparsers.add_parser("gpu", help="GPU management")
@@ -598,18 +602,18 @@ def main():
     user_subparsers = user_parser.add_subparsers(dest="user_command")
     user_list_parser = user_subparsers.add_parser(
         "list", 
-        help="List installed certificates (use --full for more details)"
+        help="List installed certificates (use -f or --full for more details)"
     )
-    user_list_parser.add_argument("--full", action="store_true", help="Show full details of installed certificates")
+    user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
 
     # "remote" command
     remote_parser = subparsers.add_parser("remote", help="Manage remotes")
     remote_subparsers = remote_parser.add_subparsers(dest="remote_command")
     remote_list_parser = remote_subparsers.add_parser(
         "list", 
-        help="List available remotes (use --full for more details)"
+        help="List available remotes (use -f or --full for more details)"
     )
-    remote_list_parser.add_argument("--full", action="store_true", help="Show full details of available remotes")
+    remote_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of available remotes")
     remote_enroll_parser = remote_subparsers.add_parser("enroll", help="Enroll a remote Incus server")
     remote_enroll_parser.add_argument("remote_server", help="Name to assign to the remote server")
     remote_enroll_parser.add_argument("ip_address", help="IP address or domain name of the remote server")
@@ -624,19 +628,19 @@ def main():
 
     if not args.command:
         parser.print_help()
-    elif args.command == "show":
-        if not args.show_command:
-            show_parser.print_help()
-        else:
+    elif args.command in ["instance", "in", "i"]:
+        if not args.instance_command:
+            instance_parser.print_help()
+        elif args.instance_command == "list":
             vm_profiles, _, _ = get_instance_profiles(client)
-            if args.show_command == "profiles":
+            if args.full:
                 print_instance_profiles(vm_profiles, client)
-            elif args.show_command == "gpus":
+            else:
                 print_gpu_profiles(vm_profiles, client)
-    elif args.command == "stop":
-        stop_instance(args.instance_name, client)
-    elif args.command == "start":
-        start_instance(args.instance_name, client)
+        elif args.instance_command == "start":
+            start_instance(args.instance_name, client)
+        elif args.instance_command == "stop":
+            stop_instance(args.instance_name, client)
     elif args.command == "gpu":
         if not args.gpu_command:
             gpu_parser.print_help()
