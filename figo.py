@@ -15,6 +15,7 @@ import json
 NET_PROFILE = "net-bridged-br-200-3"
 NAME_SERVER_IP_ADDR = "160.80.1.8"
 NAME_SERVER_IP_ADDR_2 = "8.8.8.8"
+PROFILE_DIR = "./profiles"
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -286,25 +287,44 @@ def list_gpu_profiles(client):
     print("{:<10} {:<30}".format("TOTAL", "PROFILES"))
     print("{:<10} {:<30}".format(len(gpu_profiles), ", ".join(gpu_profiles)))
 
+def dump_profile_to_file(profile, directory):
+    """Helper function to write a profile to a .yaml file."""
+    profile_data = {
+        'name': profile.name,
+        'description': profile.description,
+        'config': profile.config,
+        'devices': profile.devices
+    }
+    file_name = os.path.join(directory, f"{profile.name}.yaml")
+    with open(file_name, 'w') as file:
+        yaml.dump(profile_data, file)
+    print(f"Profile '{profile.name}' saved to '{file_name}'.")
+
 def dump_profiles(client):
     """Dump all profiles into .yaml files."""
     profiles = client.profiles.all()
-    directory = "./profiles"
+    directory = os.path.expanduser(PROFILE_DIR)
     
     if not os.path.exists(directory):
         os.makedirs(directory)
     
     for profile in profiles:
-        profile_data = {
-            'name': profile.name,
-            'description': profile.description,
-            'config': profile.config,
-            'devices': profile.devices
-        }
-        file_name = os.path.join(directory, f"{profile.name}.yaml")
-        with open(file_name, 'w') as file:
-            yaml.dump(profile_data, file)
-        print(f"Profile '{profile.name}' saved to '{file_name}'.")
+        dump_profile_to_file(profile, directory)
+
+def dump_profile(client, profile_name):
+    """Dump a specific profile into a .yaml file."""
+    try:
+        profile = client.profiles.get(profile_name)
+        directory = os.path.expanduser(PROFILE_DIR)
+        
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        
+        dump_profile_to_file(profile, directory)
+    
+    except pylxd.exceptions.NotFound:
+        print(f"Profile '{profile_name}' not found.")
+        return
 
 def is_valid_ip(ip):
     """Check if the provided string is a valid IPv4 address."""
@@ -594,8 +614,14 @@ def main():
     remove_gpu_parser.add_argument("instance_name", help="Name of the instance to remove a GPU profile from")
     remove_gpu_parser.add_argument("--all", action="store_true", help="Remove all GPU profiles from the instance")
 
-    # "dump_profiles" command
-    dump_profiles_parser = subparsers.add_parser("dump_profiles", help="Dump all profiles to .yaml files")
+    # "profile" command
+    profile_parser = subparsers.add_parser("profile", help="Profile management")
+    profile_subparsers = profile_parser.add_subparsers(dest="profile_command")
+
+    # "dump" subcommand under "profile"
+    dump_profiles_parser = profile_subparsers.add_parser("dump", help="Dump profiles to .yaml files")
+    dump_profiles_parser.add_argument("-a", "--all", action="store_true", help="Dump all profiles to .yaml files")
+    dump_profiles_parser.add_argument("profile_name", nargs="?", help="Name of the profile to dump")
 
     # "user" command
     user_parser = subparsers.add_parser("user", help="Manage users")
@@ -659,8 +685,16 @@ def main():
                 remove_gpu_all_profiles(args.instance_name, client)
             else:
                 remove_gpu_profile(args.instance_name, client)
-    elif args.command == "dump_profiles":
-        dump_profiles(client)
+    elif args.command == "profile":
+        if not args.profile_command:
+            profile_parser.print_help()
+        elif args.profile_command == "dump":
+            if args.all:
+                dump_profiles(client)
+            elif args.profile_name:
+                dump_profile(client, args.profile_name)
+            else:
+                print("You must provide a profile name or use the --all option.")
     elif args.command == "user":
         if not args.user_command:
             user_parser.print_help()
