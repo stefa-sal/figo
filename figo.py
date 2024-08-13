@@ -48,16 +48,6 @@ def print_vm_profiles(vm_profiles, client):
         profiles_str = ", ".join(profiles)
         print("{:<20} {:<10} {:<30}".format(name, state, profiles_str))
 
-# def print_gpu_profiles(vm_profiles, client):
-#     """Print GPU profiles in a formatted table."""
-#     print("{:<20} {:<10} {:<30}".format("INSTANCE", "STATE", "PROFILES"))
-#     for name, profiles in vm_profiles.items():
-#         instance = client.instances.get(name)
-#         state = instance.status
-#         gpu_profiles = [profile for profile in profiles if profile.startswith("gpu")]
-#         profiles_str = ", ".join(gpu_profiles)
-#         print("{:<20} {:<10} {:<30}".format(name, state, profiles_str))
-
 def print_gpu_profiles(vm_profiles, client):
     """Print GPU profiles in a formatted table with colors based on instance state."""
     RED = "\033[91m"
