@@ -20,53 +20,63 @@ NAME_SERVER_IP_ADDR_2 = "8.8.8.8"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_vm_profiles(client):
-    """Get VM profiles and categorize them based on their status."""
-    vm_profiles = {}
-    running_vms = {}
-    stopped_vms = []
+def get_instance_profiles(client):
+    """Get profiles for all instances and categorize them by their status."""
+    instance_profiles = {}
+    running_instances = {}
+    stopped_instances = []
 
     for instance in client.instances.all():
-        vm_profiles[instance.name] = instance.profiles
+        instance_profiles[instance.name] = instance.profiles
         if instance.status == "Running":
-            running_vms[instance.name] = instance.profiles
+            running_instances[instance.name] = instance.profiles
         else:
-            stopped_vms.append(instance.name)
+            stopped_instances.append(instance.name)
 
-    return vm_profiles, running_vms, stopped_vms
+    return instance_profiles, running_instances, stopped_instances
 
 def get_all_profiles(client):
     """Get all available profiles."""
     return [profile.name for profile in client.profiles.all()]
 
-def print_vm_profiles(vm_profiles, client):
-    """Print VM profiles in a formatted table."""
-    print("{:<20} {:<10} {:<30}".format("INSTANCE", "STATE", "PROFILES"))
-    for name, profiles in vm_profiles.items():
+def print_instance_profiles(instance_profiles, client):
+    """Print profiles of all instances in a formatted table with instance type and short state."""
+    print("{:<18} {:<4} {:<6} {:<30}".format("INSTANCE", "TYPE", "STATE", "PROFILES"))
+    for name, profiles in instance_profiles.items():
         instance = client.instances.get(name)
-        state = instance.status
-        profiles_str = ", ".join(profiles)
-        print("{:<20} {:<10} {:<30}".format(name, state, profiles_str))
+        instance_type = "vm" if instance.type == "virtual-machine" else "cnt"
 
-def print_gpu_profiles(vm_profiles, client):
-    """Print GPU profiles in a formatted table with colors based on instance state."""
+        # Map state to a short form
+        state_map = {"Running": "run", "Stopped": "stop", "Error": "err"}
+        state = state_map.get(instance.status, "err")  # Default to "err" if state is unknown
+
+        profiles_str = ", ".join(profiles)
+        print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, profiles_str))
+
+def print_gpu_profiles(instance_profiles, client):
+    """Print GPU profiles with colors based on instance state, include instance type, and short state."""
     RED = "\033[91m"
     GREEN = "\033[92m"
     RESET = "\033[0m"
     
-    print("{:<20} {:<10} {:<30}".format("INSTANCE", "STATE", "PROFILES"))
-    for name, profiles in vm_profiles.items():
+    print("{:<18} {:<4} {:<6} {:<30}".format("INSTANCE", "TYPE", "STATE", "GPU PROFILES"))
+    for name, profiles in instance_profiles.items():
         instance = client.instances.get(name)
-        state = instance.status
+        instance_type = "vm" if instance.type == "virtual-machine" else "cnt"
+
+        # Map state to a short form
+        state_map = {"Running": "run", "Stopped": "stop", "Error": "err"}
+        state = state_map.get(instance.status, "err")  # Default to "err" if state is unknown
+
         gpu_profiles = [profile for profile in profiles if profile.startswith("gpu")]
         profiles_str = ", ".join(gpu_profiles)
         
-        if state.lower() == "running":
+        if state == "run":
             colored_profiles_str = "{}{}{}".format(RED, profiles_str, RESET)
         else:
             colored_profiles_str = "{}{}{}".format(GREEN, profiles_str, RESET)
         
-        print("{:<20} {:<10} {:<30}".format(name, state, colored_profiles_str))
+        print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, colored_profiles_str))        
 
 def stop_instance(instance_name, client):
     """Stop a specific instance."""
@@ -75,6 +85,7 @@ def stop_instance(instance_name, client):
         if instance.status != "Running":
             logger.error(f"Instance '{instance_name}' is not running.")
             return
+
         instance.stop(wait=True)
         logger.info(f"Instance '{instance_name}' stopped.")
     except pylxd.exceptions.LXDAPIException as e:
@@ -617,9 +628,9 @@ def main():
         if not args.show_command:
             show_parser.print_help()
         else:
-            vm_profiles, _, _ = get_vm_profiles(client)
+            vm_profiles, _, _ = get_instance_profiles(client)
             if args.show_command == "profiles":
-                print_vm_profiles(vm_profiles, client)
+                print_instance_profiles(vm_profiles, client)
             elif args.show_command == "gpus":
                 print_gpu_profiles(vm_profiles, client)
     elif args.command == "stop":
