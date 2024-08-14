@@ -11,11 +11,18 @@ import yaml
 import re
 import socket
 import json 
+import cryptography.hazmat.backends
+import cryptography.hazmat.primitives.serialization
+import cryptography.hazmat.primitives.asymmetric.rsa
+import cryptography.x509
+import cryptography.x509.oid
+import datetime
 
 NET_PROFILE = "net-bridged-br-200-3"
 NAME_SERVER_IP_ADDR = "160.80.1.8"
 NAME_SERVER_IP_ADDR_2 = "8.8.8.8"
 PROFILE_DIR = "./profiles"
+USER_DIR = "./users"
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -581,6 +588,93 @@ def enroll(remote_server, ip_address_port, cert_filename="~/.config/incus/client
     except subprocess.CalledProcessError as e:
         print(f"An error occurred while adding the remote server to the client configuration: {e}")
 
+def add_user(user_name, client):
+    # Check if user already exists in the certificates
+    for cert in client.certificates.all():
+        if cert.name == user_name:
+            print(f"Error: User '{user_name}' already exists.")
+            return
+
+    # Check if the project already exists
+    project_name = f"prj_{user_name}"
+    if project_name in [project.name for project in client.projects.all()]:
+        print(f"Error: Project '{project_name}' already exists.")
+        return
+
+    # Ensure USER_DIR exists
+    if not os.path.exists(USER_DIR):
+        os.makedirs(USER_DIR)
+
+    crt_file = os.path.join(USER_DIR, f"{user_name}.crt")
+    pfx_file = os.path.join(USER_DIR, f"{user_name}.pfx")
+
+    # Generate key pair and certificate
+    generate_key_pair(user_name, crt_file, pfx_file)
+
+    # Create project for the user
+    create_project(client, project_name)
+
+    # Add the user certificate to Incus
+    add_certificate_to_incus(user_name, crt_file, project_name)
+
+def generate_key_pair(user_name, crt_file, pfx_file):
+    """Generate key pair (CRT and PFX files) for the user."""
+    # Generate private key
+    private_key = cryptography.hazmat.primitives.asymmetric.rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+        backend=cryptography.hazmat.backends.default_backend()
+    )
+
+    # Generate a self-signed certificate
+    subject = issuer = cryptography.x509.Name([
+        cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.COMMON_NAME, user_name),
+    ])
+    
+    certificate = cryptography.x509.CertificateBuilder() \
+        .subject_name(subject) \
+        .issuer_name(issuer) \
+        .public_key(private_key.public_key()) \
+        .serial_number(cryptography.x509.random_serial_number()) \
+        .not_valid_before(datetime.datetime.utcnow()) \
+        .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365)) \
+        .sign(private_key, cryptography.hazmat.primitives.hashes.SHA256(), cryptography.hazmat.backends.default_backend())
+
+    # Write certificate to file
+    with open(crt_file, "wb") as crt:
+        crt.write(certificate.public_bytes(cryptography.hazmat.primitives.serialization.Encoding.PEM))
+
+    # Write private key and certificate to a PFX file
+    with open(pfx_file, "wb") as pfx:
+        pfx.write(private_key.private_bytes(
+            cryptography.hazmat.primitives.serialization.Encoding.PEM,
+            cryptography.hazmat.primitives.serialization.PrivateFormat.PKCS8,
+            cryptography.hazmat.primitives.serialization.NoEncryption()
+        ))
+
+def create_project(client, project_name):
+    """Create a new project."""
+    config = {
+        "name": project_name,
+        "description": f"Project for user {project_name}",
+    }
+    client.projects.create(config)
+    print(f"Project '{project_name}' created.")
+
+def add_certificate_to_incus(user_name, crt_file, project_name):
+    """Add user certificate to Incus with restricted access to the project."""
+    try:
+        # Execute the incus command to add the certificate
+        subprocess.run([
+            "incus", "config", "trust", "add-certificate", crt_file, 
+            "--restricted", 
+            f"--projects={project_name}", 
+            f"--name={user_name}"
+        ], check=True)
+        print(f"User '{user_name}' certificate added to Incus with project '{project_name}'.")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to add certificate to Incus: {e}")
+
 def main():
     parser = argparse.ArgumentParser(
         description="Manage a federated testbed with CPUs and GPUs",
@@ -663,6 +757,14 @@ def main():
     )
     user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
 
+    # Add "add" subcommand under "user"
+    user_add_parser = user_subparsers.add_parser(
+        "add", 
+        help="Add a new user to the system"
+    )
+    user_add_parser.add_argument("username", help="Username of the new user")
+    user_add_parser.add_argument("key_filename", help="Path to the user's public key file")
+
     # Manually add aliases for "user"
     subparsers._name_parser_map["us"] = user_parser
     subparsers._name_parser_map["u"] = user_parser
@@ -743,6 +845,8 @@ def main():
             user_parser.print_help()
         elif args.user_command == "list":
             list_users(client, full=args.full)
+        elif args.user_command == "add":
+            add_user(args.username, args.key_filename, client)
     elif args.command in ["remote", "re", "r"]:
         if not args.remote_command:
             remote_parser.print_help()
@@ -750,7 +854,7 @@ def main():
             list_remotes(client, full=args.full)
         elif args.remote_command == "enroll":
             enroll(args.remote_server, args.ip_address, args.port, args.user, 
-                        args.cert_filename, args.loc_name)
+                          args.cert_filename, args.loc_name)
 
 if __name__ == "__main__":
     main()
