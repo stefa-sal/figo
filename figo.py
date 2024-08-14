@@ -600,13 +600,13 @@ def add_user(user_name, client):
     if project_name in [project.name for project in client.projects.all()]:
         print(f"Error: Project '{project_name}' already exists.")
         return
+    directory = os.path.expanduser(USER_DIR)
+    # Ensure directory exists
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
-    # Ensure USER_DIR exists
-    if not os.path.exists(USER_DIR):
-        os.makedirs(USER_DIR)
-
-    crt_file = os.path.join(USER_DIR, f"{user_name}.crt")
-    pfx_file = os.path.join(USER_DIR, f"{user_name}.pfx")
+    crt_file = os.path.join(directory, f"{user_name}.crt")
+    pfx_file = os.path.join(directory, f"{user_name}.pfx")
 
     # Generate key pair and certificate
     generate_key_pair(user_name, crt_file, pfx_file)
