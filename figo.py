@@ -457,7 +457,7 @@ def list_users(client, full=False):
     """List all installed certificates with optional full details."""
     
     if full:
-        print("{:<20} {:<12} {:<10} {:<10} {:<20}".format(
+        print("{:<20} {:<12} {:<5} {:<10} {:<20}".format(
             "NAME", "FINGERPRINT", "TYPE", "RESTRICTED", "PROJECTS"
         ))
     else:
@@ -469,8 +469,8 @@ def list_users(client, full=False):
 
         if full:
             projects = ", ".join(certificate.projects)
-            print("{:<20} {:<12} {:<10} {:<10} {:<20}".format(
-                name, fingerprint, certificate.type, str(certificate.restricted), projects
+            print("{:<20} {:<12} {:<5} {:<10} {:<20}".format(
+                name, fingerprint, certificate.type[:3], str(certificate.restricted), projects
             ))
         else:
             print(f"{name:<20} {fingerprint:<12}")
@@ -588,7 +588,7 @@ def enroll(remote_server, ip_address_port, cert_filename="~/.config/incus/client
     except subprocess.CalledProcessError as e:
         print(f"An error occurred while adding the remote server to the client configuration: {e}")
 
-def add_user(user_name, client):
+def add_user(user_name, cert_file, client):
     # Check if user already exists in the certificates
     for cert in client.certificates.all():
         if cert.name == user_name:
@@ -596,20 +596,27 @@ def add_user(user_name, client):
             return
 
     # Check if the project already exists
-    project_name = f"prj_{user_name}"
+    project_name = f"prj-{user_name}"
     if project_name in [project.name for project in client.projects.all()]:
         print(f"Error: Project '{project_name}' already exists.")
         return
+
     directory = os.path.expanduser(USER_DIR)
     # Ensure directory exists
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-    crt_file = os.path.join(directory, f"{user_name}.crt")
-    pfx_file = os.path.join(directory, f"{user_name}.pfx")
-
-    # Generate key pair and certificate
-    generate_key_pair(user_name, crt_file, pfx_file)
+    # Determine whether to use the provided cert or generate a new key pair
+    if cert_file:
+        # Use the provided certificate
+        crt_file = cert_file
+        print(f"Using provided certificate: {crt_file}")
+    else:
+        # Generate key pair and certificate
+        crt_file = os.path.join(directory, f"{user_name}.crt")
+        pfx_file = os.path.join(directory, f"{user_name}.pfx")
+        generate_key_pair(user_name, crt_file, pfx_file)
+        print(f"Generated certificate and key pair for user: {user_name}")
 
     # Create project for the user
     create_project(client, project_name)
@@ -653,13 +660,21 @@ def generate_key_pair(user_name, crt_file, pfx_file):
         ))
 
 def create_project(client, project_name):
-    """Create a new project."""
-    config = {
-        "name": project_name,
-        "description": f"Project for user {project_name}",
-    }
-    client.projects.create(config)
-    print(f"Project '{project_name}' created.")
+    try:
+        # Explicitly define the project details as a dictionary
+        project_data = {
+            "name": project_name,  # The project's name (string)
+            "description": f"Project for user {project_name}",  # Optional description
+            "config": {}  # Empty configuration for now
+        }
+
+        # Creating the project using the correct format
+        client.api.projects.post(json=project_data)
+        print(f"Project '{project_name}' created successfully.")
+
+    except pylxd.exceptions.LXDAPIException as e:
+        print(f"Error creating project '{project_name}': {str(e)}")
+
 
 def add_certificate_to_incus(user_name, crt_file, project_name):
     """Add user certificate to Incus with restricted access to the project."""
@@ -757,13 +772,13 @@ def main():
     )
     user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
 
-    # Add "add" subcommand under "user"
+    # Modify "add" subcommand under "user" to make "key_filename" optional and add "--cert" option
     user_add_parser = user_subparsers.add_parser(
         "add", 
         help="Add a new user to the system"
     )
     user_add_parser.add_argument("username", help="Username of the new user")
-    user_add_parser.add_argument("key_filename", help="Path to the user's public key file")
+    user_add_parser.add_argument("--cert", help="Path to the user's certificate file (optional)")
 
     # Manually add aliases for "user"
     subparsers._name_parser_map["us"] = user_parser
@@ -846,7 +861,7 @@ def main():
         elif args.user_command == "list":
             list_users(client, full=args.full)
         elif args.user_command == "add":
-            add_user(args.username, args.key_filename, client)
+            add_user(args.username, args.cert, client)
     elif args.command in ["remote", "re", "r"]:
         if not args.remote_command:
             remote_parser.print_help()
