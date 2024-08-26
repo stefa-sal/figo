@@ -59,13 +59,13 @@ def switch_to_remote(remote_node):
         return False
     return True
 
-def run_incus_list(remote_node=None):
-    """Run the 'incus list -f json' command, optionally targeting a remote node, and return its output as JSON."""
+def run_incus_list(remote_node=None, project_name="default"):
+    """Run the 'incus list -f json' command, optionally targeting a remote node and project, and return its output as JSON."""
     try:
-        # Prepare the command with an optional remote node using the correct syntax
-        command = ["incus", "list", "-f", "json"]
+        # Prepare the command with an optional remote node and project name using the correct syntax
+        command = ["incus", "list", "-f", "json", "--project", project_name]
         if remote_node:
-            command = ["incus", "list", f"{remote_node}:", "-f", "json"]
+            command = ["incus", "list", f"{remote_node}:", "-f", "json", "--project", project_name]
         
         # Run the command to get the list of instances in JSON format
         result = subprocess.run(command, capture_output=True, text=True, check=True)
@@ -82,6 +82,7 @@ def run_incus_list(remote_node=None):
     except Exception as e:
         print(f"Error: An unexpected error occurred while running 'incus list -f json': {e}")
         return None
+
 
 def print_profiles(remote_node=None, full=False):
     """Print profiles of all instances, either from the local or a remote Incus node.
