@@ -59,14 +59,17 @@ def switch_to_remote(remote_node):
         return False
     return True
 
-
-def run_incus_list():
-    """Run the 'incus list -f json' command and return its output as JSON."""
+def run_incus_list(remote_node=None):
+    """Run the 'incus list -f json' command, optionally targeting a remote node, and return its output as JSON."""
     try:
-        # Run 'incus list -f json' command to get the list of instances in JSON format
-        result = subprocess.run(
-            ["incus", "list", "-f", "json"], capture_output=True, text=True, check=True
-        )
+        # Prepare the command with an optional remote node using the correct syntax
+        command = ["incus", "list", "-f", "json"]
+        if remote_node:
+            command = ["incus", "list", f"{remote_node}:", "-f", "json"]
+        
+        # Run the command to get the list of instances in JSON format
+        result = subprocess.run(command, capture_output=True, text=True, check=True)
+        
         # Parse the JSON output
         instances = json.loads(result.stdout)
         return instances
@@ -80,65 +83,6 @@ def run_incus_list():
         print(f"Error: An unexpected error occurred while running 'incus list -f json': {e}")
         return None
 
-
-def print_instance_profiles(remote_node=None):
-    """Print profiles of all instances, either from the local or a remote Incus node."""
-    if remote_node:
-        # Attempt to switch to the remote node
-        if not switch_to_remote(remote_node):
-            return  # Exit the function if switching fails
-
-    # Get the instances from 'incus list -f json'
-    instances = run_incus_list()
-    if instances is None:
-        return  # Exit if fetching the instances failed
-
-    # Print header
-    print("{:<18} {:<4} {:<6} {:<30}".format("INSTANCE", "TYPE", "STATE", "PROFILES"))
-
-    # Iterate through instances and print their details in columns
-    for instance in instances:
-        name = instance.get("name", "Unknown")
-        instance_type = "vm" if instance.get("type") == "virtual-machine" else "cnt"
-        state = instance.get("status", "err")[:3].lower()  # Shorten the status
-        profiles_str = ", ".join(instance.get("profiles", []))
-        print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, profiles_str))
-
-
-def print_gpu_profiles(remote_node=None):
-    """Print GPU profiles, either from the local or a remote Incus node."""
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    RESET = "\033[0m"
-
-    if remote_node:
-        # Attempt to switch to the remote node
-        if not switch_to_remote(remote_node):
-            return  # Exit the function if switching fails
-
-    # Get the instances from 'incus list -f json'
-    instances = run_incus_list()
-    if instances is None:
-        return  # Exit if fetching the instances failed
-
-    # Print header
-    print("{:<18} {:<4} {:<6} {:<30}".format("INSTANCE", "TYPE", "STATE", "GPU PROFILES"))
-
-    # Iterate through instances and print their GPU profiles in columns
-    for instance in instances:
-        name = instance.get("name", "Unknown")
-        instance_type = "vm" if instance.get("type") == "virtual-machine" else "cnt"
-        state = instance.get("status", "err")[:3].lower()  # Shorten the status
-
-        # Filter out only GPU profiles
-        gpu_profiles = [profile for profile in instance.get("profiles", []) if profile.startswith("gpu")]
-        profiles_str = ", ".join(gpu_profiles)
-
-        # Add color based on state
-        colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
-
-        print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, colored_profiles_str))
-
 def print_profiles(remote_node=None, full=False):
     """Print profiles of all instances, either from the local or a remote Incus node.
     If full is False, prints only GPU profiles with color coding.
@@ -147,21 +91,16 @@ def print_profiles(remote_node=None, full=False):
     GREEN = "\033[92m"
     RESET = "\033[0m"
 
-    if remote_node:
-        # Attempt to switch to the remote node
-        if not switch_to_remote(remote_node):
-            return  # Exit the function if switching fails
-
     # Get the instances from 'incus list -f json'
-    instances = run_incus_list()
+    instances = run_incus_list(remote_node=remote_node)
     if instances is None:
         return  # Exit if fetching the instances failed
 
     # Determine the header and profile type based on the 'full' flag
     if full:
-        print("{:<18} {:<4} {:<6} {:<30}".format("INSTANCE", "TYPE", "STATE", "PROFILES"))
+        print("{:<14} {:<4} {:<5} {:<30}".format("INSTANCE", "TYPE", "STATE", "PROFILES"))
     else:
-        print("{:<18} {:<4} {:<6} {:<30}".format("INSTANCE", "TYPE", "STATE", "GPU PROFILES"))
+        print("{:<14} {:<4} {:<5} {:<30}".format("INSTANCE", "TYPE", "STATE", "GPU PROFILES"))
 
     # Iterate through instances and print their details in columns
     for instance in instances:
@@ -172,14 +111,13 @@ def print_profiles(remote_node=None, full=False):
         if full:
             # Print all profiles
             profiles_str = ", ".join(instance.get("profiles", []))
-            print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, profiles_str))
+            print("{:<14} {:<4} {:<5} {:<30}".format(name, instance_type, state, profiles_str))
         else:
             # Print only GPU profiles with color coding based on state
             gpu_profiles = [profile for profile in instance.get("profiles", []) if profile.startswith("gpu")]
             profiles_str = ", ".join(gpu_profiles)
             colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
-            print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, colored_profiles_str))
-
+            print("{:<14} {:<4} {:<5} {:<30}".format(name, instance_type, state, colored_profiles_str))
 
 def stop_instance(instance_name, client):
     """Stop a specific instance."""
