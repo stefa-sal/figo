@@ -84,7 +84,7 @@ def run_incus_list(remote_node=None, project_name="default"):
         return None
 
 
-def print_profiles(remote_node=None, full=False):
+def print_profiles(remote_node=None, full=False, project_name="default"):
     """Print profiles of all instances, either from the local or a remote Incus node.
     If full is False, prints only GPU profiles with color coding.
     """
@@ -93,7 +93,7 @@ def print_profiles(remote_node=None, full=False):
     RESET = "\033[0m"
 
     # Get the instances from 'incus list -f json'
-    instances = run_incus_list(remote_node=remote_node)
+    instances = run_incus_list(remote_node=remote_node, project_name=project_name)
     if instances is None:
         return  # Exit if fetching the instances failed
 
@@ -743,6 +743,7 @@ def main():
     instance_list_parser = instance_subparsers.add_parser("list", help="List instances (use -f or --full for more details)")
     instance_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of instance profiles")
     instance_list_parser.add_argument("-r", "--remote", help="Remote Incus server name")
+    instance_list_parser.add_argument("-p", "--project", default="default", help="Project name (default: default)")
 
     # Add "start" subcommand under "instance"
     start_parser = instance_subparsers.add_parser("start", help="Start a specific instance")
@@ -857,17 +858,16 @@ def main():
         if not args.instance_command:
             instance_parser.print_help()
         elif args.instance_command == "list":
-            vm_profiles, _, _ = get_instance_profiles(client)
             if args.remote:
                 remote_node = args.remote
             else:
-                 remote_node = None
+                remote_node = None
             if args.full:
-                #print_instance_profiles(remote_node)
-                print_profiles(remote_node, full=True)
+                # Call print_profiles with project_name argument
+                print_profiles(remote_node, full=True, project_name=args.project)
             else:
-                #print_gpu_profiles(remote_node) 
-                print_profiles(remote_node)
+                # Call print_profiles with project_name argument
+                print_profiles(remote_node, full=False, project_name=args.project)
         elif args.instance_command == "start":
             start_instance(args.instance_name, client)
         elif args.instance_command == "stop":
@@ -917,6 +917,7 @@ def main():
         elif args.remote_command == "enroll":
             enroll(args.remote_server, args.ip_address, args.port, args.user, 
                           args.cert_filename, args.loc_name)
+
 
 if __name__ == "__main__":
     main()
