@@ -74,7 +74,8 @@ def run_incus_list(remote_node="local", project_name="default"):
         instances = json.loads(result.stdout)
         return instances
     except subprocess.CalledProcessError as e:
-        print(f"Error: Failed to run 'incus list -f json'. {e}")
+        # Print the exact error message from the command's stderr
+        print(f"Error: {e.stderr.strip()}")
         return None
     except json.JSONDecodeError as e:
         print(f"Error: Failed to parse JSON output. {e}")
@@ -118,6 +119,8 @@ def print_profiles(remote_node=None, project_name=None, full=False):
                 my_project_name = project["name"]
                 get_instances(remote_node=remote_node, project_name=my_project_name, full=full)
         else:
+            print("Listing profiles from remote node: ", remote_node)
+            print("Listing profiles from project: ", project_name)
             get_instances(remote_node=remote_node, project_name=project_name, full=full)
 
 def get_instances(remote_node=None, project_name=None, full=False):
@@ -784,8 +787,9 @@ def main():
     # Add "list" subcommand under "instance"
     instance_list_parser = instance_subparsers.add_parser("list", help="List instances (use -f or --full for more details)")
     instance_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of instance profiles")
-    instance_list_parser.add_argument("-r", "--remote", help="Remote Incus server name")
+    instance_list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project' to limit the listing")
     instance_list_parser.add_argument("-p", "--project", help="Project name to list instances from")
+    instance_list_parser.add_argument("-r", "--remote", help="Remote Incus server name")
 
     # Add "start" subcommand under "instance"
     start_parser = instance_subparsers.add_parser("start", help="Start a specific instance")
@@ -900,19 +904,39 @@ def main():
         if not args.instance_command:
             instance_parser.print_help()
         elif args.instance_command == "list":
-            if args.remote:
-                remote_node = args.remote
-            else:
-                remote_node = None
-            if args.project:
-                project_name = args.project
-            else:
-                project_name = None
+            remote_node = args.remote
+            project_name = args.project
+
+            if args.scope:
+                if ":" in args.scope:
+                    # If scope is "remote:project"
+                    remote_scope, project_scope = args.scope.split(":", 1)
+                    print(f"remote_scope: {remote_scope}, project_scope: {project_scope}")
+                    if project_scope == "":
+                        project_scope = None
+
+                    if args.remote and args.remote != remote_scope:
+                        print(f"Error: Conflict between scope remote '{remote_scope}' and provided remote '{args.remote}'.")
+                        return
+                    if args.project and project_scope and args.project != project_scope:
+                        print(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
+                        return
+
+                    remote_node = remote_scope
+                    project_name = project_scope if project_scope else args.project
+                else:
+                    # If scope is only "project"
+                    project_scope = args.scope
+
+                    if args.project and args.project != project_scope:
+                        print(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
+                        return
+
+                    project_name = project_scope
+
             if args.full:
-                # Call print_profiles with project_name argument
                 print_profiles(remote_node, project_name=project_name, full=True)
             else:
-                # Call print_profiles with project_name argument
                 print_profiles(remote_node, project_name=project_name, full=False)
         elif args.instance_command == "start":
             start_instance(args.instance_name, client)
@@ -963,7 +987,6 @@ def main():
         elif args.remote_command == "enroll":
             enroll(args.remote_server, args.ip_address, args.port, args.user, 
                           args.cert_filename, args.loc_name)
-
 
 if __name__ == "__main__":
     main()
