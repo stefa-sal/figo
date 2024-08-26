@@ -59,6 +59,39 @@ def switch_to_remote(remote_node):
         return False
     return True
 
+def get_instances(remote_node=None, project_name=None, full=False):
+    """Get instances from the specified remote node and project and print their details."""
+
+    RED = "\033[91m"
+    GREEN = "\033[92m"
+    RESET = "\033[0m"
+
+    # Get the instances from 'incus list -f json'
+    instances = run_incus_list(remote_node=remote_node, project_name=project_name)
+    if instances is None:
+        return  # Exit if fetching the instances failed
+
+    # Iterate through instances and print their details in columns
+    for instance in instances:
+        name = instance.get("name", "Unknown")
+        instance_type = "vm" if instance.get("type") == "virtual-machine" else "cnt"
+        state = instance.get("status", "err")[:3].lower()  # Shorten the status
+
+        # Construct the context column as remote_name:project_name
+        project_name = instance.get("project", "default")
+        context = f"{remote_node}:{project_name}" if remote_node else f"local:{project_name}"
+
+        if full:
+            # Print all profiles
+            profiles_str = ", ".join(instance.get("profiles", []))
+            print("{:<14} {:<4} {:<5} {:<22} {:<30}".format(name, instance_type, state, context, profiles_str))
+        else:
+            # Print only GPU profiles with color coding based on state
+            gpu_profiles = [profile for profile in instance.get("profiles", []) if profile.startswith("gpu")]
+            profiles_str = ", ".join(gpu_profiles)
+            colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
+            print("{:<14} {:<4} {:<5} {:<22} {:<30}".format(name, instance_type, state, context, colored_profiles_str))
+
 def run_incus_list(remote_node="local", project_name="default"):
     """Run the 'incus list -f json' command, optionally targeting a remote node and project, and return its output as JSON."""
     try:
@@ -122,39 +155,6 @@ def print_profiles(remote_node=None, project_name=None, full=False):
             print("Listing profiles from remote node: ", remote_node)
             print("Listing profiles from project: ", project_name)
             get_instances(remote_node=remote_node, project_name=project_name, full=full)
-
-def get_instances(remote_node=None, project_name=None, full=False):
-    """Get instances from the specified remote node and project and print their details."""
-
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    RESET = "\033[0m"
-
-    # Get the instances from 'incus list -f json'
-    instances = run_incus_list(remote_node=remote_node, project_name=project_name)
-    if instances is None:
-        return  # Exit if fetching the instances failed
-
-    # Iterate through instances and print their details in columns
-    for instance in instances:
-        name = instance.get("name", "Unknown")
-        instance_type = "vm" if instance.get("type") == "virtual-machine" else "cnt"
-        state = instance.get("status", "err")[:3].lower()  # Shorten the status
-
-        # Construct the context column as remote_name:project_name
-        project_name = instance.get("project", "default")
-        context = f"{remote_node}:{project_name}" if remote_node else f"local:{project_name}"
-
-        if full:
-            # Print all profiles
-            profiles_str = ", ".join(instance.get("profiles", []))
-            print("{:<14} {:<4} {:<5} {:<22} {:<30}".format(name, instance_type, state, context, profiles_str))
-        else:
-            # Print only GPU profiles with color coding based on state
-            gpu_profiles = [profile for profile in instance.get("profiles", []) if profile.startswith("gpu")]
-            profiles_str = ", ".join(gpu_profiles)
-            colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
-            print("{:<14} {:<4} {:<5} {:<22} {:<30}".format(name, instance_type, state, context, colored_profiles_str))
 
 def stop_instance(instance_name, client):
     """Stop a specific instance."""
