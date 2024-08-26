@@ -128,14 +128,14 @@ def print_profiles(remote_node=None, project_name=None, full=False):
         print("{:<14} {:<4} {:<5} {:<22} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "GPU PROFILES"))
 
     if remote_node is None:
-        # #Listing profiles from the local Incus server
-        # remote_node = "local"
-        
         #iterate over all remote nodes
         remotes = get_incus_remotes()
         for my_remote_node in remotes:
-            if my_remote_node == "images":
+            # check to skip all the remote node of type images
+            # Skipping remote node with protocol simplestreams
+            if remotes[my_remote_node]["Protocol"] == "simplestreams":
                 continue
+
             if project_name is None:
                 # iterate over all projects
                 projects = get_projects(remote_node=my_remote_node)
@@ -145,6 +145,7 @@ def print_profiles(remote_node=None, project_name=None, full=False):
             else:
                 get_instances(remote_node=my_remote_node, project_name=project_name, full=full)
     else:
+        # Get instances from the specified remote node
         if project_name is None:
             # iterate over all projects
             projects = get_projects(remote_node=remote_node)
@@ -152,8 +153,7 @@ def print_profiles(remote_node=None, project_name=None, full=False):
                 my_project_name = project["name"]
                 get_instances(remote_node=remote_node, project_name=my_project_name, full=full)
         else:
-            print("Listing profiles from remote node: ", remote_node)
-            print("Listing profiles from project: ", project_name)
+            # Get instances from the specified remote node and project
             get_instances(remote_node=remote_node, project_name=project_name, full=full)
 
 def stop_instance(instance_name, client):
@@ -911,7 +911,6 @@ def main():
                 if ":" in args.scope:
                     # If scope is "remote:project"
                     remote_scope, project_scope = args.scope.split(":", 1)
-                    print(f"remote_scope: {remote_scope}, project_scope: {project_scope}")
                     if project_scope == "":
                         project_scope = None
 
