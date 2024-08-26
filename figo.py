@@ -47,44 +47,97 @@ def get_all_profiles(client):
     """Get all available profiles."""
     return [profile.name for profile in client.profiles.all()]
 
-def print_instance_profiles(instance_profiles, client):
-    """Print profiles of all instances in a formatted table with instance type and short state."""
+def switch_to_remote(remote_node):
+    """Switch the Incus CLI to the specified remote node."""
+    try:
+        subprocess.run(["incus", "remote", "switch", remote_node], check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error: Failed to switch to remote '{remote_node}'. {e}")
+        return False
+    except Exception as e:
+        print(f"Error: An unexpected error occurred while switching to remote '{remote_node}': {e}")
+        return False
+    return True
+
+
+def run_incus_list(full=False):
+    """Run the 'incus list -f json' command and return its output as JSON."""
+    try:
+        # Run 'incus list -f json' command to get the list of instances in JSON format
+        result = subprocess.run(
+            ["incus", "list", "-f", "json"], capture_output=True, text=True, check=True
+        )
+        # Parse the JSON output
+        instances = json.loads(result.stdout)
+        return instances
+    except subprocess.CalledProcessError as e:
+        print(f"Error: Failed to run 'incus list -f json'. {e}")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"Error: Failed to parse JSON output. {e}")
+        return None
+    except Exception as e:
+        print(f"Error: An unexpected error occurred while running 'incus list -f json': {e}")
+        return None
+
+
+def print_instance_profiles(client, remote_node=None, full=False):
+    """Print profiles of all instances, either from the local or a remote Incus node."""
+    if remote_node:
+        # Attempt to switch to the remote node
+        if not switch_to_remote(remote_node):
+            return  # Exit the function if switching fails
+
+    # Get the instances from 'incus list -f json'
+    instances = run_incus_list(full=True if full else False)
+    if instances is None:
+        return  # Exit if fetching the instances failed
+
+    # Print header
     print("{:<18} {:<4} {:<6} {:<30}".format("INSTANCE", "TYPE", "STATE", "PROFILES"))
-    for name, profiles in instance_profiles.items():
-        instance = client.instances.get(name)
-        instance_type = "vm" if instance.type == "virtual-machine" else "cnt"
 
-        # Map state to a short form
-        state_map = {"Running": "run", "Stopped": "stop", "Error": "err"}
-        state = state_map.get(instance.status, "err")  # Default to "err" if state is unknown
-
-        profiles_str = ", ".join(profiles)
+    # Iterate through instances and print their details in columns
+    for instance in instances:
+        name = instance.get("name", "Unknown")
+        instance_type = "vm" if instance.get("type") == "virtual-machine" else "cnt"
+        state = instance.get("status", "err")[:3].lower()  # Shorten the status
+        profiles_str = ", ".join(instance.get("profiles", []))
         print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, profiles_str))
 
-def print_gpu_profiles(instance_profiles, client):
-    """Print GPU profiles with colors based on instance state, include instance type, and short state."""
+
+def print_gpu_profiles(client, remote_node=None):
+    """Print GPU profiles, either from the local or a remote Incus node."""
     RED = "\033[91m"
     GREEN = "\033[92m"
     RESET = "\033[0m"
-    
+
+    if remote_node:
+        # Attempt to switch to the remote node
+        if not switch_to_remote(remote_node):
+            return  # Exit the function if switching fails
+
+    # Get the instances from 'incus list -f json'
+    instances = run_incus_list(full=False)
+    if instances is None:
+        return  # Exit if fetching the instances failed
+
+    # Print header
     print("{:<18} {:<4} {:<6} {:<30}".format("INSTANCE", "TYPE", "STATE", "GPU PROFILES"))
-    for name, profiles in instance_profiles.items():
-        instance = client.instances.get(name)
-        instance_type = "vm" if instance.type == "virtual-machine" else "cnt"
 
-        # Map state to a short form
-        state_map = {"Running": "run", "Stopped": "stop", "Error": "err"}
-        state = state_map.get(instance.status, "err")  # Default to "err" if state is unknown
+    # Iterate through instances and print their GPU profiles in columns
+    for instance in instances:
+        name = instance.get("name", "Unknown")
+        instance_type = "vm" if instance.get("type") == "virtual-machine" else "cnt"
+        state = instance.get("status", "err")[:3].lower()  # Shorten the status
 
-        gpu_profiles = [profile for profile in profiles if profile.startswith("gpu")]
+        # Filter out only GPU profiles
+        gpu_profiles = [profile for profile in instance.get("profiles", []) if profile.startswith("gpu")]
         profiles_str = ", ".join(gpu_profiles)
-        
-        if state == "run":
-            colored_profiles_str = "{}{}{}".format(RED, profiles_str, RESET)
-        else:
-            colored_profiles_str = "{}{}{}".format(GREEN, profiles_str, RESET)
-        
-        print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, colored_profiles_str))        
+
+        # Add color based on state
+        colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
+
+        print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, colored_profiles_str))
 
 def stop_instance(instance_name, client):
     """Stop a specific instance."""
@@ -704,6 +757,7 @@ def main():
     # Add "list" subcommand under "instance"
     instance_list_parser = instance_subparsers.add_parser("list", help="List instances (use -f or --full for more details)")
     instance_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of instance profiles")
+    instance_list_parser.add_argument("-r", "--remote", help="Remote Incus server name")
 
     # Add "start" subcommand under "instance"
     start_parser = instance_subparsers.add_parser("start", help="Start a specific instance")
@@ -807,6 +861,8 @@ def main():
     subparsers._name_parser_map["re"] = remote_parser
     subparsers._name_parser_map["r"] = remote_parser
 
+    argcomplete.autocomplete(parser)
+
     args = parser.parse_args()
     client = pylxd.Client()
 
@@ -817,10 +873,14 @@ def main():
             instance_parser.print_help()
         elif args.instance_command == "list":
             vm_profiles, _, _ = get_instance_profiles(client)
-            if args.full:
-                print_instance_profiles(vm_profiles, client)
+            if args.remote:
+                remote_node = args.remote
             else:
-                print_gpu_profiles(vm_profiles, client)
+                 remote_node = None
+            if args.full:
+                print_instance_profiles(client, remote_node)
+            else:
+                print_gpu_profiles(client, remote_node) 
         elif args.instance_command == "start":
             start_instance(args.instance_name, client)
         elif args.instance_command == "stop":
