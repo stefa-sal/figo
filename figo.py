@@ -59,7 +59,7 @@ def switch_to_remote(remote_node):
         return False
     return True
 
-def run_incus_list(remote_node=None, project_name="default"):
+def run_incus_list(remote_node="local", project_name="default"):
     """Run the 'incus list -f json' command, optionally targeting a remote node and project, and return its output as JSON."""
     try:
         # Prepare the command with an optional remote node and project name using the correct syntax
@@ -83,11 +83,46 @@ def run_incus_list(remote_node=None, project_name="default"):
         print(f"Error: An unexpected error occurred while running 'incus list -f json': {e}")
         return None
 
-
-def print_profiles(remote_node=None, full=False, project_name="default"):
+def print_profiles(remote_node=None, project_name=None, full=False):
     """Print profiles of all instances, either from the local or a remote Incus node.
     If full is False, prints only GPU profiles with color coding.
     """
+    # Determine the header and profile type based on the 'full' flag
+    if full:
+        print("{:<14} {:<4} {:<5} {:<22} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "PROFILES"))
+    else:
+        print("{:<14} {:<4} {:<5} {:<22} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "GPU PROFILES"))
+
+    if remote_node is None:
+        # #Listing profiles from the local Incus server
+        # remote_node = "local"
+        
+        #iterate over all remote nodes
+        remotes = get_incus_remotes()
+        for my_remote_node in remotes:
+            if my_remote_node == "images":
+                continue
+            if project_name is None:
+                # iterate over all projects
+                projects = get_projects(remote_node=my_remote_node)
+                for project in projects:
+                    my_project_name = project["name"]
+                    get_instances(remote_node=my_remote_node, project_name=my_project_name, full=full)
+            else:
+                get_instances(remote_node=my_remote_node, project_name=project_name, full=full)
+    else:
+        if project_name is None:
+            # iterate over all projects
+            projects = get_projects(remote_node=remote_node)
+            for project in projects:
+                my_project_name = project["name"]
+                get_instances(remote_node=remote_node, project_name=my_project_name, full=full)
+        else:
+            get_instances(remote_node=remote_node, project_name=project_name, full=full)
+
+def get_instances(remote_node=None, project_name=None, full=False):
+    """Get instances from the specified remote node and project and print their details."""
+
     RED = "\033[91m"
     GREEN = "\033[92m"
     RESET = "\033[0m"
@@ -96,12 +131,6 @@ def print_profiles(remote_node=None, full=False, project_name="default"):
     instances = run_incus_list(remote_node=remote_node, project_name=project_name)
     if instances is None:
         return  # Exit if fetching the instances failed
-
-    # Determine the header and profile type based on the 'full' flag
-    if full:
-        print("{:<14} {:<4} {:<5} {:<22} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "PROFILES"))
-    else:
-        print("{:<14} {:<4} {:<5} {:<22} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "GPU PROFILES"))
 
     # Iterate through instances and print their details in columns
     for instance in instances:
@@ -533,6 +562,19 @@ def get_incus_remotes():
     except json.JSONDecodeError:
         raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
 
+def get_projects(remote_node="local"): 
+    """Fetches and returns the list of projects as a JSON object."""
+    result = subprocess.run(['incus', 'project', 'list', f"{remote_node}:", '--format', 'json'], capture_output=True, text=True)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to retrieve projects: {result.stderr}")
+
+    try:
+        projects = json.loads(result.stdout)
+        return projects
+    except json.JSONDecodeError:
+        raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
+
 
 def list_remotes(client, full=False):
     """Lists the available Incus remotes and their addresses."""
@@ -743,7 +785,7 @@ def main():
     instance_list_parser = instance_subparsers.add_parser("list", help="List instances (use -f or --full for more details)")
     instance_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of instance profiles")
     instance_list_parser.add_argument("-r", "--remote", help="Remote Incus server name")
-    instance_list_parser.add_argument("-p", "--project", default="default", help="Project name (default: default)")
+    instance_list_parser.add_argument("-p", "--project", help="Project name to list instances from")
 
     # Add "start" subcommand under "instance"
     start_parser = instance_subparsers.add_parser("start", help="Start a specific instance")
@@ -862,12 +904,16 @@ def main():
                 remote_node = args.remote
             else:
                 remote_node = None
+            if args.project:
+                project_name = args.project
+            else:
+                project_name = None
             if args.full:
                 # Call print_profiles with project_name argument
-                print_profiles(remote_node, full=True, project_name=args.project)
+                print_profiles(remote_node, project_name=project_name, full=True)
             else:
                 # Call print_profiles with project_name argument
-                print_profiles(remote_node, full=False, project_name=args.project)
+                print_profiles(remote_node, project_name=project_name, full=False)
         elif args.instance_command == "start":
             start_instance(args.instance_name, client)
         elif args.instance_command == "stop":
