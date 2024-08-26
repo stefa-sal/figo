@@ -98,9 +98,9 @@ def print_profiles(remote_node=None, full=False):
 
     # Determine the header and profile type based on the 'full' flag
     if full:
-        print("{:<14} {:<4} {:<5} {:<30}".format("INSTANCE", "TYPE", "STATE", "PROFILES"))
+        print("{:<14} {:<4} {:<5} {:<22} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "PROFILES"))
     else:
-        print("{:<14} {:<4} {:<5} {:<30}".format("INSTANCE", "TYPE", "STATE", "GPU PROFILES"))
+        print("{:<14} {:<4} {:<5} {:<22} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "GPU PROFILES"))
 
     # Iterate through instances and print their details in columns
     for instance in instances:
@@ -108,16 +108,20 @@ def print_profiles(remote_node=None, full=False):
         instance_type = "vm" if instance.get("type") == "virtual-machine" else "cnt"
         state = instance.get("status", "err")[:3].lower()  # Shorten the status
 
+        # Construct the context column as remote_name:project_name
+        project_name = instance.get("project", "default")
+        context = f"{remote_node}:{project_name}" if remote_node else f"local:{project_name}"
+
         if full:
             # Print all profiles
             profiles_str = ", ".join(instance.get("profiles", []))
-            print("{:<14} {:<4} {:<5} {:<30}".format(name, instance_type, state, profiles_str))
+            print("{:<14} {:<4} {:<5} {:<22} {:<30}".format(name, instance_type, state, context, profiles_str))
         else:
             # Print only GPU profiles with color coding based on state
             gpu_profiles = [profile for profile in instance.get("profiles", []) if profile.startswith("gpu")]
             profiles_str = ", ".join(gpu_profiles)
             colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
-            print("{:<14} {:<4} {:<5} {:<30}".format(name, instance_type, state, colored_profiles_str))
+            print("{:<14} {:<4} {:<5} {:<22} {:<30}".format(name, instance_type, state, context, colored_profiles_str))
 
 def stop_instance(instance_name, client):
     """Stop a specific instance."""
