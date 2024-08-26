@@ -1,12 +1,11 @@
 # FIGO - Federated Infrastructure for GPU Orchestration
 
-FIGO is a tool for managing LXD instances and GPU profiles. It provides
-commands to handle instances and GPU profiles, including showing
-information, starting and stopping instances, and managing GPU profiles.
+FIGO is a tool for managing federated testbed with CPUs and GPUs. It provides
+commands to handle instances (VMs and contariners) and GPU profiles. 
 
 # Usage
 
-FIGO provides various commands to manage LXD instances and GPU profiles.
+FIGO provides various commands to manage VM and container instances and GPU profiles.
 Below is a detailed guide on how to use these commands.
 
 ## General Usage
@@ -15,95 +14,272 @@ When the script is called with no command parameters, the general usage
 information is displayed.
 
 ``` bash
-python figo.py
+figo
 ```
 
 ## Commands
 
-### show
+**Description:**
 
-The `show` command provides information about instances and their
-profiles.
+This module provides a command-line interface (CLI) to manage a
+federated testbed with CPUs and GPUs. The <span
+class="title-ref">figo</span> program offers various commands and
+subcommands for managing instances, GPUs, profiles, users, and remotes
+in a federated environment.
 
-``` bash
-python figo.py show
-```
-
-If called with no subcommand, the subcommands are displayed.
-
-``` bash
-python figo.py show profile
-```
-
-Displays instance profiles.
+**Usage:**
 
 ``` bash
-python figo.py show gpu
+figo [command] [subcommand] [options]
 ```
 
-Displays GPU profiles.
+**Commands:**
 
-### stop
+-   <span class="title-ref">instance</span>
+-   <span class="title-ref">gpu</span>
+-   <span class="title-ref">profile</span>
+-   <span class="title-ref">user</span>
+-   <span class="title-ref">remote</span>
 
-Stops a specific instance.
+Each command has its own set of subcommands and options.
 
-``` bash
-python figo.py stop <instance_name>
-```
+**Command and Subcommand Details:**
 
-### start
+1.  **Instance Command**  
+    -   **Aliases:** <span class="title-ref">in</span>, <span
+        class="title-ref">i</span>
+    -   **Description:** Manage instances.
+    -   **Subcommands:**
+        1.  **list**  
+            -   **Description:** List instances, with an option to show
+                detailed profiles.
 
-Starts a specific instance.
+            -   **Syntax:** .. code-block:: bash figo instance list
+                \[scope\] \[-f \| --full\] \[-p project\] \[-r remote\]
 
-``` bash
-python figo.py start <instance_name>
-```
+            -   **Options:**  
+                -   \`-f, --full\`: Show full details of instance
+                    profiles.
+                -   \`scope\`: Define the scope in the format <span
+                    class="title-ref">remote:project</span> to limit the
+                    listing.
+                -   \`-p, --project\`: Specify the project name to list
+                    instances from.
+                -   \`-r, --remote\`: Specify the remote Incus server
+                    name.
 
-### gpu
+            -   **Conflict Handling:**  
+                -   If <span class="title-ref">scope</span> is provided and both the <span class="title-ref">--project</span> and <span class="title-ref">--remote</span> options are also provided, conflicts are checked:  
+                    -   If the <span class="title-ref">remote</span> in
+                        <span class="title-ref">scope</span> conflicts
+                        with the <span class="title-ref">--remote</span>
+                        option, an error is returned.
+                    -   If the <span class="title-ref">project</span> in
+                        <span class="title-ref">scope</span> conflicts
+                        with the <span
+                        class="title-ref">--project</span> option, an
+                        error is returned.
 
-Provides GPU-related information.
+        2.  **start**  
+            -   **Description:** Start a specific instance.
 
-``` bash
-python figo.py gpu
-```
+            -   **Syntax:** .. code-block:: bash figo instance start
+                instance_name
 
-If called with no subcommand, the subcommands are displayed.
+            -   **Options:**  
+                -   \`instance_name\`: Name of the instance to start.
 
-``` bash
-python figo.py gpu status
-```
+        3.  **stop**  
+            -   **Description:** Stop a specific instance.
 
-Shows the status of GPUs.
+            -   **Syntax:** .. code-block:: bash figo instance stop
+                instance_name
 
-``` bash
-python figo.py gpu list
-```
+            -   **Options:**  
+                -   \`instance_name\`: Name of the instance to stop.
 
-Lists all GPU profiles.
+        4.  **set_key**  
+            -   **Description:** Set a public key for a user in an
+                instance.
 
-### add_gpu
+            -   **Syntax:** .. code-block:: bash figo instance set_key
+                instance_name key_filename
 
-Adds a GPU profile to a specific instance.
+            -   **Options:**  
+                -   \`instance_name\`: Name of the instance.
+                -   \`key_filename\`: Filename of the public key on the
+                    host.
 
-``` bash
-python figo.py add_gpu <instance_name>
-```
+        5.  **set_ip**  
+            -   **Description:** Set a static IP address and gateway for
+                a stopped instance.
 
-### remove_gpu
+            -   **Syntax:** .. code-block:: bash figo instance set_ip
+                instance_name ip_address gw_address
 
-Removes a GPU profile from a specific instance.
+            -   **Options:**  
+                -   \`instance_name\`: Name of the instance.
+                -   \`ip_address\`: Static IP address to assign.
+                -   \`gw_address\`: Gateway address to assign.
 
-``` bash
-python figo.py remove_gpu <instance_name>
-```
+2.  **GPU Command**  
+    -   **Aliases:** <span class="title-ref">gp</span>, <span
+        class="title-ref">g</span>
+    -   **Description:** Manage GPUs.
+    -   **Subcommands:**
+        1.  **status**  
+            -   **Description:** Show GPU status.
+            -   **Syntax:** .. code-block:: bash figo gpu status
 
-### remove_gpu_all
+        2.  **list**  
+            -   **Description:** List GPU profiles.
+            -   **Syntax:** .. code-block:: bash figo gpu list
 
-Removes all GPU profiles from a specific instance.
+        3.  **add**  
+            -   **Description:** Add a GPU profile to a specific
+                instance.
 
-``` bash
-python figo.py remove_gpu_all <instance_name>
-```
+            -   **Syntax:** .. code-block:: bash figo gpu add
+                instance_name
+
+            -   **Options:**  
+                -   \`instance_name\`: Name of the instance to add the
+                    GPU profile to.
+
+        4.  **remove**  
+            -   **Description:** Remove GPU profiles from a specific
+                instance.
+
+            -   **Syntax:** .. code-block:: bash figo gpu remove
+                instance_name \[--all\]
+
+            -   **Options:**  
+                -   \`instance_name\`: Name of the instance to remove
+                    the GPU profile from.
+                -   \`--all\`: Remove all GPU profiles from the
+                    instance.
+
+3.  **Profile Command**  
+    -   **Aliases:** <span class="title-ref">pr</span>, <span
+        class="title-ref">p</span>
+    -   **Description:** Manage profiles.
+    -   **Subcommands:**
+        1.  **dump**  
+            -   **Description:** Dump profiles to <span
+                class="title-ref">.yaml</span> files.
+
+            -   **Syntax:** .. code-block:: bash figo profile dump \[-a
+                \| --all\] \[profile_name\]
+
+            -   **Options:**  
+                -   \`-a, --all\`: Dump all profiles to <span
+                    class="title-ref">.yaml</span> files.
+                -   \`profile_name\`: Name of the profile to dump.
+
+            -   **Notes:**  
+                -   If neither <span class="title-ref">--all</span> nor
+                    <span class="title-ref">profile_name</span> is
+                    provided, an error message is displayed.
+
+        2.  **list**  
+            -   **Description:** List profiles and associated instances.
+            -   **Syntax:** .. code-block:: bash figo profile list
+
+4.  **User Command**  
+    -   **Aliases:** <span class="title-ref">us</span>, <span
+        class="title-ref">u</span>
+    -   **Description:** Manage users.
+    -   **Subcommands:**
+        1.  **list**  
+            -   **Description:** List installed certificates, with an
+                option to show detailed information.
+
+            -   **Syntax:** .. code-block:: bash figo user list \[-f \|
+                --full\]
+
+            -   **Options:**  
+                -   \`-f, --full\`: Show full details of installed
+                    certificates.
+
+        2.  **add**  
+            -   **Description:** Add a new user to the system.
+
+            -   **Syntax:** .. code-block:: bash figo user add username
+                \[--cert cert_filename\]
+
+            -   **Options:**  
+                -   \`username\`: Username of the new user.
+                -   \`--cert\`: Path to the user's certificate file
+                    (optional).
+
+5.  **Remote Command**  
+    -   **Aliases:** <span class="title-ref">re</span>, <span
+        class="title-ref">r</span>
+    -   **Description:** Manage remotes.
+    -   **Subcommands:**
+        1.  **list**  
+            -   **Description:** List available remotes, with an option
+                to show detailed information.
+
+            -   **Syntax:** .. code-block:: bash figo remote list \[-f
+                \| --full\]
+
+            -   **Options:**  
+                -   \`-f, --full\`: Show full details of available
+                    remotes.
+
+        2.  **enroll**  
+            -   **Description:** Enroll a remote Incus server.
+
+            -   **Syntax:** .. code-block:: bash figo remote enroll
+                remote_server ip_address \[port\] \[user\]
+                \[cert_filename\] \[--loc_name loc_name\]
+
+            -   **Options:**  
+                -   \`remote_server\`: Name to assign to the remote
+                    server.
+                -   \`ip_address\`: IP address or domain name of the
+                    remote server.
+                -   \`port\`: Port of the remote server (default: 8443).
+                -   \`user\`: Username for SSH (default: ubuntu).
+                -   \`cert_filename\`: Client certificate file to
+                    transfer (default: <span
+                    class="title-ref">\~/.config/incus/client.cr</span>).
+                -   \`--loc_name\`: Name to use for local storage
+                    (default: main).
+
+**Autocompletion:**
+
+The CLI supports autocompletion using the <span
+class="title-ref">argcomplete</span> library, which must be installed
+and configured to enable this feature.
+
+**Examples:**
+
+1.  List all instances in a specific project:
+
+    ``` bash
+    figo instance list myproject
+    ```
+
+2.  Start an instance named \`test-instance\`:
+
+    ``` bash
+    figo instance start test-instance
+    ```
+
+3.  Add a GPU profile to an instance:
+
+    ``` bash
+    figo gpu add test-instance
+    ```
+
+4.  Enroll a remote Incus server:
+
+    ``` bash
+    figo remote enroll my-remote-server 192.168.1.10 8443 myuser ~/.config/incus/client.cr --loc_name backup
+    ```
+
 
 # Contributing
 
