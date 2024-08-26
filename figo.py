@@ -60,7 +60,7 @@ def switch_to_remote(remote_node):
     return True
 
 
-def run_incus_list(full=False):
+def run_incus_list():
     """Run the 'incus list -f json' command and return its output as JSON."""
     try:
         # Run 'incus list -f json' command to get the list of instances in JSON format
@@ -81,7 +81,7 @@ def run_incus_list(full=False):
         return None
 
 
-def print_instance_profiles(client, remote_node=None, full=False):
+def print_instance_profiles(remote_node=None):
     """Print profiles of all instances, either from the local or a remote Incus node."""
     if remote_node:
         # Attempt to switch to the remote node
@@ -89,7 +89,7 @@ def print_instance_profiles(client, remote_node=None, full=False):
             return  # Exit the function if switching fails
 
     # Get the instances from 'incus list -f json'
-    instances = run_incus_list(full=True if full else False)
+    instances = run_incus_list()
     if instances is None:
         return  # Exit if fetching the instances failed
 
@@ -105,7 +105,7 @@ def print_instance_profiles(client, remote_node=None, full=False):
         print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, profiles_str))
 
 
-def print_gpu_profiles(client, remote_node=None):
+def print_gpu_profiles(remote_node=None):
     """Print GPU profiles, either from the local or a remote Incus node."""
     RED = "\033[91m"
     GREEN = "\033[92m"
@@ -117,7 +117,7 @@ def print_gpu_profiles(client, remote_node=None):
             return  # Exit the function if switching fails
 
     # Get the instances from 'incus list -f json'
-    instances = run_incus_list(full=False)
+    instances = run_incus_list()
     if instances is None:
         return  # Exit if fetching the instances failed
 
@@ -138,6 +138,48 @@ def print_gpu_profiles(client, remote_node=None):
         colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
 
         print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, colored_profiles_str))
+
+def print_profiles(remote_node=None, full=False):
+    """Print profiles of all instances, either from the local or a remote Incus node.
+    If full is False, prints only GPU profiles with color coding.
+    """
+    RED = "\033[91m"
+    GREEN = "\033[92m"
+    RESET = "\033[0m"
+
+    if remote_node:
+        # Attempt to switch to the remote node
+        if not switch_to_remote(remote_node):
+            return  # Exit the function if switching fails
+
+    # Get the instances from 'incus list -f json'
+    instances = run_incus_list()
+    if instances is None:
+        return  # Exit if fetching the instances failed
+
+    # Determine the header and profile type based on the 'full' flag
+    if full:
+        print("{:<18} {:<4} {:<6} {:<30}".format("INSTANCE", "TYPE", "STATE", "PROFILES"))
+    else:
+        print("{:<18} {:<4} {:<6} {:<30}".format("INSTANCE", "TYPE", "STATE", "GPU PROFILES"))
+
+    # Iterate through instances and print their details in columns
+    for instance in instances:
+        name = instance.get("name", "Unknown")
+        instance_type = "vm" if instance.get("type") == "virtual-machine" else "cnt"
+        state = instance.get("status", "err")[:3].lower()  # Shorten the status
+
+        if full:
+            # Print all profiles
+            profiles_str = ", ".join(instance.get("profiles", []))
+            print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, profiles_str))
+        else:
+            # Print only GPU profiles with color coding based on state
+            gpu_profiles = [profile for profile in instance.get("profiles", []) if profile.startswith("gpu")]
+            profiles_str = ", ".join(gpu_profiles)
+            colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
+            print("{:<18} {:<4} {:<6} {:<30}".format(name, instance_type, state, colored_profiles_str))
+
 
 def stop_instance(instance_name, client):
     """Stop a specific instance."""
@@ -878,9 +920,11 @@ def main():
             else:
                  remote_node = None
             if args.full:
-                print_instance_profiles(client, remote_node)
+                #print_instance_profiles(remote_node)
+                print_profiles(remote_node, full=True)
             else:
-                print_gpu_profiles(client, remote_node) 
+                #print_gpu_profiles(remote_node) 
+                print_profiles(remote_node)
         elif args.instance_command == "start":
             start_instance(args.instance_name, client)
         elif args.instance_command == "stop":
