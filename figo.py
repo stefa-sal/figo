@@ -24,6 +24,9 @@ NAME_SERVER_IP_ADDR_2 = "8.8.8.8"
 PROFILE_DIR = "./profiles"
 USER_DIR = "./users"
 
+# NB: PROJECT_PREFIX cannot contain underscores
+PROJECT_PREFIX = "figo-" 
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -672,6 +675,8 @@ def enroll(remote_server, ip_address_port, cert_filename="~/.config/incus/client
         print(f"An error occurred while adding the remote server to the client configuration: {e}")
 
 def add_user(user_name, cert_file, client):
+    global PROJECT_PREFIX  # Declare the use of the global variable
+
     # Check if user already exists in the certificates
     for cert in client.certificates.all():
         if cert.name == user_name:
@@ -679,7 +684,7 @@ def add_user(user_name, cert_file, client):
             return
 
     # Check if the project already exists
-    project_name = f"prj-{user_name}"
+    project_name = f"{PROJECT_PREFIX}{user_name}"
     if project_name in [project.name for project in client.projects.all()]:
         print(f"Error: Project '{project_name}' already exists.")
         return
