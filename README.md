@@ -45,7 +45,7 @@ Each command has its own set of subcommands and options.
 
 **Command and Subcommand Details:**
 
-## figo instance
+### figo instance
 
 -   **Aliases:** <span class="title-ref">in</span>, <span
     class="title-ref">i</span>
@@ -133,7 +133,7 @@ Each command has its own set of subcommands and options.
             -   \`ip_address\`: Static IP address to assign.
             -   \`gw_address\`: Gateway address to assign.
 
-## figo gpu
+### figo gpu
 
 -   **Aliases:** <span class="title-ref">gp</span>, <span
     class="title-ref">g</span>
@@ -182,7 +182,7 @@ Each command has its own set of subcommands and options.
                 GPU profile from.
             -   \`--all\`: Remove all GPU profiles from the instance.
 
-## figo profile
+### figo profile
 
 -   **Aliases:** <span class="title-ref">pr</span>, <span
     class="title-ref">p</span>
@@ -216,7 +216,7 @@ Each command has its own set of subcommands and options.
             figo profile list
             ```
 
-## figo user
+### figo user
 
 -   **Aliases:** <span class="title-ref">us</span>, <span
     class="title-ref">u</span>
@@ -249,7 +249,7 @@ Each command has its own set of subcommands and options.
             -   \`--cert\`: Path to the user's certificate file
                 (optional).
 
-## figo remote
+### figo remote
 
 -   **Aliases:** <span class="title-ref">re</span>, <span
     class="title-ref">r</span>
@@ -288,13 +288,13 @@ Each command has its own set of subcommands and options.
             -   \`--loc_name\`: Name to use for local storage (default:
                 main).
 
-**Autocompletion:**
+## Autocompletion:
 
 The CLI supports autocompletion using the <span
 class="title-ref">argcomplete</span> library, which must be installed
 and configured to enable this feature.
 
-**Examples:**
+## Examples
 
 -   List all instances in a specific project:
 
