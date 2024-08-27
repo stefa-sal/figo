@@ -62,6 +62,19 @@ def switch_to_remote(remote_node):
         return False
     return True
 
+def get_projects(remote_node="local"): 
+    """Fetches and returns the list of projects as a JSON object."""
+    result = subprocess.run(['incus', 'project', 'list', f"{remote_node}:", '--format', 'json'], capture_output=True, text=True)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to retrieve projects: {result.stderr}")
+
+    try:
+        projects = json.loads(result.stdout)
+        return projects
+    except json.JSONDecodeError:
+        raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
+
 def get_instances(remote_node=None, project_name=None, full=False):
     """Get instances from the specified remote node and project and print their details."""
 
@@ -567,20 +580,6 @@ def get_incus_remotes():
         return remotes
     except json.JSONDecodeError:
         raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
-
-def get_projects(remote_node="local"): 
-    """Fetches and returns the list of projects as a JSON object."""
-    result = subprocess.run(['incus', 'project', 'list', f"{remote_node}:", '--format', 'json'], capture_output=True, text=True)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to retrieve projects: {result.stderr}")
-
-    try:
-        projects = json.loads(result.stdout)
-        return projects
-    except json.JSONDecodeError:
-        raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
-
 
 def list_remotes(client, full=False):
     """Lists the available Incus remotes and their addresses."""
