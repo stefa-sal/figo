@@ -35,11 +35,11 @@ figo [command] [subcommand] [options]
 
 **Commands:**
 
--   <span class="title-ref">instance</span>
--   <span class="title-ref">gpu</span>
--   <span class="title-ref">profile</span>
--   <span class="title-ref">user</span>
--   <span class="title-ref">remote</span>
+-   <span class="title-ref">figo instance</span>
+-   <span class="title-ref">figo gpu</span>
+-   <span class="title-ref">figo profile</span>
+-   <span class="title-ref">figo user</span>
+-   <span class="title-ref">figo remote</span>
 
 Each command has its own set of subcommands and options.
 
