@@ -52,18 +52,6 @@ def get_all_profiles(client):
     """Get all available profiles."""
     return [profile.name for profile in client.profiles.all()]
 
-def switch_to_remote(remote_node):
-    """Switch the Incus CLI to the specified remote node."""
-    try:
-        subprocess.run(["incus", "remote", "switch", remote_node], check=True)
-    except subprocess.CalledProcessError as e:
-        print(f"Error: Failed to switch to remote '{remote_node}'. {e}")
-        return False
-    except Exception as e:
-        print(f"Error: An unexpected error occurred while switching to remote '{remote_node}': {e}")
-        return False
-    return True
-
 def get_projects(remote_node="local"): 
     """Fetches and returns the list of projects as a JSON object."""
     result = subprocess.run(['incus', 'project', 'list', f"{remote_node}:", '--format', 'json'], capture_output=True, text=True)
