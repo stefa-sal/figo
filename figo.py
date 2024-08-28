@@ -17,6 +17,7 @@ import cryptography.hazmat.primitives.asymmetric.rsa
 import cryptography.x509
 import cryptography.x509.oid
 import datetime
+import shutil
 
 NET_PROFILE = "net-bridged-br-200-3"
 NAME_SERVER_IP_ADDR = "160.80.1.8"
@@ -682,18 +683,29 @@ def add_user(user_name, cert_file, client):
             print(f"Error: User '{user_name}' already exists.")
             return
 
-    # Check if the project already exists
+    # Construct the project name
     project_name = f"{PROJECT_PREFIX}{user_name}"
-    if project_name in [project.name for project in client.projects.all()]:
-        print(f"Error: Project '{project_name}' already exists.")
-        return
+
+    # Retrieve the list of remote servers
+    remotes = get_incus_remotes()
+
+    # Check if the project already exists in any remote server
+    for remote_node in remotes:
+        # Skipping remote node with protocol simplestreams
+        if remotes[remote_node]["Protocol"] == "simplestreams":
+            continue
+
+        projects = get_projects(remote_node=remote_node)
+        if project_name in [project['name'] for project in projects]:
+            print(f"Error: Project '{project_name}' already exists on remote '{remote_node}'.")
+            return
 
     directory = os.path.expanduser(USER_DIR)
-    # Ensure directory exists
+    # Ensure the directory exists
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-    # Determine whether to use the provided cert or generate a new key pair
+    # Determine whether to use the provided certificate or generate a new key pair
     if cert_file:
         # Use the provided certificate
         crt_file = cert_file
@@ -702,7 +714,8 @@ def add_user(user_name, cert_file, client):
         # Generate key pair and certificate
         crt_file = os.path.join(directory, f"{user_name}.crt")
         pfx_file = os.path.join(directory, f"{user_name}.pfx")
-        generate_key_pair(user_name, crt_file, pfx_file)
+        key_file = os.path.join(directory, f"{user_name}.key")
+        generate_key_pair(user_name, crt_file, key_file, pfx_file)
         print(f"Generated certificate and key pair for user: {user_name}")
 
     # Create project for the user
@@ -711,7 +724,7 @@ def add_user(user_name, cert_file, client):
     # Add the user certificate to Incus
     add_certificate_to_incus(user_name, crt_file, project_name)
 
-def generate_key_pair(user_name, crt_file, pfx_file):
+def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None):
     """Generate key pair (CRT and PFX files) for the user."""
     # Generate private key
     private_key = cryptography.hazmat.primitives.asymmetric.rsa.generate_private_key(
@@ -720,9 +733,11 @@ def generate_key_pair(user_name, crt_file, pfx_file):
         backend=cryptography.hazmat.backends.default_backend()
     )
 
-    # Generate a self-signed certificate
+    # Generate a self-signed certificate with more detailed subject and issuer information
     subject = issuer = cryptography.x509.Name([
-        cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.COMMON_NAME, user_name),
+        cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.COUNTRY_NAME, u"AU"),
+        cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.STATE_OR_PROVINCE_NAME, u"Some-State"),
+        cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.ORGANIZATION_NAME, u"Incus UI 10.200.3.2 (Browser Generated)"),
     ])
     
     certificate = cryptography.x509.CertificateBuilder() \
@@ -734,17 +749,77 @@ def generate_key_pair(user_name, crt_file, pfx_file):
         .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365)) \
         .sign(private_key, cryptography.hazmat.primitives.hashes.SHA256(), cryptography.hazmat.backends.default_backend())
 
+    # Write the private key to a file
+    with open(key_file, "wb") as key_out:
+        key_out.write(private_key.private_bytes(
+            cryptography.hazmat.primitives.serialization.Encoding.PEM,
+            cryptography.hazmat.primitives.serialization.PrivateFormat.TraditionalOpenSSL,
+            cryptography.hazmat.primitives.serialization.NoEncryption()
+        ))
+
     # Write certificate to file
     with open(crt_file, "wb") as crt:
         crt.write(certificate.public_bytes(cryptography.hazmat.primitives.serialization.Encoding.PEM))
 
-    # Write private key and certificate to a PFX file
-    with open(pfx_file, "wb") as pfx:
-        pfx.write(private_key.private_bytes(
-            cryptography.hazmat.primitives.serialization.Encoding.PEM,
-            cryptography.hazmat.primitives.serialization.PrivateFormat.PKCS8,
-            cryptography.hazmat.primitives.serialization.NoEncryption()
-        ))
+    # Use OpenSSL to create the PFX file with specific settings
+    # Note that the chosen algorithms are not the most secure, but are used for compatibility
+    # with older systems and software
+    # Anyway the add_friendly_name function that is called to add a friendly name to the PFX file
+    # will change the encryption algorithm to AES256 and the MAC algorithm to SHA256    
+    openssl_cmd = [
+        "openssl", "pkcs12", "-export",
+        "-out", pfx_file,
+        "-inkey", key_file,
+        "-in", crt_file,
+        "-certpbe", "PBE-SHA1-3DES",  # Use SHA1 and 3DES for encryption
+        "-keypbe", "PBE-SHA1-3DES",   # Use SHA1 and 3DES for the key
+        "-macalg", "sha1",             # Use SHA1 for MAC
+        "-iter", "2048"                # Set iteration count to 2048
+    ]
+
+
+    if pfx_password:
+        openssl_cmd.extend(["-passout", f"pass:{pfx_password}"])
+
+    subprocess.run(openssl_cmd, check=True)
+
+    add_friendly_name(pfx_file, f"figo-{user_name}", password=pfx_password)
+
+    print(f"PFX file generated: {pfx_file}")
+
+def add_friendly_name(pfx_file, friendly_name, password=None):
+    """Add a friendlyName attribute to the existing PFX file, overwriting the original."""
+    temp_pem_file = "temp.pem"
+    temp_pfx_file = "temp_with_friendlyname.pfx"
+
+    # Convert the existing PFX to PEM format
+    openssl_cmd = [
+        "openssl", "pkcs12", "-in", pfx_file, "-out", temp_pem_file, "-nodes"
+    ]
+    if password:
+        openssl_cmd.extend(["-password", f"pass:{password}"])
+    
+    subprocess.run(openssl_cmd, check=True)
+
+    # Prepare the command to create the new PFX file with friendlyName
+    openssl_cmd = [
+        "openssl", "pkcs12", "-export", "-in", temp_pem_file, "-out", temp_pfx_file,
+        "-name", friendly_name
+    ]
+    if password:
+        openssl_cmd.extend(["-passin", f"pass:{password}", "-passout", f"pass:{password}"])
+    else:
+        openssl_cmd.extend(["-passout", "pass:"])
+
+    subprocess.run(openssl_cmd, check=True)
+
+    # Replace the original PFX file with the new one
+    subprocess.run(["mv", temp_pfx_file, pfx_file])
+
+    # Clean up temporary files
+    subprocess.run(["rm", temp_pem_file])
+
+    print(f"PFX file with friendlyName updated: {pfx_file}")
 
 def create_project(client, project_name):
     try:
