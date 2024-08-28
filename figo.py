@@ -751,7 +751,16 @@ def list_instances_in_project(remote_node, project_name, remotes):
     print(f"Instances in project '{project_name}': {', '.join(instances_in_project)}")  
     return instances_in_project
 
-def delete_user(user_name, client):
+def delete_user(user_name, client, purge=False):
+    """
+    Delete a user from the system.
+
+    Parameters:
+    - username: Username of the user to delete
+    - client: pylxd.Client instance
+    - purge: If True, delete associated projects even if the user does not exist
+    """
+
     global PROJECT_PREFIX  # Declare the use of the global variable
 
     # Construct the project name associated with the user
@@ -768,8 +777,11 @@ def delete_user(user_name, client):
             break
 
     if not cert_exists:
-        print(f"Warning: User '{user_name}' does not exist.")
-        #return
+        if purge:
+            print(f"Warning: User '{user_name}' does not exist.")
+        else:
+            print(f"User '{user_name}' does not exist. No action taken.")
+            return
 
     # Retrieve the list of remote servers
     remotes = get_incus_remotes()
@@ -952,7 +964,10 @@ def main():
     instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
 
     # Add "list" subcommand under "instance"
-    instance_list_parser = instance_subparsers.add_parser("list", help="List instances (use -f or --full for more details)")
+    instance_list_parser = instance_subparsers.add_parser("list", 
+        help="List instances (use -f or --full for more details)",
+        aliases=["l"]
+    )
     instance_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of instance profiles")
     instance_list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project' to limit the listing")
     instance_list_parser.add_argument("-p", "--project", help="Project name to list instances from")
@@ -987,7 +1002,10 @@ def main():
 
     # Add GPU subcommands
     gpu_status_parser = gpu_subparsers.add_parser("status", help="Show GPU status")
-    gpu_list_parser = gpu_subparsers.add_parser("list", help="List GPU profiles")
+    gpu_list_parser = gpu_subparsers.add_parser("list", 
+        help="List GPU profiles",
+        aliases=["l"]
+    )
     add_gpu_parser = gpu_subparsers.add_parser("add", help="Add a GPU profile to a specific instance")
     add_gpu_parser.add_argument("instance_name", help="Name of the instance to add a GPU profile to")
     remove_gpu_parser = gpu_subparsers.add_parser("remove", help="Remove GPU profiles from a specific instance")
@@ -1008,7 +1026,10 @@ def main():
     dump_profiles_parser.add_argument("profile_name", nargs="?", help="Name of the profile to dump")
 
     # Add "list" subcommand under "profile"
-    profile_list_parser = profile_subparsers.add_parser("list", help="List profiles and associated instances")
+    profile_list_parser = profile_subparsers.add_parser(
+        "list", help="List profiles and associated instances",
+        aliases=["l"]
+    )
 
     # Manually add aliases for "profile"
     subparsers._name_parser_map["pr"] = profile_parser
@@ -1032,7 +1053,7 @@ def main():
         help="Add a new user to the system"
     )
     user_add_parser.add_argument("username", help="Username of the new user")
-    user_add_parser.add_argument("--cert", help="Path to the user's certificate file (optional)")
+    user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional)")
 
     # Add "delete" subcommand under "user" with aliases
     user_delete_parser = user_subparsers.add_parser(
@@ -1041,6 +1062,8 @@ def main():
         aliases=["del", "d"]
     )
     user_delete_parser.add_argument("username", help="Username of the user to delete")
+    user_delete_parser.add_argument("-p", "--purge", action="store_true", 
+                                    help="Delete associated projects even if the user does not exist")
 
     # Manually add aliases for "user"
     subparsers._name_parser_map["us"] = user_parser
@@ -1079,7 +1102,7 @@ def main():
     elif args.command in ["instance", "in", "i"]:
         if not args.instance_command:
             instance_parser.print_help()
-        elif args.instance_command == "list":
+        elif args.instance_command in ["list","l"]:
             remote_node = args.remote
             project_name = args.project
 
@@ -1126,7 +1149,7 @@ def main():
             gpu_parser.print_help()
         elif args.gpu_command == "status":
             show_gpu_status(client)
-        elif args.gpu_command == "list":
+        elif args.gpu_command in ["list","l"]:
             list_gpu_profiles(client)
         elif args.gpu_command == "add":
             add_gpu_profile(args.instance_name, client)
@@ -1145,17 +1168,18 @@ def main():
                 dump_profile(client, args.profile_name)
             else:
                 print("You must provide a profile name or use the --all option.")
-        elif args.profile_command == "list":
+        elif args.profile_command in ["list","l"]:
             list_profiles(client)
     elif args.command in ["user", "us", "u"]:
         if not args.user_command:
             user_parser.print_help()
-        elif args.user_command == "list":
+        elif args.user_command in ["list","l"]:
             list_users(client, full=args.full)
         elif args.user_command == "add":
             add_user(args.username, args.cert, client)
         elif args.user_command in ["delete", "del", "d"]:
-            delete_user(args.username, client)
+            # Pass the `purge` argument to `delete_user`
+            delete_user(args.username, client, purge=args.purge)  
     elif args.command in ["remote", "re", "r"]:
         if not args.remote_command:
             remote_parser.print_help()
