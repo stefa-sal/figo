@@ -1189,6 +1189,5 @@ def main():
             enroll(args.remote_server, args.ip_address, args.port, args.user, 
                           args.cert_filename, args.loc_name)
 
-
 if __name__ == "__main__":
     main()
