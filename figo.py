@@ -17,13 +17,14 @@ import cryptography.hazmat.primitives.asymmetric.rsa
 import cryptography.x509
 import cryptography.x509.oid
 import datetime
-import shutil
+from urllib.parse import urlparse
 
 NET_PROFILE = "net-bridged-br-200-3"
 NAME_SERVER_IP_ADDR = "160.80.1.8"
 NAME_SERVER_IP_ADDR_2 = "8.8.8.8"
 PROFILE_DIR = "./profiles"
 USER_DIR = "./users"
+CERTIFICATE_DIR = "./certs"
 
 # NB: PROJECT_PREFIX cannot contain underscores
 PROJECT_PREFIX = "figo-" 
@@ -724,6 +725,105 @@ def add_user(user_name, cert_file, client):
     # Add the user certificate to Incus
     add_certificate_to_incus(user_name, crt_file, project_name)
 
+def get_certificate_path(remote_node):
+    """
+    Retrieve the path to the self-signed certificate for the specified remote node.
+    """
+    return os.path.join(CERTIFICATE_DIR, f"{remote_node}.crt")
+
+def get_remote_address(remotes, remote_node):
+    """Retrieve the address of the remote node."""
+    remote_info = remotes.get(remote_node, None)
+    if remote_info and "Addr" in remote_info:
+        return remote_info["Addr"]
+    else:
+        raise ValueError(f"Error: Address not found for remote node '{remote_node}'")
+
+def list_instances_in_project(remote_node, project_name, remotes):
+    """List instances associated with a project on the specified remote node."""
+    
+    # Connect to the remote Incus server
+    print(f"Connecting to remote '{remote_node}'...")
+    if remote_node == "local":
+        remote_client = pylxd.Client()
+    else:
+        address = get_remote_address(remotes, remote_node)
+        cert_path = get_certificate_path(remote_node)
+
+        # Create a pylxd.Client instance with SSL verification
+        remote_client = pylxd.Client(endpoint=address, verify=cert_path)
+
+    # List all instances in the project
+    instances = remote_client.instances.all()
+
+    # Filter instances by the project name
+    instances_in_project = [
+        instance.name for instance in instances if instance.project == project_name
+    ]
+    print(f"Instances in project '{project_name}': {', '.join(instances_in_project)}")  
+    return instances_in_project
+
+def delete_user(user_name, client):
+    global PROJECT_PREFIX  # Declare the use of the global variable
+
+    # Construct the project name associated with the user
+    project_name = f"{PROJECT_PREFIX}{user_name}"
+
+    # Check if the user exists in the certificates
+    cert_exists = False
+    for cert in client.certificates.all():
+        if cert.name == user_name:
+            cert_exists = True
+            # Remove the user's certificate
+            cert.delete()
+            print(f"Certificate for user '{user_name}' has been removed.")
+            break
+
+    if not cert_exists:
+        print(f"Warning: User '{user_name}' does not exist.")
+        #return
+
+    # Retrieve the list of remote servers
+    remotes = get_incus_remotes()
+
+    project_found = False
+    for remote_node in remotes:
+        # Skipping remote node with protocol simplestreams
+        if remotes[remote_node]["Protocol"] == "simplestreams":
+            continue
+
+        projects = get_projects(remote_node=remote_node)
+        if project_name in [project['name'] for project in projects]:
+            project_found = True
+
+            # Check if there are any instances in the project
+            instances = list_instances_in_project(remote_node, project_name, remotes)
+            # Check if there are any profiles in the project
+            profiles = None
+            #profiles = list_profiles_in_project(remote_node, project_name)
+            # Check if there are any storage volumes in the project
+            storage_volumes = None
+            #storage_volumes = list_storage_volumes_in_project(remote_node, project_name)
+
+            # Warn if the project is not empty
+            if instances or profiles or storage_volumes:
+                print(f"Warning: Project '{project_name}' on remote '{remote_node}' is not empty.")
+                if instances:
+                    print(f"  - Contains {len(instances)} instance(s)")
+                if profiles:
+                    print(f"  - Contains {len(profiles)} profile(s)")
+                if storage_volumes:
+                    print(f"  - Contains {len(storage_volumes)} storage volume(s)")
+            else:
+                # Delete the empty project
+                #delete_project(remote_node, project_name)
+                print(f"Project '{project_name}' on remote '{remote_node}' has been deleted.")
+
+    if not project_found:
+        print(f"No associated project '{project_name}' found for user '{user_name}' on any remote.")
+    else:
+        print(f"User '{user_name}' has been deleted successfully.")
+
 def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None):
     """Generate key pair (CRT and PFX files) for the user."""
     # Generate private key
@@ -945,6 +1045,14 @@ def main():
     user_add_parser.add_argument("username", help="Username of the new user")
     user_add_parser.add_argument("--cert", help="Path to the user's certificate file (optional)")
 
+    # Add "delete" subcommand under "user" with aliases
+    user_delete_parser = user_subparsers.add_parser(
+        "delete", 
+        help="Delete an existing user from the system",
+        aliases=["del", "d"]
+    )
+    user_delete_parser.add_argument("username", help="Username of the user to delete")
+
     # Manually add aliases for "user"
     subparsers._name_parser_map["us"] = user_parser
     subparsers._name_parser_map["u"] = user_parser
@@ -1057,6 +1165,8 @@ def main():
             list_users(client, full=args.full)
         elif args.user_command == "add":
             add_user(args.username, args.cert, client)
+        elif args.user_command in ["delete", "del", "d"]:
+            delete_user(args.username, client)
     elif args.command in ["remote", "re", "r"]:
         if not args.remote_command:
             remote_parser.print_help()
@@ -1065,6 +1175,7 @@ def main():
         elif args.remote_command == "enroll":
             enroll(args.remote_server, args.ip_address, args.port, args.user, 
                           args.cert_filename, args.loc_name)
+
 
 if __name__ == "__main__":
     main()
