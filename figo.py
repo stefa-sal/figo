@@ -1033,7 +1033,8 @@ def main():
     # Add user subcommands
     user_list_parser = user_subparsers.add_parser(
         "list", 
-        help="List installed certificates (use -f or --full for more details)"
+        help="List installed certificates (use -f or --full for more details)",
+        aliases=["l"]
     )
     user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
 
