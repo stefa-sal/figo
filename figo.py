@@ -1046,9 +1046,8 @@ def main():
     instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
 
     # Add "list" subcommand under "instance"
-    instance_list_parser = instance_subparsers.add_parser("list", 
-        help="List instances (use -f or --full for more details)",
-        aliases=["l"]
+    instance_list_parser = instance_subparsers.add_parser("list", aliases=["l"],
+        help="List instances (use -f or --full for more details)"
     )
     instance_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of instance profiles")
     instance_list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project' to limit the listing")
@@ -1084,9 +1083,8 @@ def main():
 
     # Add GPU subcommands
     gpu_status_parser = gpu_subparsers.add_parser("status", help="Show GPU status")
-    gpu_list_parser = gpu_subparsers.add_parser("list", 
+    gpu_list_parser = gpu_subparsers.add_parser("list", aliases=["l"],
         help="List GPU profiles",
-        aliases=["l"]
     )
     add_gpu_parser = gpu_subparsers.add_parser("add", help="Add a GPU profile to a specific instance")
     add_gpu_parser.add_argument("instance_name", help="Name of the instance to add a GPU profile to")
@@ -1108,9 +1106,8 @@ def main():
     dump_profiles_parser.add_argument("profile_name", nargs="?", help="Name of the profile to dump")
 
     # Add "list" subcommand under "profile"
-    profile_list_parser = profile_subparsers.add_parser(
-        "list", help="List profiles and associated instances",
-        aliases=["l"]
+    profile_list_parser = profile_subparsers.add_parser("list",aliases=["l"], 
+        help="List profiles and associated instances"
     )
 
     # Manually add aliases for "profile"
@@ -1122,16 +1119,14 @@ def main():
     user_subparsers = user_parser.add_subparsers(dest="user_command")
 
     # Add user subcommands
-    user_list_parser = user_subparsers.add_parser(
-        "list", 
-        help="List installed certificates (use -f or --full for more details)",
-        aliases=["l"]
+    user_list_parser = user_subparsers.add_parser("list", aliases=["l"], 
+        help="List installed certificates (use -f or --full for more details)"
     )
     user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
 
     # Modify "add" subcommand under "user" to make "key_filename" optional and add "--cert" option
     user_add_parser = user_subparsers.add_parser(
-        "add", 
+        "add", aliases=["a"],
         help="Add a new user to the system"
     )
     user_add_parser.add_argument("username", help="Username of the new user")
@@ -1139,9 +1134,8 @@ def main():
 
     # Add "delete" subcommand under "user" with aliases
     user_delete_parser = user_subparsers.add_parser(
-        "delete", 
-        help="Delete an existing user from the system",
-        aliases=["del", "d"]
+        "delete", aliases=["del", "d"],
+        help="Delete an existing user from the system"
     )
     user_delete_parser.add_argument("username", help="Username of the user to delete")
     user_delete_parser.add_argument("-p", "--purge", action="store_true", 
@@ -1157,7 +1151,7 @@ def main():
 
     # Add remote subcommands
     remote_list_parser = remote_subparsers.add_parser(
-        "list", 
+        "list", aliases=["l"],
         help="List available remotes (use -f or --full for more details)"
     )
     remote_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of available remotes")
@@ -1233,7 +1227,7 @@ def main():
             show_gpu_status(client)
         elif args.gpu_command in ["list","l"]:
             list_gpu_profiles(client)
-        elif args.gpu_command == "add":
+        elif args.gpu_command in ["add", "a"]:
             add_gpu_profile(args.instance_name, client)
         elif args.gpu_command == "remove":
             if args.all:
@@ -1257,7 +1251,7 @@ def main():
             user_parser.print_help()
         elif args.user_command in ["list","l"]:
             list_users(client, full=args.full)
-        elif args.user_command == "add":
+        elif args.user_command in ["add", "a"]:
             add_user(args.username, args.cert, client)
         elif args.user_command in ["delete", "del", "d"]:
             # Pass the `purge` argument to `delete_user`
@@ -1265,7 +1259,7 @@ def main():
     elif args.command in ["remote", "re", "r"]:
         if not args.remote_command:
             remote_parser.print_help()
-        elif args.remote_command == "list":
+        elif args.remote_command in ["list","l"]:
             list_remotes(client, full=args.full)
         elif args.remote_command == "enroll":
             enroll(args.remote_server, args.ip_address, args.port, args.user, 
