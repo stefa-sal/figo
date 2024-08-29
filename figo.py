@@ -718,7 +718,11 @@ def add_user(user_name, cert_file, client):
     create_project(client, project_name)
 
     # Add the user certificate to Incus
-    add_certificate_to_incus(user_name, crt_file, project_name)
+    certificate_added = add_certificate_to_incus(user_name, crt_file, project_name)
+
+    if not certificate_added:
+        delete_project(client, 'local', project_name)
+        return
 
 def get_certificate_path(remote_node):
     """
@@ -783,7 +787,7 @@ def list_storage_volumes_in_project(remote_client, project_name):
 
     return storage_volumes_in_project
 
-def delete_project(remote_client, project_name):
+def delete_project(remote_client, remote_node, project_name):
     """
     Delete a project on a specific remote node.
 
@@ -794,10 +798,10 @@ def delete_project(remote_client, project_name):
     try:
         # Retrieve the project from the remote node
         project = remote_client.projects.get(project_name)
+        print(f"Deleted project '{project_name}' on remote '{remote_node}'")
         
         # Delete the project
         project.delete()
-        print(f"Project '{project_name}' has been successfully deleted.")
 
     except pylxd.exceptions.NotFound:
         print(f"Project '{project_name}' not found on the remote node. No action taken.")
@@ -883,8 +887,7 @@ def delete_user(user_name, client, purge=False):
                     print(f"  - Contains {len(storage_volumes)} storage volume(s)")
             else:
                 # Delete the empty project
-                delete_project(remote_client, project_name)
-                print(f"Project '{project_name}' on remote '{remote_node}' has been deleted.")
+                delete_project(remote_client, remote_node, project_name)
 
     if not project_found:
         print(f"No associated project '{project_name}' found for user '{user_name}' on any remote.")
@@ -1006,18 +1009,30 @@ def create_project(client, project_name):
 
 
 def add_certificate_to_incus(user_name, crt_file, project_name):
-    """Add user certificate to Incus with restricted access to the project."""
+    """Add user certificate to Incus with restricted access to the project.
+    
+    returns True if the certificate is added successfully, False otherwise.
+    """
     try:
         # Execute the incus command to add the certificate
         subprocess.run([
-            "incus", "config", "trust", "add-certificate", crt_file, 
+            "incus", "config", "trust", "add-certificate", f"{crt_file}", 
             "--restricted", 
             f"--projects={project_name}", 
             f"--name={user_name}"
-        ], check=True)
+        ], capture_output=True, text=True, check=True)
         print(f"User '{user_name}' certificate added to Incus with project '{project_name}'.")
+        return True
+
     except subprocess.CalledProcessError as e:
-        print(f"Failed to add certificate to Incus: {e}")
+        # Print the exact error message from the command's stderr
+        print(f"Failed to add certificate to Incus: {e.stderr.strip()}")
+        return False
+
+    except Exception as e:
+        print(f"Error: An unexpected error occurred : {e}")
+        return False
+
 
 def main():
     parser = argparse.ArgumentParser(
