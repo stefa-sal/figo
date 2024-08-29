@@ -663,7 +663,7 @@ def enroll(remote_server, ip_address_port, cert_filename="~/.config/incus/client
     except subprocess.CalledProcessError as e:
         print(f"An error occurred while adding the remote server to the client configuration: {e}")
 
-def add_user(user_name, cert_file, client):
+def add_user(user_name, cert_file, client, admin=False):
     global PROJECT_PREFIX  # Declare the use of the global variable
 
     # Check if user already exists in the certificates
@@ -717,12 +717,13 @@ def add_user(user_name, cert_file, client):
         print(f"Generated certificate and key pair for user: {user_name}")
 
     # Create project for the user
-    create_project(client, project_name)
+    if not admin:
+        create_project(client, project_name)
 
     # Add the user certificate to Incus
-    certificate_added = add_certificate_to_incus(user_name, crt_file, project_name)
+    certificate_added = add_certificate_to_incus(user_name, crt_file, project_name, admin=admin)
 
-    if not certificate_added:
+    if not admin and not certificate_added:
         delete_project(client, 'local', project_name)
         return
 
@@ -909,7 +910,7 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
     Returns:
     - True if the key pair was generated successfully, False otherwise
     """
-    
+
     try:
         # Generate private key
         private_key = cryptography.hazmat.primitives.asymmetric.rsa.generate_private_key(
@@ -1051,19 +1052,28 @@ def create_project(client, project_name):
         print(f"Error creating project '{project_name}': {str(e)}")
 
 
-def add_certificate_to_incus(user_name, crt_file, project_name):
-    """Add user certificate to Incus with restricted access to the project.
+def add_certificate_to_incus(user_name, crt_file, project_name, admin=False):
+    """Add user certificate to Incus 
     
+    If the user is an admin, the certificate is added without any restrictions.
+    If the user is not an admin, the certificate is restricted to the specified project.
+
     returns True if the certificate is added successfully, False otherwise.
     """
     try:
         # Execute the incus command to add the certificate
-        subprocess.run([
-            "incus", "config", "trust", "add-certificate", f"{crt_file}", 
-            "--restricted", 
-            f"--projects={project_name}", 
-            f"--name={user_name}"
-        ], capture_output=True, text=True, check=True)
+        if admin:
+            subprocess.run([
+                "incus", "config", "trust", "add-certificate", f"{crt_file}", 
+                f"--name={user_name}"
+            ], capture_output=True, text=True, check=True)
+        else:
+            subprocess.run([
+                "incus", "config", "trust", "add-certificate", f"{crt_file}", 
+                "--restricted", 
+                f"--projects={project_name}", 
+                f"--name={user_name}"
+            ], capture_output=True, text=True, check=True)
         print(f"User '{user_name}' certificate added to Incus with project '{project_name}'.")
         return True
 
@@ -1075,7 +1085,6 @@ def add_certificate_to_incus(user_name, crt_file, project_name):
     except Exception as e:
         print(f"Error: An unexpected error occurred : {e}")
         return False
-
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1167,13 +1176,14 @@ def main():
     )
     user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
 
-    # Modify "add" subcommand under "user" to make "key_filename" optional and add "--cert" option
+    # Modify "add" subcommand under "user" to make "key_filename" optional, add "--cert" option, and add "--admin" option
     user_add_parser = user_subparsers.add_parser(
         "add", aliases=["a"],
         help="Add a new user to the system"
     )
     user_add_parser.add_argument("username", help="Username of the new user")
     user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional)")
+    user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
 
     # Add "delete" subcommand under "user" with aliases
     user_delete_parser = user_subparsers.add_parser(
@@ -1295,7 +1305,7 @@ def main():
         elif args.user_command in ["list","l"]:
             list_users(client, full=args.full)
         elif args.user_command in ["add", "a"]:
-            add_user(args.username, args.cert, client)
+            add_user(args.username, args.cert, client, admin=args.admin)
         elif args.user_command in ["delete", "del", "d"]:
             # Pass the `purge` argument to `delete_user`
             delete_user(args.username, client, purge=args.purge)  
