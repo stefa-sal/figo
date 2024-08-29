@@ -697,7 +697,14 @@ def add_user(user_name, cert_file, client):
     # Determine whether to use the provided certificate or generate a new key pair
     if cert_file:
         # Use the provided certificate
-        crt_file = cert_file
+        # the certificate file is in the folder USER_DIR
+        # the certificate file should be named as user_name.crt
+        # get the certificate file path
+        crt_file = os.path.join(directory, cert_file)
+        if not os.path.exists(crt_file):
+            print(f"Error: Certificate file '{crt_file}' not found.")
+            return
+        
         print(f"Using provided certificate: {crt_file}")
     else:
         # Generate key pair and certificate
@@ -727,29 +734,79 @@ def get_remote_address(remotes, remote_node):
     else:
         raise ValueError(f"Error: Address not found for remote node '{remote_node}'")
 
-def list_instances_in_project(remote_node, project_name, remotes):
-    """List instances associated with a project on the specified remote node."""
+def list_instances_in_project(remote_client, project_name):
+    """List instances associated with a project on a specific remote node."""
     
-    # Connect to the remote Incus server
-    print(f"Connecting to remote '{remote_node}'...")
-    if remote_node == "local":
-        remote_client = pylxd.Client()
-    else:
-        address = get_remote_address(remotes, remote_node)
-        cert_path = get_certificate_path(remote_node)
-
-        # Create a pylxd.Client instance with SSL verification
-        remote_client = pylxd.Client(endpoint=address, verify=cert_path)
-
-    # List all instances in the project
+    # List all instances in the remote node
     instances = remote_client.instances.all()
 
     # Filter instances by the project name
     instances_in_project = [
-        instance.name for instance in instances if instance.project == project_name
+        instance.name for instance in instances if instance.config.get("volatile.project") == project_name
     ]
-    print(f"Instances in project '{project_name}': {', '.join(instances_in_project)}")  
     return instances_in_project
+
+def list_profiles_in_project(remote_client, project_name):
+    """List profiles associated with a project on a specific remote node."""
+
+    profiles_in_project = []
+
+    # Retrieve all profiles on the remote node
+    profiles = remote_client.profiles.all()
+
+    for profile in profiles:
+        # Check if the profile is associated with the project
+        if profile.config.get("volatile.project") == project_name:
+            profiles_in_project.append(profile.name)
+
+    return profiles_in_project
+
+def list_storage_volumes_in_project(remote_client, project_name):
+    """List storage volumes associated with a project on a specific remote node."""
+
+    storage_volumes_in_project = []
+
+    # Iterate over all storage pools on the remote client
+    for pool in remote_client.storage_pools.all():
+        try:
+            # Retrieve all volumes in the storage pool
+            volumes = pool.volumes.all()
+        except pylxd.exceptions.NotFound:
+            # Handle the case where no volumes are found in the pool
+            print(f"No volumes found in storage pool '{pool.name}'.")
+            continue
+
+        # Filter volumes by project name in their configuration
+        for volume in volumes:
+            if volume.config.get("volatile.project") == project_name:
+                storage_volumes_in_project.append(volume.name)
+
+    return storage_volumes_in_project
+
+def delete_project(remote_client, project_name):
+    """
+    Delete a project on a specific remote node.
+
+    Parameters:
+    - remote_client: pylxd.Client instance connected to the remote node
+    - project_name: Name of the project to delete
+    """
+    try:
+        # Retrieve the project from the remote node
+        project = remote_client.projects.get(project_name)
+        
+        # Delete the project
+        project.delete()
+        print(f"Project '{project_name}' has been successfully deleted.")
+
+    except pylxd.exceptions.NotFound:
+        print(f"Project '{project_name}' not found on the remote node. No action taken.")
+        
+    except pylxd.exceptions.LXDAPIException as e:
+        print(f"Failed to delete project '{project_name}': {e}")
+    
+    except Exception as e:
+        print(f"An unexpected error occurred while deleting project '{project_name}': {e}")
 
 def delete_user(user_name, client, purge=False):
     """
@@ -792,18 +849,28 @@ def delete_user(user_name, client, purge=False):
         if remotes[remote_node]["Protocol"] == "simplestreams":
             continue
 
+        # Check if the project exists on the remote node
         projects = get_projects(remote_node=remote_node)
         if project_name in [project['name'] for project in projects]:
             project_found = True
 
+            # Connect a client to the remote Incus server
+            if remote_node == "local":
+                remote_client = pylxd.Client()
+            else:
+                address = get_remote_address(remotes, remote_node)
+                cert_path = get_certificate_path(remote_node)
+
+                # Create a pylxd.Client instance with SSL verification
+                remote_client = pylxd.Client(endpoint=address, verify=cert_path)
+
             # Check if there are any instances in the project
-            instances = list_instances_in_project(remote_node, project_name, remotes)
+            instances = list_instances_in_project(remote_client, project_name)
             # Check if there are any profiles in the project
-            profiles = None
-            #profiles = list_profiles_in_project(remote_node, project_name)
+            profiles = list_profiles_in_project(remote_client, project_name)
             # Check if there are any storage volumes in the project
             storage_volumes = None
-            #storage_volumes = list_storage_volumes_in_project(remote_node, project_name)
+            #storage_volumes = list_storage_volumes_in_project(remote_client, project_name)
 
             # Warn if the project is not empty
             if instances or profiles or storage_volumes:
@@ -816,7 +883,7 @@ def delete_user(user_name, client, purge=False):
                     print(f"  - Contains {len(storage_volumes)} storage volume(s)")
             else:
                 # Delete the empty project
-                #delete_project(remote_node, project_name)
+                delete_project(remote_client, project_name)
                 print(f"Project '{project_name}' on remote '{remote_node}' has been deleted.")
 
     if not project_found:
