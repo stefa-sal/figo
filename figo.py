@@ -704,14 +704,16 @@ def add_user(user_name, cert_file, client):
         if not os.path.exists(crt_file):
             print(f"Error: Certificate file '{crt_file}' not found.")
             return
-        
         print(f"Using provided certificate: {crt_file}")
+
     else:
         # Generate key pair and certificate
         crt_file = os.path.join(directory, f"{user_name}.crt")
         pfx_file = os.path.join(directory, f"{user_name}.pfx")
         key_file = os.path.join(directory, f"{user_name}.key")
-        generate_key_pair(user_name, crt_file, key_file, pfx_file)
+        if not generate_key_pair(user_name, crt_file, key_file, pfx_file):
+            print(f"Failed to generate key pair and certificate for user: {user_name}") 
+            return
         print(f"Generated certificate and key pair for user: {user_name}")
 
     # Create project for the user
@@ -895,67 +897,108 @@ def delete_user(user_name, client, purge=False):
         print(f"User '{user_name}' has been deleted successfully.")
 
 def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None):
-    """Generate key pair (CRT and PFX files) for the user."""
-    # Generate private key
-    private_key = cryptography.hazmat.primitives.asymmetric.rsa.generate_private_key(
-        public_exponent=65537,
-        key_size=2048,
-        backend=cryptography.hazmat.backends.default_backend()
-    )
+    """Generate key pair (CRT and PFX files) for the user.
 
-    # Generate a self-signed certificate with more detailed subject and issuer information
-    subject = issuer = cryptography.x509.Name([
-        cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.COUNTRY_NAME, u"AU"),
-        cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.STATE_OR_PROVINCE_NAME, u"Some-State"),
-        cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.ORGANIZATION_NAME, u"Incus UI 10.200.3.2 (Browser Generated)"),
-    ])
+    Parameters:
+    - user_name: Name of the user
+    - crt_file: Path to the certificate file
+    - key_file: Path to the private key file (PEM format) temporary file
+    - pfx_file: Path to the PFX file
+    - pfx_password: Password for the PFX file (optional)
+
+    Returns:
+    - True if the key pair was generated successfully, False otherwise
+    """
     
-    certificate = cryptography.x509.CertificateBuilder() \
-        .subject_name(subject) \
-        .issuer_name(issuer) \
-        .public_key(private_key.public_key()) \
-        .serial_number(cryptography.x509.random_serial_number()) \
-        .not_valid_before(datetime.datetime.utcnow()) \
-        .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365)) \
-        .sign(private_key, cryptography.hazmat.primitives.hashes.SHA256(), cryptography.hazmat.backends.default_backend())
+    try:
+        # Generate private key
+        private_key = cryptography.hazmat.primitives.asymmetric.rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=cryptography.hazmat.backends.default_backend()
+        )
 
-    # Write the private key to a file
-    with open(key_file, "wb") as key_out:
-        key_out.write(private_key.private_bytes(
-            cryptography.hazmat.primitives.serialization.Encoding.PEM,
-            cryptography.hazmat.primitives.serialization.PrivateFormat.TraditionalOpenSSL,
-            cryptography.hazmat.primitives.serialization.NoEncryption()
-        ))
+        # Generate a self-signed certificate with detailed subject and issuer information
+        subject = issuer = cryptography.x509.Name([
+            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.COUNTRY_NAME, u"AU"),
+            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.STATE_OR_PROVINCE_NAME, u"Some-State"),
+            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.ORGANIZATION_NAME, u"Incus UI 10.200.3.2 (Browser Generated)"),
+        ])
 
-    # Write certificate to file
-    with open(crt_file, "wb") as crt:
-        crt.write(certificate.public_bytes(cryptography.hazmat.primitives.serialization.Encoding.PEM))
+        # Set the certificate validity to 2 years
+        certificate = cryptography.x509.CertificateBuilder() \
+            .subject_name(subject) \
+            .issuer_name(issuer) \
+            .public_key(private_key.public_key()) \
+            .serial_number(cryptography.x509.random_serial_number()) \
+            .not_valid_before(datetime.datetime.utcnow()) \
+            .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=2*365)) \
+            .sign(private_key, cryptography.hazmat.primitives.hashes.SHA256(), cryptography.hazmat.backends.default_backend())
 
-    # Use OpenSSL to create the PFX file with specific settings
-    # Note that the chosen algorithms are not the most secure, but are used for compatibility
-    # with older systems and software
-    # Anyway the add_friendly_name function that is called to add a friendly name to the PFX file
-    # will change the encryption algorithm to AES256 and the MAC algorithm to SHA256    
-    openssl_cmd = [
-        "openssl", "pkcs12", "-export",
-        "-out", pfx_file,
-        "-inkey", key_file,
-        "-in", crt_file,
-        "-certpbe", "PBE-SHA1-3DES",  # Use SHA1 and 3DES for encryption
-        "-keypbe", "PBE-SHA1-3DES",   # Use SHA1 and 3DES for the key
-        "-macalg", "sha1",             # Use SHA1 for MAC
-        "-iter", "2048"                # Set iteration count to 2048
-    ]
+        # Write the private key to a file
+        try:
+            with open(key_file, "wb") as key_out:
+                key_out.write(private_key.private_bytes(
+                    cryptography.hazmat.primitives.serialization.Encoding.PEM,
+                    cryptography.hazmat.primitives.serialization.PrivateFormat.TraditionalOpenSSL,
+                    cryptography.hazmat.primitives.serialization.NoEncryption()
+                ))
+        except IOError as e:
+            print(f"Failed to write private key to {key_file}: {e}")
+            return False
 
+        # Write the certificate to a file
+        try:
+            with open(crt_file, "wb") as crt:
+                crt.write(certificate.public_bytes(cryptography.hazmat.primitives.serialization.Encoding.PEM))
+        except IOError as e:
+            print(f"Failed to write certificate to {crt_file}: {e}")
+            return False
 
-    if pfx_password:
-        openssl_cmd.extend(["-passout", f"pass:{pfx_password}"])
+        # Use OpenSSL to create the PFX file with specific settings
+        openssl_cmd = [
+            "openssl", "pkcs12", "-export",
+            "-out", pfx_file,
+            "-inkey", key_file,
+            "-in", crt_file,
+            "-certpbe", "PBE-SHA1-3DES",  # Use SHA1 and 3DES for encryption
+            "-keypbe", "PBE-SHA1-3DES",   # Use SHA1 and 3DES for the key
+            "-macalg", "sha1",             # Use SHA1 for MAC
+            "-iter", "2048"                # Set iteration count to 2048
+        ]
 
-    subprocess.run(openssl_cmd, check=True)
+        if pfx_password:
+            openssl_cmd.extend(["-passout", f"pass:{pfx_password}"])
 
-    add_friendly_name(pfx_file, f"figo-{user_name}", password=pfx_password)
+        try:
+            subprocess.run(openssl_cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"OpenSSL command failed: {e}")
+            return False
+        except FileNotFoundError:
+            print("OpenSSL is not installed or not found in the system's PATH.")
+            return False
 
-    print(f"PFX file generated: {pfx_file}")
+        # Delete the key file
+        try:
+            subprocess.run(["rm", key_file], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to delete key file {key_file}: {e}")
+            return False
+
+        # Add a friendly name to the PFX file
+        try:
+            add_friendly_name(pfx_file, f"figo-{user_name}", password=pfx_password)
+        except Exception as e:
+            print(f"Failed to add a friendly name to the PFX file {pfx_file}: {e}")
+            return False
+
+        print(f"PFX file generated: {pfx_file}")
+        return True
+
+    except Exception as e:
+        print(f"An error occurred while generating the key pair: {e}")
+        return False
 
 def add_friendly_name(pfx_file, friendly_name, password=None):
     """Add a friendlyName attribute to the existing PFX file, overwriting the original."""
