@@ -26,8 +26,10 @@ PROFILE_DIR = "./profiles"
 USER_DIR = "./users"
 CERTIFICATE_DIR = "./certs"
 
+FIGO_PREFIX="figo-"  
+
 # NB: PROJECT_PREFIX cannot contain underscores
-PROJECT_PREFIX = "figo-" 
+PROJECT_PREFIX = FIGO_PREFIX 
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -921,9 +923,10 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
 
         # Generate a self-signed certificate with detailed subject and issuer information
         subject = issuer = cryptography.x509.Name([
-            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.COUNTRY_NAME, u"AU"),
-            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.STATE_OR_PROVINCE_NAME, u"Some-State"),
-            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.ORGANIZATION_NAME, u"Incus UI 10.200.3.2 (Browser Generated)"),
+            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.COUNTRY_NAME, u"IT"),
+            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.STATE_OR_PROVINCE_NAME, u"RM"),
+            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.ORGANIZATION_NAME, u"Restart"),
+            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.COMMON_NAME, f"{FIGO_PREFIX}{user_name}")  # Add the user_name as the Common Name (CN)
         ])
 
         # Set the certificate validity to 2 years
@@ -989,7 +992,7 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
 
         # Add a friendly name to the PFX file
         try:
-            add_friendly_name(pfx_file, f"figo-{user_name}", password=pfx_password)
+            add_friendly_name(pfx_file, f"{FIGO_PREFIX}{user_name}", password=pfx_password)
         except Exception as e:
             print(f"Failed to add a friendly name to the PFX file {pfx_file}: {e}")
             return False
@@ -1067,6 +1070,7 @@ def add_certificate_to_incus(user_name, crt_file, project_name, admin=False):
                 "incus", "config", "trust", "add-certificate", f"{crt_file}", 
                 f"--name={user_name}"
             ], capture_output=True, text=True, check=True)
+            print(f"Admin certificate '{user_name}' added to Incus.")
         else:
             subprocess.run([
                 "incus", "config", "trust", "add-certificate", f"{crt_file}", 
@@ -1074,7 +1078,7 @@ def add_certificate_to_incus(user_name, crt_file, project_name, admin=False):
                 f"--projects={project_name}", 
                 f"--name={user_name}"
             ], capture_output=True, text=True, check=True)
-        print(f"User '{user_name}' certificate added to Incus with project '{project_name}'.")
+            print(f"User '{user_name}' certificate added to Incus with project '{project_name}'.")
         return True
 
     except subprocess.CalledProcessError as e:
