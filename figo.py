@@ -665,7 +665,7 @@ def enroll(remote_server, ip_address_port, cert_filename="~/.config/incus/client
     except subprocess.CalledProcessError as e:
         print(f"An error occurred while adding the remote server to the client configuration: {e}")
 
-def add_user(user_name, cert_file, client, admin=False):
+def add_user(user_name, cert_file, client, admin=False, project=None):
     global PROJECT_PREFIX  # Declare the use of the global variable
 
     # Check if user already exists in the certificates
@@ -687,9 +687,20 @@ def add_user(user_name, cert_file, client, admin=False):
             continue
 
         projects = get_projects(remote_node=remote_node)
-        if project_name in [project['name'] for project in projects]:
+        if project_name in [myproject['name'] for myproject in projects]:
             print(f"Error: Project '{project_name}' already exists on remote '{remote_node}'.")
             return
+
+    if project:
+        # Check if the project already exists on the local server
+        projects = get_projects(remote_node="local")
+        found = False
+        if project in [myproject['name'] for myproject in projects]:
+            found = True
+        if not found:
+            print(f"Error: Project '{project}' not found on the local server.")
+            return
+        project_name = project
 
     directory = os.path.expanduser(USER_DIR)
     # Ensure the directory exists
@@ -719,13 +730,18 @@ def add_user(user_name, cert_file, client, admin=False):
         print(f"Generated certificate and key pair for user: {user_name}")
 
     # Create project for the user
-    if not admin:
-        create_project(client, project_name)
+    project_created = False
+    if not admin and project==None:
+        project_created = create_project(client, project_name)
+
+    if not project_created:
+        print(f"Error: Failed to create project '{project_name}', no certificate added.")
+        return
 
     # Add the user certificate to Incus
     certificate_added = add_certificate_to_incus(user_name, crt_file, project_name, admin=admin)
 
-    if not admin and not certificate_added:
+    if not admin and project==None and not certificate_added:
         delete_project(client, 'local', project_name)
         return
 
@@ -791,6 +807,42 @@ def list_storage_volumes_in_project(remote_client, project_name):
                 storage_volumes_in_project.append(volume.name)
 
     return storage_volumes_in_project
+
+def grant_user_access(username, projectname, client):
+    try:
+        # Step 1: Retrieve the certificate by username
+        certificates = client.certificates.all()
+        user_cert = None
+        for cert in certificates:
+            if cert.name == username:
+                user_cert = cert
+                break
+        
+        if not user_cert:
+            print(f"User '{username}' not found.")
+            return
+
+        # Step 3: Fetch the user's configuration
+        try:
+            # Assuming the 'projects' attribute exists on 'user_cert'
+            projects = user_cert.projects or []  # Get current projects or initialize an empty list
+            
+            # Step 4: Modify the user's configuration to add the project
+            if projectname not in projects:
+                projects.append(projectname)
+                user_cert.projects = projects
+
+                # Step 5: Save the updated user configuration
+                user_cert.save()  # Save the updated configuration
+                print(f"User '{username}' has been granted access to project '{projectname}'.")
+            else:
+                print(f"User '{username}' already has access to project '{projectname}'.")
+        except Exception as e:
+            print(f"Error updating user configuration: {e}")
+            return
+
+    except Exception as e:
+        print(f"Error retrieving certificate for user '{username}': {e}")
 
 def delete_project(remote_client, remote_node, project_name):
     """
@@ -1062,9 +1114,14 @@ def create_project(client, project_name):
         # Creating the project using the correct format
         client.api.projects.post(json=project_data)
         print(f"Project '{project_name}' created successfully.")
+        return True
 
     except pylxd.exceptions.LXDAPIException as e:
         print(f"Error creating project '{project_name}': {str(e)}")
+        return False
+    except Exception as e:
+        print(f"An unexpected error occurred creating project '{project_name}': {str(e)}")
+        return False
 
 
 def add_certificate_to_incus(user_name, crt_file, project_name, admin=False):
@@ -1174,7 +1231,7 @@ def main():
     dump_profiles_parser.add_argument("profile_name", nargs="?", help="Name of the profile to dump")
 
     # Add "list" subcommand under "profile"
-    profile_list_parser = profile_subparsers.add_parser("list",aliases=["l"], 
+    profile_list_parser = profile_subparsers.add_parser("list", aliases=["l"], 
         help="List profiles and associated instances"
     )
 
@@ -1192,7 +1249,7 @@ def main():
     )
     user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
 
-    # Modify "add" subcommand under "user" to make "key_filename" optional, add "--cert" option, and add "--admin" option
+    # "user add" subcommand with aliases
     user_add_parser = user_subparsers.add_parser(
         "add", aliases=["a"],
         help="Add a new user to the system"
@@ -1200,6 +1257,14 @@ def main():
     user_add_parser.add_argument("username", help="Username of the new user")
     user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional)")
     user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
+    user_add_parser.add_argument("-p", "--project", help="Project name to associate the user with an existing project")
+
+    # Add "grant" subcommand under "user" to grant user access to a project.
+    user_grant_parser = user_subparsers.add_parser(
+        "grant", help="Grant a user access to a specific project"
+    )
+    user_grant_parser.add_argument("username", help="Username to grant access")
+    user_grant_parser.add_argument("projectname", help="Project name to grant access to")
 
     # Add "delete" subcommand under "user" with aliases
     user_delete_parser = user_subparsers.add_parser(
@@ -1323,10 +1388,11 @@ def main():
         elif args.user_command in ["list","l"]:
             list_users(client, full=args.full)
         elif args.user_command in ["add", "a"]:
-            add_user(args.username, args.cert, client, admin=args.admin)
+            add_user(args.username, args.cert, client, admin=args.admin, project=args.project)
+        elif args.user_command == "grant":
+            grant_user_access(args.username, args.projectname, client)
         elif args.user_command in ["delete", "del", "d"]:
-            # Pass the `purge` and the `removefiles` arguments to `delete_user`
-            delete_user(args.username, client, purge=args.purge, removefiles=args.removefiles)  
+            delete_user(args.username, client, purge=args.purge, removefiles=args.removefiles)
     elif args.command in ["remote", "re", "r"]:
         if not args.remote_command:
             remote_parser.print_help()
@@ -1335,6 +1401,7 @@ def main():
         elif args.remote_command == "enroll":
             enroll(args.remote_server, args.ip_address, args.port, args.user, 
                           args.cert_filename, args.loc_name)
+
 
 if __name__ == "__main__":
     main()
