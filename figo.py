@@ -817,7 +817,7 @@ def delete_project(remote_client, remote_node, project_name):
     except Exception as e:
         print(f"An unexpected error occurred while deleting project '{project_name}': {e}")
 
-def delete_user(user_name, client, purge=False):
+def delete_user(user_name, client, purge=False, removefiles=False):
     """
     Delete a user from the system.
 
@@ -825,6 +825,7 @@ def delete_user(user_name, client, purge=False):
     - username: Username of the user to delete
     - client: pylxd.Client instance
     - purge: If True, delete associated projects even if the user does not exist
+    - removefiles: If True, remove files associated with the user in the USER_DIR
     """
 
     global PROJECT_PREFIX  # Declare the use of the global variable
@@ -848,6 +849,16 @@ def delete_user(user_name, client, purge=False):
         else:
             print(f"User '{user_name}' does not exist. No action taken.")
             return
+
+    # Remove the user's files if the flag is set
+    if removefiles:
+        directory = os.path.expanduser(USER_DIR)
+        user_files = [f"{user_name}.crt", f"{user_name}.pfx", f"{user_name}.pub"]
+        for file in user_files:
+            file_path = os.path.join(directory, file)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"File '{file}' has been removed.")
 
     # Retrieve the list of remote servers
     remotes = get_incus_remotes()
@@ -878,6 +889,7 @@ def delete_user(user_name, client, purge=False):
             # Check if there are any profiles in the project
             profiles = list_profiles_in_project(remote_client, project_name)
             # Check if there are any storage volumes in the project
+            #TODO: Implement this function
             storage_volumes = None
             #storage_volumes = list_storage_volumes_in_project(remote_client, project_name)
 
@@ -1196,7 +1208,9 @@ def main():
     )
     user_delete_parser.add_argument("username", help="Username of the user to delete")
     user_delete_parser.add_argument("-p", "--purge", action="store_true", 
-                                    help="Delete associated projects even if the user does not exist")
+            help="Delete associated projects and user files (if -r) even if the user does not exist")
+    user_delete_parser.add_argument("-r", "--removefiles", action="store_true", 
+            help="Remove the associated files of the user from the users folder")
 
     # Manually add aliases for "user"
     subparsers._name_parser_map["us"] = user_parser
@@ -1311,8 +1325,8 @@ def main():
         elif args.user_command in ["add", "a"]:
             add_user(args.username, args.cert, client, admin=args.admin)
         elif args.user_command in ["delete", "del", "d"]:
-            # Pass the `purge` argument to `delete_user`
-            delete_user(args.username, client, purge=args.purge)  
+            # Pass the `purge` and the `removefiles` arguments to `delete_user`
+            delete_user(args.username, client, purge=args.purge, removefiles=args.removefiles)  
     elif args.command in ["remote", "re", "r"]:
         if not args.remote_command:
             remote_parser.print_help()
