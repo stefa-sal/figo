@@ -592,7 +592,7 @@ def list_remotes_full():
             print(f"  {key}: {value}")
         print("-" * 60)
 
-def enroll(remote_server, ip_address_port, cert_filename="~/.config/incus/client.crt",
+def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus/client.crt",
            user="ubuntu", loc_name="main"):
     """Enroll a remote server by transferring the client certificate and adding it to the Incus daemon."""
     ip_address, port = (ip_address_port.split(":") + ["8443"])[:2]
@@ -1160,17 +1160,38 @@ def add_certificate_to_incus(user_name, crt_file, project_name, admin=False):
         return False
 
 def main():
+    parser, parser_dict = create_parser()
+    argcomplete.autocomplete(parser)
+    args = parser.parse_args()
+    client = pylxd.Client()
+
+    if not args.command:
+        parser.print_help()
+    else:
+        handle_command(args, client, parser, parser_dict)   
+
+def create_parser():
     parser = argparse.ArgumentParser(
         description="Manage a federated testbed with CPUs and GPUs",
         prog="figo"
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    # "instance" command without aliases in the help text
+    parser.add_argument("--version", action="version", version="%(prog)s 0.1")  # Set the version of the program
+
+    parser_dict = {}
+    parser_dict['instance_parser'] = create_instance_parser(subparsers)
+    parser_dict['gpu_parser'] = create_gpu_parser(subparsers)
+    parser_dict['profile_parser'] = create_profile_parser(subparsers)
+    parser_dict['user_parser'] = create_user_parser(subparsers)
+    parser_dict['remote_parser'] = create_remote_parser(subparsers)
+
+    return parser, parser_dict
+
+def create_instance_parser(subparsers):
     instance_parser = subparsers.add_parser("instance", help="Manage instances")
     instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
 
-    # Add "list" subcommand under "instance"
     instance_list_parser = instance_subparsers.add_parser("list", aliases=["l"],
         help="List instances (use -f or --full for more details)"
     )
@@ -1179,229 +1200,224 @@ def main():
     instance_list_parser.add_argument("-p", "--project", help="Project name to list instances from")
     instance_list_parser.add_argument("-r", "--remote", help="Remote Incus server name")
 
-    # Add "start" subcommand under "instance"
     start_parser = instance_subparsers.add_parser("start", help="Start a specific instance")
     start_parser.add_argument("instance_name", help="Name of the instance to start")
 
-    # Add "stop" subcommand under "instance"
     stop_parser = instance_subparsers.add_parser("stop", help="Stop a specific instance")
     stop_parser.add_argument("instance_name", help="Name of the instance to stop")
 
-    # Add "set_key" subcommand under "instance"
     set_key_parser = instance_subparsers.add_parser("set_key", help="Set a public key for a user in an instance")
     set_key_parser.add_argument("instance_name", help="Name of the instance")
     set_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
 
-    # Add "set_ip" subcommand under "instance"
     set_ip_parser = instance_subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance")
     set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for")
     set_ip_parser.add_argument("ip_address", help="Static IP address to assign to the instance")
     set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
 
-    # Manually add aliases for "instance"
     subparsers._name_parser_map["in"] = instance_parser
     subparsers._name_parser_map["i"] = instance_parser
 
-    # "gpu" command without aliases in the help text
+    return instance_parser
+
+def create_gpu_parser(subparsers):
     gpu_parser = subparsers.add_parser("gpu", help="Manage GPUs")
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
 
-    # Add GPU subcommands
-    gpu_status_parser = gpu_subparsers.add_parser("status", help="Show GPU status")
-    gpu_list_parser = gpu_subparsers.add_parser("list", aliases=["l"],
-        help="List GPU profiles",
-    )
+    gpu_subparsers.add_parser("status", help="Show GPU status")
+    gpu_subparsers.add_parser("list", aliases=["l"], help="List GPU profiles")
     add_gpu_parser = gpu_subparsers.add_parser("add", help="Add a GPU profile to a specific instance")
     add_gpu_parser.add_argument("instance_name", help="Name of the instance to add a GPU profile to")
     remove_gpu_parser = gpu_subparsers.add_parser("remove", help="Remove GPU profiles from a specific instance")
     remove_gpu_parser.add_argument("instance_name", help="Name of the instance to remove a GPU profile from")
     remove_gpu_parser.add_argument("--all", action="store_true", help="Remove all GPU profiles from the instance")
 
-    # Manually add aliases for "gpu"
     subparsers._name_parser_map["gp"] = gpu_parser
     subparsers._name_parser_map["g"] = gpu_parser
 
-    # "profile" command without aliases in the help text
+    return gpu_parser
+
+def create_profile_parser(subparsers):
     profile_parser = subparsers.add_parser("profile", help="Manage profiles")
     profile_subparsers = profile_parser.add_subparsers(dest="profile_command")
 
-    # Add profile subcommands
     dump_profiles_parser = profile_subparsers.add_parser("dump", help="Dump profiles to .yaml files")
     dump_profiles_parser.add_argument("-a", "--all", action="store_true", help="Dump all profiles to .yaml files")
     dump_profiles_parser.add_argument("profile_name", nargs="?", help="Name of the profile to dump")
 
-    # Add "list" subcommand under "profile"
-    profile_list_parser = profile_subparsers.add_parser("list", aliases=["l"], 
-        help="List profiles and associated instances"
-    )
+    profile_subparsers.add_parser("list", aliases=["l"], help="List profiles and associated instances")
 
-    # Manually add aliases for "profile"
     subparsers._name_parser_map["pr"] = profile_parser
     subparsers._name_parser_map["p"] = profile_parser
 
-    # "user" command without aliases in the help text
+    return profile_parser
+
+def create_user_parser(subparsers):
     user_parser = subparsers.add_parser("user", help="Manage users")
     user_subparsers = user_parser.add_subparsers(dest="user_command")
 
-    # Add user subcommands
-    user_list_parser = user_subparsers.add_parser("list", aliases=["l"], 
-        help="List installed certificates (use -f or --full for more details)"
-    )
+    user_list_parser = user_subparsers.add_parser("list", aliases=["l"], help="List installed certificates (use -f or --full for more details)")
     user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
 
-    # "user add" subcommand with aliases
-    user_add_parser = user_subparsers.add_parser(
-        "add", aliases=["a"],
-        help="Add a new user to the system"
-    )
+    user_add_parser = user_subparsers.add_parser("add", aliases=["a"], help="Add a new user to the system")
     user_add_parser.add_argument("username", help="Username of the new user")
     user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional)")
     user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
     user_add_parser.add_argument("-p", "--project", help="Project name to associate the user with an existing project")
 
-    # Add "grant" subcommand under "user" to grant user access to a project.
-    user_grant_parser = user_subparsers.add_parser(
-        "grant", help="Grant a user access to a specific project"
-    )
+    user_grant_parser = user_subparsers.add_parser("grant", help="Grant a user access to a specific project")
     user_grant_parser.add_argument("username", help="Username to grant access")
     user_grant_parser.add_argument("projectname", help="Project name to grant access to")
 
-    # Add "delete" subcommand under "user" with aliases
-    user_delete_parser = user_subparsers.add_parser(
-        "delete", aliases=["del", "d"],
-        help="Delete an existing user from the system"
-    )
+    user_delete_parser = user_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete an existing user from the system")
     user_delete_parser.add_argument("username", help="Username of the user to delete")
-    user_delete_parser.add_argument("-p", "--purge", action="store_true", 
-            help="Delete associated projects and user files (if -r) even if the user does not exist")
-    user_delete_parser.add_argument("-r", "--removefiles", action="store_true", 
-            help="Remove the associated files of the user from the users folder")
+    user_delete_parser.add_argument("-p", "--purge", action="store_true", help="Delete associated projects and user files (if -r) even if the user does not exist")
+    user_delete_parser.add_argument("-r", "--removefiles", action="store_true", help="Remove the associated files of the user from the users folder")
 
-    # Manually add aliases for "user"
     subparsers._name_parser_map["us"] = user_parser
     subparsers._name_parser_map["u"] = user_parser
 
-    # "remote" command without aliases in the help text
+    return user_parser
+
+def create_remote_parser(subparsers):
     remote_parser = subparsers.add_parser("remote", help="Manage remotes")
     remote_subparsers = remote_parser.add_subparsers(dest="remote_command")
 
-    # Add remote subcommands
-    remote_list_parser = remote_subparsers.add_parser(
-        "list", aliases=["l"],
-        help="List available remotes (use -f or --full for more details)"
-    )
+    remote_list_parser = remote_subparsers.add_parser("list", aliases=["l"], help="List available remotes (use -f or --full for more details)")
     remote_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of available remotes")
+
     remote_enroll_parser = remote_subparsers.add_parser("enroll", help="Enroll a remote Incus server")
     remote_enroll_parser.add_argument("remote_server", help="Name to assign to the remote server")
     remote_enroll_parser.add_argument("ip_address", help="IP address or domain name of the remote server")
     remote_enroll_parser.add_argument("port", nargs="?", default="8443", help="Port of the remote server (default: 8443)")
     remote_enroll_parser.add_argument("user", nargs="?", default="ubuntu", help="Username for SSH (default: ubuntu)")
-    remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.cr", 
-                                      help="Client certificate file to transfer (default: ~/.config/incus/client.cr)")
+    remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.cr", help="Client certificate file to transfer (default: ~/.config/incus/client.cr)")
     remote_enroll_parser.add_argument("--loc_name", default="main", help="Name to use for local storage (default: main)")
 
-    # Manually add aliases for "remote"
     subparsers._name_parser_map["re"] = remote_parser
     subparsers._name_parser_map["r"] = remote_parser
 
-    argcomplete.autocomplete(parser)
+    return remote_parser
 
-    args = parser.parse_args()
-    client = pylxd.Client()
+def handle_command(args, client, parser, parser_dict):
 
-    if not args.command:
-        parser.print_help()
-    elif args.command in ["instance", "in", "i"]:
-        if not args.instance_command:
-            instance_parser.print_help()
-        elif args.instance_command in ["list","l"]:
-            remote_node = args.remote
-            project_name = args.project
-
-            if args.scope:
-                if ":" in args.scope:
-                    # If scope is "remote:project"
-                    remote_scope, project_scope = args.scope.split(":", 1)
-                    if project_scope == "":
-                        project_scope = None
-
-                    if args.remote and args.remote != remote_scope:
-                        print(f"Error: Conflict between scope remote '{remote_scope}' and provided remote '{args.remote}'.")
-                        return
-                    if args.project and project_scope and args.project != project_scope:
-                        print(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
-                        return
-
-                    remote_node = remote_scope
-                    project_name = project_scope if project_scope else args.project
-                else:
-                    # If scope is only "project"
-                    project_scope = args.scope
-
-                    if args.project and args.project != project_scope:
-                        print(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
-                        return
-
-                    project_name = project_scope
-
-            if args.full:
-                print_profiles(remote_node, project_name=project_name, full=True)
-            else:
-                print_profiles(remote_node, project_name=project_name, full=False)
-        elif args.instance_command == "start":
-            start_instance(args.instance_name, client)
-        elif args.instance_command == "stop":
-            stop_instance(args.instance_name, client)
-        elif args.instance_command == "set_key":
-            set_user_key(args.instance_name, args.key_filename, client)
-        elif args.instance_command == "set_ip":
-            set_ip(args.instance_name, args.ip_address, args.gw_address, client)
+    # if --version is provided, print the version and exit
+    if hasattr(args, 'version'):
+        print(parser.prog, parser.version)  # prints the version of the parser
+        return
+    
+    # Handle the command based on the subparser
+    if args.command in ["instance", "in", "i"]:
+        handle_instance_command(args, client, parser_dict)
     elif args.command in ["gpu", "gp", "g"]:
-        if not args.gpu_command:
-            gpu_parser.print_help()
-        elif args.gpu_command == "status":
-            show_gpu_status(client)
-        elif args.gpu_command in ["list","l"]:
-            list_gpu_profiles(client)
-        elif args.gpu_command in ["add", "a"]:
-            add_gpu_profile(args.instance_name, client)
-        elif args.gpu_command == "remove":
-            if args.all:
-                remove_gpu_all_profiles(args.instance_name, client)
-            else:
-                remove_gpu_profile(args.instance_name, client)
+        handle_gpu_command(args, client, parser_dict)
     elif args.command in ["profile", "pr", "p"]:
-        if not args.profile_command:
-            profile_parser.print_help()
-        elif args.profile_command == "dump":
-            if args.all:
-                dump_profiles(client)
-            elif args.profile_name:
-                dump_profile(client, args.profile_name)
-            else:
-                print("You must provide a profile name or use the --all option.")
-        elif args.profile_command in ["list","l"]:
-            list_profiles(client)
+        handle_profile_command(args, client, parser_dict)
     elif args.command in ["user", "us", "u"]:
-        if not args.user_command:
-            user_parser.print_help()
-        elif args.user_command in ["list","l"]:
-            list_users(client, full=args.full)
-        elif args.user_command in ["add", "a"]:
-            add_user(args.username, args.cert, client, admin=args.admin, project=args.project)
-        elif args.user_command == "grant":
-            grant_user_access(args.username, args.projectname, client)
-        elif args.user_command in ["delete", "del", "d"]:
-            delete_user(args.username, client, purge=args.purge, removefiles=args.removefiles)
+        handle_user_command(args, client, parser_dict)
     elif args.command in ["remote", "re", "r"]:
-        if not args.remote_command:
-            remote_parser.print_help()
-        elif args.remote_command in ["list","l"]:
-            list_remotes(client, full=args.full)
-        elif args.remote_command == "enroll":
-            enroll(args.remote_server, args.ip_address, args.port, args.user, 
-                          args.cert_filename, args.loc_name)
+        handle_remote_command(args, client, parser_dict)
 
+def handle_instance_command(args, client, parser_dict):
+    if not args.instance_command:
+        parser_dict['instance_parser'].print_help()
+    elif args.instance_command in ["list", "l"]:
+        handle_instance_list(args)
+    elif args.instance_command == "start":
+        start_instance(args.instance_name, client)
+    elif args.instance_command == "stop":
+        stop_instance(args.instance_name, client)
+    elif args.instance_command == "set_key":
+        set_user_key(args.instance_name, args.key_filename, client)
+    elif args.instance_command == "set_ip":
+        set_ip(args.instance_name, args.ip_address, args.gw_address, client)
+
+def handle_gpu_command(args, client, parser_dict):
+    if not args.gpu_command:
+        parser_dict['gpu_parser'].print_help()
+    elif args.gpu_command == "status":
+        show_gpu_status(client)
+    elif args.gpu_command in ["list", "l"]:
+        list_gpu_profiles(client)
+    elif args.gpu_command == "add":
+        add_gpu_profile(args.instance_name, client)
+    elif args.gpu_command == "remove":
+        remove_gpu_profiles(args.instance_name, client, args.all)
+
+def handle_profile_command(args, client, parser_dict):
+    if not args.profile_command:
+        parser_dict['profile_parser'].print_help()
+    elif args.profile_command == "dump":
+        dump_profiles_command(client, args)
+    elif args.profile_command in ["list", "l"]:
+        list_profiles(client)
+
+def handle_user_command(args, client, parser_dict):
+    if not args.user_command:
+        parser_dict['user_parser'].print_help()
+    elif args.user_command in ["list", "l"]:
+        list_users(client, full=args.full)
+    elif args.user_command == "add":
+        add_user(args.username, args.cert, client, admin=args.admin, project=args.project)
+    elif args.user_command == "grant":
+        grant_user_access(args.username, args.projectname, client)
+    elif args.user_command in ["delete", "del", "d"]:
+        delete_user(args.username, client, purge=args.purge, removefiles=args.removefiles)
+
+def handle_remote_command(args, client, parser_dict):
+    if not args.remote_command:
+        parser_dict['remote_parser'].print_help()
+    elif args.remote_command in ["list", "l"]:
+        list_remotes(client, full=args.full)
+    elif args.remote_command == "enroll":
+        enroll_remote(args.remote_server, args.ip_address, args.port, args.user, args.cert_filename, args.loc_name)
+
+def handle_instance_list(args):
+    remote_node = args.remote
+    project_name = args.project
+
+    if args.scope:
+        if ":" in args.scope:
+            remote_scope, project_scope = args.scope.split(":", 1)
+            if project_scope == "":
+                project_scope = None
+
+            if args.remote and args.remote != remote_scope:
+                print(f"Error: Conflict between scope remote '{remote_scope}' and provided remote '{args.remote}'.")
+                return
+            if args.project and project_scope and args.project != project_scope:
+                print(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
+                return
+
+            remote_node = remote_scope
+            project_name = project_scope if project_scope else args.project
+        else:
+            project_scope = args.scope
+
+            if args.project and args.project != project_scope:
+                print(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
+                return
+
+            project_name = project_scope
+
+    if args.full:
+        print_profiles(remote_node, project_name=project_name, full=True)
+    else:
+        print_profiles(remote_node, project_name=project_name, full=False)
+
+def dump_profiles_command(client, args):
+    if args.all:
+        dump_profiles(client)
+    elif args.profile_name:
+        dump_profile(client, args.profile_name)
+    else:
+        print("You must provide a profile name or use the --all option.")
+
+def remove_gpu_profiles(instance_name, client, all_profiles):
+    if all_profiles:
+        remove_gpu_all_profiles(instance_name, client)
+    else:
+        remove_gpu_profile(instance_name, client)
 
 if __name__ == "__main__":
     main()
