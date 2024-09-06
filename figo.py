@@ -561,7 +561,13 @@ def resolve_hostname(hostname):
         return None
 
 def get_incus_remotes():
-    """Fetches and returns the list of Incus remotes as a JSON object."""
+    """Fetches the list of Incus remotes as a JSON object.
+    
+    Returns:    A dictionary of remote names and their information.
+    Raises:     RuntimeError if the command fails to retrieve the JSON list
+                ValueError if the JSON output cannot be parsed.
+                
+    """
     result = subprocess.run(['incus', 'remote', 'list', '--format', 'json'], capture_output=True, text=True)
 
     if result.returncode != 0:
@@ -575,22 +581,28 @@ def get_incus_remotes():
 
 def list_remotes(client, full=False):
     """Lists the available Incus remotes and their addresses."""
-    if full:
-        list_remotes_full()
-    else:
+    try:
         remotes = get_incus_remotes()
+    except RuntimeError as e:
+        logger.error(f"Error: {e}")
+        return
+    except ValueError as e:
+        logger.error(f"Error: {e}")
+        return
+    except Exception as e:
+        logger.error(f"An unexpected error occurred: {e}")
+        return
+
+    if full:
+        for remote_name, remote_info in remotes.items():
+            print(f"REMOTE NAME: {remote_name}")
+            for key, value in remote_info.items():
+                print(f"  {key}: {value}")
+            print("-" * 60)
+    else:
         print("{:<20} {:<40}".format("REMOTE NAME", "ADDRESS"))
         for remote_name, remote_info in remotes.items():
             print("{:<20} {:<40}".format(remote_name, remote_info['Addr']))
-
-def list_remotes_full():
-    """Shows all fields for the available Incus remotes."""
-    remotes = get_incus_remotes()
-    for remote_name, remote_info in remotes.items():
-        print(f"REMOTE NAME: {remote_name}")
-        for key, value in remote_info.items():
-            print(f"  {key}: {value}")
-        print("-" * 60)
 
 def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus/client.crt",
            user="ubuntu", loc_name="main"):
