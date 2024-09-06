@@ -665,7 +665,7 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
     except subprocess.CalledProcessError as e:
         print(f"An error occurred while adding the remote server to the client configuration: {e}")
 
-def add_user(user_name, cert_file, client, admin=False, project=None):
+def add_user(user_name, cert_file, client, admin=False, project=None, email='', name='', org=''):
     global PROJECT_PREFIX  # Declare the use of the global variable
 
     # Check if user already exists in the certificates
@@ -674,33 +674,27 @@ def add_user(user_name, cert_file, client, admin=False, project=None):
             print(f"Error: User '{user_name}' already exists.")
             return
 
-    # Construct the project name
-    project_name = f"{PROJECT_PREFIX}{user_name}"
+    # Initialize the project name
+    project_name = project if project else f"{PROJECT_PREFIX}{user_name}"
 
-    # Retrieve the list of remote servers
-    remotes = get_incus_remotes()
+    if not project:
+        # Retrieve the list of remote servers and check project existence on each
+        remotes = get_incus_remotes()
+        for remote_node in remotes:
+            # Skipping remote node with protocol simplestreams
+            if remotes[remote_node]["Protocol"] == "simplestreams":
+                continue
 
-    # Check if the project already exists in any remote server
-    for remote_node in remotes:
-        # Skipping remote node with protocol simplestreams
-        if remotes[remote_node]["Protocol"] == "simplestreams":
-            continue
-
-        projects = get_projects(remote_node=remote_node)
-        if project_name in [myproject['name'] for myproject in projects]:
-            print(f"Error: Project '{project_name}' already exists on remote '{remote_node}'.")
-            return
-
-    if project:
-        # Check if the project already exists on the local server
+            projects = get_projects(remote_node=remote_node)
+            if project_name in [myproject['name'] for myproject in projects]:
+                print(f"Error: Project '{project_name}' already exists on remote '{remote_node}'.")
+                return
+    else:
+        # Check if the provided project exists on the local server
         projects = get_projects(remote_node="local")
-        found = False
-        if project in [myproject['name'] for myproject in projects]:
-            found = True
-        if not found:
+        if project not in [myproject['name'] for myproject in projects]:
             print(f"Error: Project '{project}' not found on the local server.")
             return
-        project_name = project
 
     directory = os.path.expanduser(USER_DIR)
     # Ensure the directory exists
@@ -709,7 +703,7 @@ def add_user(user_name, cert_file, client, admin=False, project=None):
 
     # Determine whether to use the provided certificate or generate a new key pair
     if cert_file:
-        # Use the provided certificate
+        # If a certificate file is provided, use it
         # the certificate file is in the folder USER_DIR
         # the certificate file should be named as user_name.crt
         # get the certificate file path
@@ -729,6 +723,9 @@ def add_user(user_name, cert_file, client, admin=False, project=None):
             return
         print(f"Generated certificate and key pair for user: {user_name}")
 
+    # Format the description with the additional user details
+    description = f"{email},{name},{org}"  # Format: email,name,org
+
     # Create project for the user
     project_created = False
     if not admin and project==None:
@@ -739,7 +736,7 @@ def add_user(user_name, cert_file, client, admin=False, project=None):
         return
 
     # Add the user certificate to Incus
-    certificate_added = add_certificate_to_incus(user_name, crt_file, project_name, admin=admin)
+    certificate_added = add_certificate_to_incus(user_name, crt_file, project_name, client, admin=admin, description=description)
 
     if not admin and project==None and not certificate_added:
         delete_project(client, 'local', project_name)
@@ -1123,31 +1120,44 @@ def create_project(client, project_name):
         print(f"An unexpected error occurred creating project '{project_name}': {str(e)}")
         return False
 
-
-def add_certificate_to_incus(user_name, crt_file, project_name, admin=False):
-    """Add user certificate to Incus 
+def add_certificate_to_incus(user_name, crt_file, project_name, client, admin=False, description=""):
+    """Add user certificate to Incus
     
     If the user is an admin, the certificate is added without any restrictions.
     If the user is not an admin, the certificate is restricted to the specified project.
 
-    returns True if the certificate is added successfully, False otherwise.
+    Args:
+    - user_name: The username associated with the certificate.
+    - crt_file: Path to the certificate file.
+    - project_name: Name of the project to restrict the certificate to.
+    - admin: Specifies if the user has admin privileges.
+    - description: Optional description for the certificate.
+
+    Returns:
+    True if the certificate is added successfully, False otherwise.
     """
     try:
-        # Execute the incus command to add the certificate
-        if admin:
-            subprocess.run([
-                "incus", "config", "trust", "add-certificate", f"{crt_file}", 
-                f"--name={user_name}"
-            ], capture_output=True, text=True, check=True)
-            print(f"Admin certificate '{user_name}' added to Incus.")
-        else:
-            subprocess.run([
-                "incus", "config", "trust", "add-certificate", f"{crt_file}", 
+        command = [
+            "incus", "config", "trust", "add-certificate", crt_file, 
+            f"--name={user_name}"
+        ]
+
+        if not admin:
+            command.extend([
                 "--restricted", 
-                f"--projects={project_name}", 
-                f"--name={user_name}"
-            ], capture_output=True, text=True, check=True)
-            print(f"User '{user_name}' certificate added to Incus with project '{project_name}'.")
+                f"--projects={project_name}"
+            ])
+
+        # Execute the command
+        subprocess.run(command, capture_output=True, text=True, check=True)
+        print(f"Certificate '{user_name}' added to Incus.")
+
+        # Edit the certificate's description if provided
+        if description:
+            if not edit_certificate_description(user_name, description, client):
+                print(f"Failed to add description to certificate '{user_name}'.")
+                return False
+
         return True
 
     except subprocess.CalledProcessError as e:
@@ -1156,37 +1166,124 @@ def add_certificate_to_incus(user_name, crt_file, project_name, admin=False):
         return False
 
     except Exception as e:
-        print(f"Error: An unexpected error occurred : {e}")
+        print(f"Error: An unexpected error occurred: {e}")
         return False
 
-def main():
-    parser, parser_dict = create_parser()
-    argcomplete.autocomplete(parser)
-    args = parser.parse_args()
-    client = pylxd.Client()
+def edit_certificate_description(user_name, description, client):
+    """Edit the description of a certificate in Incus by the user name.
 
-    if not args.command:
-        parser.print_help()
-    else:
-        handle_command(args, client, parser, parser_dict)   
+    Args:
+    - user_name: The username associated with the certificate.
+    - description: Description to be added to the certificate.
 
-def create_parser():
-    parser = argparse.ArgumentParser(
-        description="Manage a federated testbed with CPUs and GPUs",
-        prog="figo"
-    )
-    subparsers = parser.add_subparsers(dest="command")
+    Returns:
+    True if the description was successfully added, False otherwise.
+    """
+    try:
+        # Step 1: Retrieve the certificate by username
+        certificates = client.certificates.all()
+        user_cert = None
+        for cert in certificates:
+            if cert.name == user_name:
+                user_cert = cert
+                break
+        
+        if not user_cert:
+            print(f"User '{user_name}' not found.")
+            return
+        
+        fingerprint = user_cert.fingerprint[:24]
 
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1")  # Set the version of the program
+        # Step 2: load the user_cert into a temporary .YAML object using incus config trust show
+        result = subprocess.run(["incus", "config", "trust", "show", fingerprint], capture_output=True, text=True, check=True)
+        user_cert_yaml = yaml.safe_load(result.stdout)   # Load the certificate configuration into a dictionary
+        user_cert_yaml["description"] = description  # Update the description
 
-    parser_dict = {}
-    parser_dict['instance_parser'] = create_instance_parser(subparsers)
-    parser_dict['gpu_parser'] = create_gpu_parser(subparsers)
-    parser_dict['profile_parser'] = create_profile_parser(subparsers)
-    parser_dict['user_parser'] = create_user_parser(subparsers)
-    parser_dict['remote_parser'] = create_remote_parser(subparsers)
+        # Step 3: Save the updated configuration to a temporary file
+        temp_file = f"/tmp/{user_name}.yaml"
+        with open(temp_file, "w") as f:
+            yaml.dump(user_cert_yaml, f)
+        
+        # Step 4: Update the certificate configuration using incus config trust edit
+        # The command is: cat temp_file | incus config trust edit fingerprint
 
-    return parser, parser_dict
+        cat_process = subprocess.Popen(
+            ['cat', temp_file], 
+            stdout=subprocess.PIPE  # Redirect the output to a pipe
+        )
+
+        # Create a subprocess to run 'incus config trust edit fingerprint'
+        # using the output of the first command as input
+        incus_process = subprocess.Popen(
+            ['incus', 'config', 'trust', 'edit', fingerprint], 
+            stdin=cat_process.stdout,  # Use output of cat as input
+            stdout=subprocess.PIPE  # Redirect the output to a pipe if needed
+        )
+
+        # Close the output of the first process to allow it to receive a SIGPIPE if the second exits
+        cat_process.stdout.close()
+
+        # Get the output of the second command if needed
+        output, error = incus_process.communicate()
+
+        if incus_process.returncode != 0:
+            print("Error in executing incus command:", error)
+            return False
+
+        print(f"Description added to certificate '{user_name}'.")
+
+        # Step 5: Remove the temporary file
+        os.remove(temp_file)
+        return True
+
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to edit certificate description: {e.stderr.strip()}")
+        return False
+    
+    except Exception as e:
+        print(f"Error: An unexpected error occurred while editing description: {e}")
+        return False
+
+
+    try:
+        # Retrieve the certificate to find the fingerprint
+        result = subprocess.run(["incus", "config", "trust", "list"],
+                                capture_output=True, text=True, check=True)
+        lines = result.stdout.splitlines()
+        fingerprint = ""
+        for line in lines:
+            if user_name in line:
+                fingerprint = line.split()[0]  # Assuming the fingerprint is the first entry
+                break
+
+        if not fingerprint:
+            print(f"No certificate found for user '{user_name}'.")
+            return False
+
+        # Execute the command to edit the certificate description
+        edit_command = [
+            "incus", "config", "trust", "edit", fingerprint,
+            f"--set-description={description}"
+        ]
+        subprocess.run(edit_command, capture_output=True, text=True, check=True)
+        print(f"Description added to certificate '{user_name}'.")
+        return True
+
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to edit certificate description: {e.stderr.strip()}")
+        return False
+
+    except Exception as e:
+        print(f"Error: An unexpected error occurred while editing description: {e}")
+        return False
+
+#############################################
+######### Command Line Interface (CLI) ######
+#############################################
+
+#############################################
+###### figo instance command
+#############################################
 
 def create_instance_parser(subparsers):
     instance_parser = subparsers.add_parser("instance", help="Manage instances")
@@ -1219,158 +1316,6 @@ def create_instance_parser(subparsers):
     subparsers._name_parser_map["i"] = instance_parser
 
     return instance_parser
-
-def create_gpu_parser(subparsers):
-    gpu_parser = subparsers.add_parser("gpu", help="Manage GPUs")
-    gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
-
-    gpu_subparsers.add_parser("status", help="Show GPU status")
-    gpu_subparsers.add_parser("list", aliases=["l"], help="List GPU profiles")
-    add_gpu_parser = gpu_subparsers.add_parser("add", help="Add a GPU profile to a specific instance")
-    add_gpu_parser.add_argument("instance_name", help="Name of the instance to add a GPU profile to")
-    remove_gpu_parser = gpu_subparsers.add_parser("remove", help="Remove GPU profiles from a specific instance")
-    remove_gpu_parser.add_argument("instance_name", help="Name of the instance to remove a GPU profile from")
-    remove_gpu_parser.add_argument("--all", action="store_true", help="Remove all GPU profiles from the instance")
-
-    subparsers._name_parser_map["gp"] = gpu_parser
-    subparsers._name_parser_map["g"] = gpu_parser
-
-    return gpu_parser
-
-def create_profile_parser(subparsers):
-    profile_parser = subparsers.add_parser("profile", help="Manage profiles")
-    profile_subparsers = profile_parser.add_subparsers(dest="profile_command")
-
-    dump_profiles_parser = profile_subparsers.add_parser("dump", help="Dump profiles to .yaml files")
-    dump_profiles_parser.add_argument("-a", "--all", action="store_true", help="Dump all profiles to .yaml files")
-    dump_profiles_parser.add_argument("profile_name", nargs="?", help="Name of the profile to dump")
-
-    profile_subparsers.add_parser("list", aliases=["l"], help="List profiles and associated instances")
-
-    subparsers._name_parser_map["pr"] = profile_parser
-    subparsers._name_parser_map["p"] = profile_parser
-
-    return profile_parser
-
-def create_user_parser(subparsers):
-    user_parser = subparsers.add_parser("user", help="Manage users")
-    user_subparsers = user_parser.add_subparsers(dest="user_command")
-
-    user_list_parser = user_subparsers.add_parser("list", aliases=["l"], help="List installed certificates (use -f or --full for more details)")
-    user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
-
-    user_add_parser = user_subparsers.add_parser("add", aliases=["a"], help="Add a new user to the system")
-    user_add_parser.add_argument("username", help="Username of the new user")
-    user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional)")
-    user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
-    user_add_parser.add_argument("-p", "--project", help="Project name to associate the user with an existing project")
-
-    user_grant_parser = user_subparsers.add_parser("grant", help="Grant a user access to a specific project")
-    user_grant_parser.add_argument("username", help="Username to grant access")
-    user_grant_parser.add_argument("projectname", help="Project name to grant access to")
-
-    user_delete_parser = user_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete an existing user from the system")
-    user_delete_parser.add_argument("username", help="Username of the user to delete")
-    user_delete_parser.add_argument("-p", "--purge", action="store_true", help="Delete associated projects and user files (if -r) even if the user does not exist")
-    user_delete_parser.add_argument("-r", "--removefiles", action="store_true", help="Remove the associated files of the user from the users folder")
-
-    subparsers._name_parser_map["us"] = user_parser
-    subparsers._name_parser_map["u"] = user_parser
-
-    return user_parser
-
-def create_remote_parser(subparsers):
-    remote_parser = subparsers.add_parser("remote", help="Manage remotes")
-    remote_subparsers = remote_parser.add_subparsers(dest="remote_command")
-
-    remote_list_parser = remote_subparsers.add_parser("list", aliases=["l"], help="List available remotes (use -f or --full for more details)")
-    remote_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of available remotes")
-
-    remote_enroll_parser = remote_subparsers.add_parser("enroll", help="Enroll a remote Incus server")
-    remote_enroll_parser.add_argument("remote_server", help="Name to assign to the remote server")
-    remote_enroll_parser.add_argument("ip_address", help="IP address or domain name of the remote server")
-    remote_enroll_parser.add_argument("port", nargs="?", default="8443", help="Port of the remote server (default: 8443)")
-    remote_enroll_parser.add_argument("user", nargs="?", default="ubuntu", help="Username for SSH (default: ubuntu)")
-    remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.cr", help="Client certificate file to transfer (default: ~/.config/incus/client.cr)")
-    remote_enroll_parser.add_argument("--loc_name", default="main", help="Name to use for local storage (default: main)")
-
-    subparsers._name_parser_map["re"] = remote_parser
-    subparsers._name_parser_map["r"] = remote_parser
-
-    return remote_parser
-
-def handle_command(args, client, parser, parser_dict):
-
-    # if --version is provided, print the version and exit
-    if hasattr(args, 'version'):
-        print(parser.prog, parser.version)  # prints the version of the parser
-        return
-    
-    # Handle the command based on the subparser
-    if args.command in ["instance", "in", "i"]:
-        handle_instance_command(args, client, parser_dict)
-    elif args.command in ["gpu", "gp", "g"]:
-        handle_gpu_command(args, client, parser_dict)
-    elif args.command in ["profile", "pr", "p"]:
-        handle_profile_command(args, client, parser_dict)
-    elif args.command in ["user", "us", "u"]:
-        handle_user_command(args, client, parser_dict)
-    elif args.command in ["remote", "re", "r"]:
-        handle_remote_command(args, client, parser_dict)
-
-def handle_instance_command(args, client, parser_dict):
-    if not args.instance_command:
-        parser_dict['instance_parser'].print_help()
-    elif args.instance_command in ["list", "l"]:
-        handle_instance_list(args)
-    elif args.instance_command == "start":
-        start_instance(args.instance_name, client)
-    elif args.instance_command == "stop":
-        stop_instance(args.instance_name, client)
-    elif args.instance_command == "set_key":
-        set_user_key(args.instance_name, args.key_filename, client)
-    elif args.instance_command == "set_ip":
-        set_ip(args.instance_name, args.ip_address, args.gw_address, client)
-
-def handle_gpu_command(args, client, parser_dict):
-    if not args.gpu_command:
-        parser_dict['gpu_parser'].print_help()
-    elif args.gpu_command == "status":
-        show_gpu_status(client)
-    elif args.gpu_command in ["list", "l"]:
-        list_gpu_profiles(client)
-    elif args.gpu_command == "add":
-        add_gpu_profile(args.instance_name, client)
-    elif args.gpu_command == "remove":
-        remove_gpu_profiles(args.instance_name, client, args.all)
-
-def handle_profile_command(args, client, parser_dict):
-    if not args.profile_command:
-        parser_dict['profile_parser'].print_help()
-    elif args.profile_command == "dump":
-        dump_profiles_command(client, args)
-    elif args.profile_command in ["list", "l"]:
-        list_profiles(client)
-
-def handle_user_command(args, client, parser_dict):
-    if not args.user_command:
-        parser_dict['user_parser'].print_help()
-    elif args.user_command in ["list", "l"]:
-        list_users(client, full=args.full)
-    elif args.user_command == "add":
-        add_user(args.username, args.cert, client, admin=args.admin, project=args.project)
-    elif args.user_command == "grant":
-        grant_user_access(args.username, args.projectname, client)
-    elif args.user_command in ["delete", "del", "d"]:
-        delete_user(args.username, client, purge=args.purge, removefiles=args.removefiles)
-
-def handle_remote_command(args, client, parser_dict):
-    if not args.remote_command:
-        parser_dict['remote_parser'].print_help()
-    elif args.remote_command in ["list", "l"]:
-        list_remotes(client, full=args.full)
-    elif args.remote_command == "enroll":
-        enroll_remote(args.remote_server, args.ip_address, args.port, args.user, args.cert_filename, args.loc_name)
 
 def handle_instance_list(args):
     remote_node = args.remote
@@ -1405,19 +1350,219 @@ def handle_instance_list(args):
     else:
         print_profiles(remote_node, project_name=project_name, full=False)
 
-def dump_profiles_command(client, args):
-    if args.all:
-        dump_profiles(client)
-    elif args.profile_name:
-        dump_profile(client, args.profile_name)
-    else:
-        print("You must provide a profile name or use the --all option.")
+def handle_instance_command(args, client, parser_dict):
 
-def remove_gpu_profiles(instance_name, client, all_profiles):
-    if all_profiles:
-        remove_gpu_all_profiles(instance_name, client)
+    if not args.instance_command:
+        parser_dict['instance_parser'].print_help()
+    elif args.instance_command in ["list", "l"]:
+        handle_instance_list(args)
+    elif args.instance_command == "start":
+        start_instance(args.instance_name, client)
+    elif args.instance_command == "stop":
+        stop_instance(args.instance_name, client)
+    elif args.instance_command == "set_key":
+        set_user_key(args.instance_name, args.key_filename, client)
+    elif args.instance_command == "set_ip":
+        set_ip(args.instance_name, args.ip_address, args.gw_address, client)
+
+#############################################
+###### figo gpu command
+#############################################
+
+def create_gpu_parser(subparsers):
+    gpu_parser = subparsers.add_parser("gpu", help="Manage GPUs")
+    gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
+
+    gpu_subparsers.add_parser("status", help="Show GPU status")
+    gpu_subparsers.add_parser("list", aliases=["l"], help="List GPU profiles")
+    add_gpu_parser = gpu_subparsers.add_parser("add", help="Add a GPU profile to a specific instance")
+    add_gpu_parser.add_argument("instance_name", help="Name of the instance to add a GPU profile to")
+    remove_gpu_parser = gpu_subparsers.add_parser("remove", help="Remove GPU profiles from a specific instance")
+    remove_gpu_parser.add_argument("instance_name", help="Name of the instance to remove a GPU profile from")
+    remove_gpu_parser.add_argument("--all", action="store_true", help="Remove all GPU profiles from the instance")
+
+    subparsers._name_parser_map["gp"] = gpu_parser
+    subparsers._name_parser_map["g"] = gpu_parser
+
+    return gpu_parser
+
+def handle_gpu_command(args, client, parser_dict):
+    if not args.gpu_command:
+        parser_dict['gpu_parser'].print_help()
+    elif args.gpu_command == "status":
+        show_gpu_status(client)
+    elif args.gpu_command in ["list", "l"]:
+        list_gpu_profiles(client)
+    elif args.gpu_command == "add":
+        add_gpu_profile(args.instance_name, client)
+    elif args.gpu_command == "remove":
+        if args.all:
+            remove_gpu_all_profiles(args.instance_name, client)
+        else:
+            remove_gpu_profile(args.instance_name, client)
+
+#############################################
+###### figo profile command
+#############################################
+
+def create_profile_parser(subparsers):
+    profile_parser = subparsers.add_parser("profile", help="Manage profiles")
+    profile_subparsers = profile_parser.add_subparsers(dest="profile_command")
+
+    dump_profiles_parser = profile_subparsers.add_parser("dump", help="Dump profiles to .yaml files")
+    dump_profiles_parser.add_argument("-a", "--all", action="store_true", help="Dump all profiles to .yaml files")
+    dump_profiles_parser.add_argument("profile_name", nargs="?", help="Name of the profile to dump")
+
+    profile_subparsers.add_parser("list", aliases=["l"], help="List profiles and associated instances")
+
+    subparsers._name_parser_map["pr"] = profile_parser
+    subparsers._name_parser_map["p"] = profile_parser
+
+    return profile_parser
+
+def handle_profile_command(args, client, parser_dict):
+    if not args.profile_command:
+        parser_dict['profile_parser'].print_help()
+    elif args.profile_command == "dump":
+        if args.all:
+            dump_profiles(client)
+        elif args.profile_name:
+            dump_profile(client, args.profile_name)
+        else:
+            print("You must provide a profile name or use the --all option.")
+    elif args.profile_command in ["list", "l"]:
+        list_profiles(client)
+
+#############################################
+###### figo user command
+#############################################
+
+def create_user_parser(subparsers):
+    user_parser = subparsers.add_parser("user", help="Manage users")
+    user_subparsers = user_parser.add_subparsers(dest="user_command")
+
+    user_list_parser = user_subparsers.add_parser("list", aliases=["l"], help="List installed certificates (use -f or --full for more details)")
+    user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
+
+    user_add_parser = user_subparsers.add_parser("add", aliases=["a"], help="Add a new user to the system")
+    user_add_parser.add_argument("username", help="Username of the new user")
+    user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional)")
+    user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
+    user_add_parser.add_argument("-p", "--project", help="Project name to associate the user with an existing project")
+    user_add_parser.add_argument("-e", "--email", help="Email address of the new user")
+    user_add_parser.add_argument("-n", "--name", help="Full name of the new user")
+    user_add_parser.add_argument("-o", "--org", help="Organization of the new user")
+
+    user_grant_parser = user_subparsers.add_parser("grant", help="Grant a user access to a specific project")
+    user_grant_parser.add_argument("username", help="Username to grant access")
+    user_grant_parser.add_argument("projectname", help="Project name to grant access to")
+
+    user_delete_parser = user_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete an existing user from the system")
+    user_delete_parser.add_argument("username", help="Username of the user to delete")
+    user_delete_parser.add_argument("-p", "--purge", action="store_true", help="Delete associated projects and user files (if -r) even if the user does not exist")
+    user_delete_parser.add_argument("-r", "--removefiles", action="store_true", help="Remove the associated files of the user from the users folder")
+
+    subparsers._name_parser_map["us"] = user_parser
+    subparsers._name_parser_map["u"] = user_parser
+
+    return user_parser
+
+def handle_user_command(args, client, parser_dict):
+    if not args.user_command:
+        parser_dict['user_parser'].print_help()
+    elif args.user_command in ["list", "l"]:
+        list_users(client, full=args.full)
+    elif args.user_command == "add":
+        add_user(args.username, args.cert, client, admin=args.admin, project=args.project, email=args.email, name=args.name, org=args.org)
+    elif args.user_command == "grant":
+        grant_user_access(args.username, args.projectname, client)
+    elif args.user_command in ["delete", "del", "d"]:
+        delete_user(args.username, client, purge=args.purge, removefiles=args.removefiles)
+
+
+#############################################
+###### figo remote command
+#############################################
+
+def create_remote_parser(subparsers):
+    remote_parser = subparsers.add_parser("remote", help="Manage remotes")
+    remote_subparsers = remote_parser.add_subparsers(dest="remote_command")
+
+    remote_list_parser = remote_subparsers.add_parser("list", aliases=["l"], help="List available remotes (use -f or --full for more details)")
+    remote_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of available remotes")
+
+    remote_enroll_parser = remote_subparsers.add_parser("enroll", help="Enroll a remote Incus server")
+    remote_enroll_parser.add_argument("remote_server", help="Name to assign to the remote server")
+    remote_enroll_parser.add_argument("ip_address", help="IP address or domain name of the remote server")
+    remote_enroll_parser.add_argument("port", nargs="?", default="8443", help="Port of the remote server (default: 8443)")
+    remote_enroll_parser.add_argument("user", nargs="?", default="ubuntu", help="Username for SSH (default: ubuntu)")
+    remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.cr", help="Client certificate file to transfer (default: ~/.config/incus/client.cr)")
+    remote_enroll_parser.add_argument("--loc_name", default="main", help="Name to use for local storage (default: main)")
+
+    subparsers._name_parser_map["re"] = remote_parser
+    subparsers._name_parser_map["r"] = remote_parser
+
+    return remote_parser
+
+def handle_remote_command(args, client, parser_dict):
+    if not args.remote_command:
+        parser_dict['remote_parser'].print_help()
+    elif args.remote_command in ["list", "l"]:
+        list_remotes(client, full=args.full)
+    elif args.remote_command == "enroll":
+        enroll_remote(args.remote_server, args.ip_address, args.port, args.user, args.cert_filename, args.loc_name)
+
+#############################################
+###### figo main functions
+#############################################
+
+def create_parser():
+    parser = argparse.ArgumentParser(
+        description="Manage a federated testbed with CPUs and GPUs",
+        prog="figo"
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    parser.add_argument("--version", action="version", version="%(prog)s 0.1")  # Set the version of the program
+
+    parser_dict = {}
+    parser_dict['instance_parser'] = create_instance_parser(subparsers)
+    parser_dict['gpu_parser'] = create_gpu_parser(subparsers)
+    parser_dict['profile_parser'] = create_profile_parser(subparsers)
+    parser_dict['user_parser'] = create_user_parser(subparsers)
+    parser_dict['remote_parser'] = create_remote_parser(subparsers)
+
+    return parser, parser_dict
+
+def handle_command(args, client, parser, parser_dict):
+
+    # if --version is provided, print the version and exit
+    if hasattr(args, 'version'):
+        print(parser.prog, parser.version)  # prints the version of the parser
+        return
+    
+    # Handle the command based on the subparser
+    if args.command in ["instance", "in", "i"]:
+        handle_instance_command(args, client, parser_dict)
+    elif args.command in ["gpu", "gp", "g"]:
+        handle_gpu_command(args, client, parser_dict)
+    elif args.command in ["profile", "pr", "p"]:
+        handle_profile_command(args, client, parser_dict)
+    elif args.command in ["user", "us", "u"]:
+        handle_user_command(args, client, parser_dict)
+    elif args.command in ["remote", "re", "r"]:
+        handle_remote_command(args, client, parser_dict)
+
+def main():
+    parser, parser_dict = create_parser()
+    argcomplete.autocomplete(parser)
+    args = parser.parse_args()
+    client = pylxd.Client()
+
+    if not args.command:
+        parser.print_help()
     else:
-        remove_gpu_profile(instance_name, client)
+        handle_command(args, client, parser, parser_dict)   
 
 if __name__ == "__main__":
     main()
