@@ -555,7 +555,7 @@ def list_users(client, full=False):
     """List all installed certificates with optional full details."""
     
     if full:
-        print("{:<20} {:<12} {:<5} {:<5} {:<20}".format(
+        print("{:<18} {:<12} {:<4} {:<5} {:<20}".format(
             "NAME", "FINGERPRINT", "TYPE", "ADMIN", "PROJECTS"
         ))
     else:
@@ -567,9 +567,9 @@ def list_users(client, full=False):
 
         if full:
             projects = ", ".join(certificate.projects)
-            print("{:<20} {:<12} {:<5} {:<5} {:<20}".format(
+            print("{:<18} {:<12} {:<4} {:<5} {:<20}".format(
                 name, fingerprint, certificate.type[:3], 
-                'admin' if str(certificate.restricted) else 'user', projects
+                'no' if certificate.restricted else 'yes', projects
             ))
         else:
             print(f"{name:<20} {fingerprint:<12}")
