@@ -320,6 +320,35 @@ and configured to enable this feature.
     figo remote enroll my-remote-server 192.168.1.10 8443 myuser ~/.config/incus/client.cr --loc_name backup
     ```
 
+-   Add a user, generating browser client certificate:
+
+    ``` bash
+    figo user add user-name --email user@email.com --name "Name of User" --org "User organization"
+    ```
+
+-   Remove a user (also deletes associated projects in all remotes if they are empty):
+
+    ``` bash
+    figo user delete user-name 
+    ```
+
+-   Remove a user, its projects in all remotes and the files associated with the user in the users folder (.pub, .ctr, .pfx, ...)
+
+    ``` bash
+    figo user delete user-name -r 
+
+-   Remove the projects associated with the user even if the user does not exist
+
+    ``` bash
+    figo user delete user-name -p 
+    ```
+    ```
+
+-   Remove the projects and the files associated with the user even if the user does not exist
+
+    ``` bash
+    figo user delete user-name -rp 
+    ```
 
 # Contributing
 
