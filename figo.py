@@ -35,24 +35,49 @@ PROJECT_PREFIX = FIGO_PREFIX
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_instance_profiles(client):
-    """Get profiles for all instances and categorize them by their status."""
-    instance_profiles = {}
-    running_instances = {}
-    stopped_instances = []
+def get_incus_remotes():
+    """Fetches the list of Incus remotes as a JSON object.
+    
+    Returns:    A dictionary of remote names and their information.
+    Raises:     RuntimeError if the command fails to retrieve the JSON list
+                ValueError if the JSON output cannot be parsed.
+                
+    """
+    result = subprocess.run(['incus', 'remote', 'list', '--format', 'json'], capture_output=True, text=True)
 
-    for instance in client.instances.all():
-        instance_profiles[instance.name] = instance.profiles
-        if instance.status == "Running":
-            running_instances[instance.name] = instance.profiles
-        else:
-            stopped_instances.append(instance.name)
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to retrieve Incus remotes: {result.stderr}")
 
-    return instance_profiles, running_instances, stopped_instances
+    try:
+        remotes = json.loads(result.stdout)
+        return remotes
+    except json.JSONDecodeError:
+        raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
 
-def get_all_profiles(client):
-    """Get all available profiles."""
-    return [profile.name for profile in client.profiles.all()]
+def run_incus_list(remote_node="local", project_name="default"):
+    """Run the 'incus list -f json' command, optionally targeting a remote node and project, and return its output as JSON."""
+    try:
+        # Prepare the command with an optional remote node and project name using the correct syntax
+        command = ["incus", "list", "-f", "json", "--project", project_name]
+        if remote_node:
+            command = ["incus", "list", f"{remote_node}:", "-f", "json", "--project", project_name]
+        
+        # Run the command to get the list of instances in JSON format
+        result = subprocess.run(command, capture_output=True, text=True, check=True)
+        
+        # Parse the JSON output
+        instances = json.loads(result.stdout)
+        return instances
+    except subprocess.CalledProcessError as e:
+        # Print the exact error message from the command's stderr
+        logger.error(f"Error: {e.stderr.strip()}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"Error: Failed to parse JSON output. {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error: An unexpected error occurred while running 'incus list -f json': {e}")
+        return None
 
 def get_projects(remote_node="local"): 
     """Fetches and returns the list of projects as a JSON object."""
@@ -99,31 +124,6 @@ def get_instances(remote_node=None, project_name=None, full=False):
             profiles_str = ", ".join(gpu_profiles)
             colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
             print("{:<14} {:<4} {:<5} {:<22} {:<30}".format(name, instance_type, state, context, colored_profiles_str))
-
-def run_incus_list(remote_node="local", project_name="default"):
-    """Run the 'incus list -f json' command, optionally targeting a remote node and project, and return its output as JSON."""
-    try:
-        # Prepare the command with an optional remote node and project name using the correct syntax
-        command = ["incus", "list", "-f", "json", "--project", project_name]
-        if remote_node:
-            command = ["incus", "list", f"{remote_node}:", "-f", "json", "--project", project_name]
-        
-        # Run the command to get the list of instances in JSON format
-        result = subprocess.run(command, capture_output=True, text=True, check=True)
-        
-        # Parse the JSON output
-        instances = json.loads(result.stdout)
-        return instances
-    except subprocess.CalledProcessError as e:
-        # Print the exact error message from the command's stderr
-        logger.error(f"Error: {e.stderr.strip()}")
-        return None
-    except json.JSONDecodeError as e:
-        logger.error(f"Error: Failed to parse JSON output. {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Error: An unexpected error occurred while running 'incus list -f json': {e}")
-        return None
 
 def print_profiles(remote_node=None, project_name=None, full=False):
     """Print profiles of all instances, either from the local or a remote Incus node.
@@ -238,6 +238,10 @@ def start_instance(instance_name, client):
         logger.info(f"Instance '{instance_name}' started.")
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to start instance '{instance_name}': {e}")
+
+def get_all_profiles(client):
+    """Get all available profiles."""
+    return [profile.name for profile in client.profiles.all()]
 
 def add_gpu_profile(instance_name, client):
     """Add a GPU profile to an instance."""
@@ -584,25 +588,6 @@ def delete_project(remote_client, remote_node, project_name):
     
     except Exception as e:
         logger.error(f"An unexpected error occurred while deleting project '{project_name}': {e}")
-
-def get_incus_remotes():
-    """Fetches the list of Incus remotes as a JSON object.
-    
-    Returns:    A dictionary of remote names and their information.
-    Raises:     RuntimeError if the command fails to retrieve the JSON list
-                ValueError if the JSON output cannot be parsed.
-                
-    """
-    result = subprocess.run(['incus', 'remote', 'list', '--format', 'json'], capture_output=True, text=True)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to retrieve Incus remotes: {result.stderr}")
-
-    try:
-        remotes = json.loads(result.stdout)
-        return remotes
-    except json.JSONDecodeError:
-        raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
 
 def list_remotes(client, full=False):
     """Lists the available Incus remotes and their addresses."""
