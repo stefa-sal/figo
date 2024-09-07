@@ -116,13 +116,13 @@ def run_incus_list(remote_node="local", project_name="default"):
         return instances
     except subprocess.CalledProcessError as e:
         # Print the exact error message from the command's stderr
-        print(f"Error: {e.stderr.strip()}")
+        logger.error(f"Error: {e.stderr.strip()}")
         return None
     except json.JSONDecodeError as e:
-        print(f"Error: Failed to parse JSON output. {e}")
+        logger.error(f"Error: Failed to parse JSON output. {e}")
         return None
     except Exception as e:
-        print(f"Error: An unexpected error occurred while running 'incus list -f json': {e}")
+        logger.error(f"Error: An unexpected error occurred while running 'incus list -f json': {e}")
         return None
 
 def print_profiles(remote_node=None, project_name=None, full=False):
@@ -398,7 +398,7 @@ def dump_profile_to_file(profile, directory):
     file_name = os.path.join(directory, f"{profile.name}.yaml")
     with open(file_name, 'w') as file:
         yaml.dump(profile_data, file)
-    print(f"Profile '{profile.name}' saved to '{file_name}'.")
+    logger.info(f"Profile '{profile.name}' saved to '{file_name}'.")
 
 def dump_profiles(client):
     """Dump all profiles into .yaml files."""
@@ -423,7 +423,7 @@ def dump_profile(client, profile_name):
         dump_profile_to_file(profile, directory)
     
     except pylxd.exceptions.NotFound:
-        print(f"Profile '{profile_name}' not found.")
+        logger.error(f"Profile '{profile_name}' not found.")
         return
 
 def is_valid_ip(ip):
@@ -438,23 +438,23 @@ def is_valid_ip(ip):
 def set_ip(instance_name, ip_address, gw_address, client):
     """Set a static IP address and gateway for a stopped instance."""
     if not is_valid_ip(ip_address):
-        print(f"Error: '{ip_address}' is not a valid IP address.")
+        logger.error(f"Error: '{ip_address}' is not a valid IP address.")
         return
     
     if not is_valid_ip(gw_address):
-        print(f"Error: '{gw_address}' is not a valid IP address.")
+        logger.error(f"Error: '{gw_address}' is not a valid IP address.")
         return
 
     try:
         instance = client.instances.get(instance_name)
         if instance.status != "Stopped":
-            print(f"Error: Instance '{instance_name}' is not stopped.")
+            logger.error(f"Error: Instance '{instance_name}' is not stopped.")
             return
         
         # Check if a profile starting with "net-" is associated with the instance
         net_profiles = [profile for profile in instance.profiles if profile.startswith("net-")]
         if not net_profiles:
-            print(f"Instance '{instance_name}' does not have a 'net-' profile associated. Adding '{NET_PROFILE}' profile.")
+            logger.info(f"Instance '{instance_name}' does not have a 'net-' profile associated. Adding '{NET_PROFILE}' profile.")
             # Add the NET_PROFILE profile to the instance
             instance.profiles.append(NET_PROFILE)
             instance.save(wait=True)
@@ -479,9 +479,9 @@ config:
 
         instance.config['cloud-init.network-config'] = network_config
         instance.save(wait=True)
-        print(f"IP address '{ip_address}' and gateway '{gw_address}' assigned to instance '{instance_name}'.")
+        logger.info(f"IP address '{ip_address}' and gateway '{gw_address}' assigned to instance '{instance_name}'.")
     except pylxd.exceptions.LXDAPIException as e:
-        print(f"Failed to set IP address for instance '{instance_name}': {e}")
+        logger.error(f"Failed to set IP address for instance '{instance_name}': {e}")
 
 def set_user_key(instance_name, key_filename, client):
     """Set a public key in the /home/mpi/.ssh/authorized_keys of the specified instance."""
@@ -495,7 +495,7 @@ def set_user_key(instance_name, key_filename, client):
 
         # Check if the instance is running
         if instance.status != "Running":
-            print(f"Error: Instance '{instance_name}' is not running.")
+            logger.error(f"Error: Instance '{instance_name}' is not running.")
             return
 
         # Connect to the instance using LXD's exec
@@ -504,10 +504,10 @@ def set_user_key(instance_name, key_filename, client):
                 exec_result = instance.execute(command)
                 output, error = exec_result
                 if error:
-                    print(f"Error executing command '{' '.join(command)}': {error}")
+                    logger.error(f"Error executing command '{' '.join(command)}': {error}")
                 return output
             except Exception as e:
-                print(f"Exception while executing command '{' '.join(command)}': {e}")
+                logger.error(f"Exception while executing command '{' '.join(command)}': {e}")
                 return None
 
         # Create .ssh directory
@@ -523,13 +523,13 @@ def set_user_key(instance_name, key_filename, client):
         # Add the public key
         exec_command(['sh', '-c', f'echo "{public_key}" >> /home/mpi/.ssh/authorized_keys'])
 
-        print(f"Public key from '{key_filename}' added to /home/mpi/.ssh/authorized_keys in instance '{instance_name}'.")
+        logger.info(f"Public key from '{key_filename}' added to /home/mpi/.ssh/authorized_keys in instance '{instance_name}'.")
     except pylxd.exceptions.LXDAPIException as e:
-        print(f"Failed to set user key for instance '{instance_name}': {e}")
+        logger.error(f"Failed to set user key for instance '{instance_name}': {e}")
     except FileNotFoundError:
-        print(f"File '{key_filename}' not found.")
+        logger.error(f"File '{key_filename}' not found.")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logger.error(f"An error occurred: {e}")
 
 def list_users(client, full=False):
     """List all installed certificates with optional full details."""
@@ -614,7 +614,7 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
         if resolved_ip:
             ip_address = resolved_ip
         else:
-            print(f"Invalid IP address or hostname: {ip_address}")
+            logger.error(f"Invalid IP address or hostname: {ip_address}")
             return
 
     cert_filename = os.path.expanduser(cert_filename)
@@ -626,7 +626,7 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
         result = subprocess.run(check_cmd, shell=True)
 
         if result.returncode == 0:
-            print(f"Warning: Certificate {loc_name}.crt already exists on {ip_address}.")
+            logger.info(f"Warning: Certificate {loc_name}.crt already exists on {ip_address}.")
         else:
             # Ensure the destination directory exists
             subprocess.run(
@@ -639,7 +639,7 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
                 ["scp", cert_filename, remote_cert_path],
                 check=True
             )
-            print(f"Certificate {cert_filename} successfully transferred to {ip_address}.")
+            logger.info(f"Certificate {cert_filename} successfully transferred to {ip_address}.")
 
             # Add the certificate to the Incus daemon on the remote server
             try:
@@ -650,32 +650,32 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
                     ["ssh", f"{user}@{ip_address}", add_cert_cmd],
                     check=True
                 )
-                print(f"Certificate {loc_name}.crt added to Incus on {ip_address}.")
+                logger.info(f"Certificate {loc_name}.crt added to Incus on {ip_address}.")
             except subprocess.CalledProcessError as e:
                 if "already exists" in str(e):
-                    print(f"Warning: Certificate incus_{loc_name} already added to Incus on {ip_address}.")
+                    logger.info(f"Warning: Certificate incus_{loc_name} already added to Incus on {ip_address}.")
                 else:
-                    print(f"An error occurred while adding the certificate to Incus: {e}")
+                    logger.error(f"An error occurred while adding the certificate to Incus: {e}")
                     return
 
     except subprocess.CalledProcessError as e:
-        print(f"An error occurred while processing the certificate: {e}")
+        logger.error(f"An error occurred while processing the certificate: {e}")
         return
 
     # Check if the remote server already exists
     try:
         remotes = get_incus_remotes()
         if remote_server in remotes:
-            print(f"Warning: Remote server {remote_server} is already configured.")
+            logger.info(f"Warning: Remote server {remote_server} is already configured.")
         else:
             # Add the remote server to the client configuration
             subprocess.run(
                 ["incus", "remote", "add", remote_server, f"https://{ip_address}:{port}", "--accept-certificate"],
                 check=True
             )
-            print(f"Remote server {remote_server} added to client configuration.")
+            logger.info(f"Remote server {remote_server} added to client configuration.")
     except subprocess.CalledProcessError as e:
-        print(f"An error occurred while adding the remote server to the client configuration: {e}")
+        logger.error(f"An error occurred while adding the remote server to the client configuration: {e}")
 
 def add_user(user_name, cert_file, client, admin=False, project=None, email='', name='', org=''):
     global PROJECT_PREFIX  # Declare the use of the global variable
@@ -683,7 +683,7 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email='', 
     # Check if user already exists in the certificates
     for cert in client.certificates.all():
         if cert.name == user_name:
-            print(f"Error: User '{user_name}' already exists.")
+            logger.error(f"Error: User '{user_name}' already exists.")
             return
 
     # Initialize the project name
@@ -699,13 +699,13 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email='', 
 
             projects = get_projects(remote_node=remote_node)
             if project_name in [myproject['name'] for myproject in projects]:
-                print(f"Error: Project '{project_name}' already exists on remote '{remote_node}'.")
+                logger.error(f"Error: Project '{project_name}' already exists on remote '{remote_node}'.")
                 return
     else:
         # Check if the provided project exists on the local server
         projects = get_projects(remote_node="local")
         if project not in [myproject['name'] for myproject in projects]:
-            print(f"Error: Project '{project}' not found on the local server.")
+            logger.error(f"Error: Project '{project}' not found on the local server.")
             return
 
     directory = os.path.expanduser(USER_DIR)
@@ -721,9 +721,9 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email='', 
         # get the certificate file path
         crt_file = os.path.join(directory, cert_file)
         if not os.path.exists(crt_file):
-            print(f"Error: Certificate file '{crt_file}' not found.")
+            logger.error(f"Error: Certificate file '{crt_file}' not found.")
             return
-        print(f"Using provided certificate: {crt_file}")
+        logger.info(f"Using provided certificate: {crt_file}")
 
     else:
         # Generate key pair and certificate
@@ -731,9 +731,9 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email='', 
         pfx_file = os.path.join(directory, f"{user_name}.pfx")
         key_file = os.path.join(directory, f"{user_name}.key")
         if not generate_key_pair(user_name, crt_file, key_file, pfx_file):
-            print(f"Failed to generate key pair and certificate for user: {user_name}") 
+            logger.error(f"Failed to generate key pair and certificate for user: {user_name}") 
             return
-        print(f"Generated certificate and key pair for user: {user_name}")
+        logger.info(f"Generated certificate and key pair for user: {user_name}")
 
     # Format the description with the additional user details
     description = f"{email},{name},{org}"  # Format: email,name,org
@@ -744,7 +744,7 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email='', 
         project_created = create_project(client, project_name)
 
     if not project_created:
-        print(f"Error: Failed to create project '{project_name}', no certificate added.")
+        logger.error(f"Error: Failed to create project '{project_name}', no certificate added.")
         return
 
     # Add the user certificate to Incus
@@ -807,7 +807,7 @@ def list_storage_volumes_in_project(remote_client, project_name):
             volumes = pool.volumes.all()
         except pylxd.exceptions.NotFound:
             # Handle the case where no volumes are found in the pool
-            print(f"No volumes found in storage pool '{pool.name}'.")
+            logger.error(f"No volumes found in storage pool '{pool.name}'.")
             continue
 
         # Filter volumes by project name in their configuration
@@ -828,7 +828,7 @@ def grant_user_access(username, projectname, client):
                 break
         
         if not user_cert:
-            print(f"User '{username}' not found.")
+            logger.error(f"User '{username}' not found.")
             return
 
         # Step 3: Fetch the user's configuration
@@ -843,15 +843,15 @@ def grant_user_access(username, projectname, client):
 
                 # Step 5: Save the updated user configuration
                 user_cert.save()  # Save the updated configuration
-                print(f"User '{username}' has been granted access to project '{projectname}'.")
+                logger.info(f"User '{username}' has been granted access to project '{projectname}'.")
             else:
-                print(f"User '{username}' already has access to project '{projectname}'.")
+                logger.info(f"User '{username}' already has access to project '{projectname}'.")
         except Exception as e:
-            print(f"Error updating user configuration: {e}")
+            logger.error(f"Error updating user configuration: {e}")
             return
 
     except Exception as e:
-        print(f"Error retrieving certificate for user '{username}': {e}")
+        logger.error(f"Error retrieving certificate for user '{username}': {e}")
 
 def delete_project(remote_client, remote_node, project_name):
     """
@@ -864,19 +864,19 @@ def delete_project(remote_client, remote_node, project_name):
     try:
         # Retrieve the project from the remote node
         project = remote_client.projects.get(project_name)
-        print(f"Deleted project '{project_name}' on remote '{remote_node}'")
+        logger.info(f"Deleted project '{project_name}' on remote '{remote_node}'")
         
         # Delete the project
         project.delete()
 
     except pylxd.exceptions.NotFound:
-        print(f"Project '{project_name}' not found on the remote node. No action taken.")
+        logger.error(f"Project '{project_name}' not found on the remote node. No action taken.")
         
     except pylxd.exceptions.LXDAPIException as e:
-        print(f"Failed to delete project '{project_name}': {e}")
+        logger.error(f"Failed to delete project '{project_name}': {e}")
     
     except Exception as e:
-        print(f"An unexpected error occurred while deleting project '{project_name}': {e}")
+        logger.error(f"An unexpected error occurred while deleting project '{project_name}': {e}")
 
 def delete_user(user_name, client, purge=False, removefiles=False):
     """
@@ -901,14 +901,14 @@ def delete_user(user_name, client, purge=False, removefiles=False):
             cert_exists = True
             # Remove the user's certificate
             cert.delete()
-            print(f"Certificate for user '{user_name}' has been removed.")
+            logger.info(f"Certificate for user '{user_name}' has been removed.")
             break
 
     if not cert_exists:
         if purge:
-            print(f"Warning: User '{user_name}' does not exist.")
+            logger.info(f"Warning: User '{user_name}' does not exist.")
         else:
-            print(f"User '{user_name}' does not exist. No action taken.")
+            logger.info(f"User '{user_name}' does not exist. No action taken.")
             return
 
     # Remove the user's files if the flag is set
@@ -919,7 +919,7 @@ def delete_user(user_name, client, purge=False, removefiles=False):
             file_path = os.path.join(directory, file)
             if os.path.exists(file_path):
                 os.remove(file_path)
-                print(f"File '{file}' has been removed.")
+                logger.info(f"File '{file}' has been removed.")
 
     # Retrieve the list of remote servers
     remotes = get_incus_remotes()
@@ -956,21 +956,21 @@ def delete_user(user_name, client, purge=False, removefiles=False):
 
             # Warn if the project is not empty
             if instances or profiles or storage_volumes:
-                print(f"Warning: Project '{project_name}' on remote '{remote_node}' is not empty.")
+                logger.info(f"Warning: Project '{project_name}' on remote '{remote_node}' is not empty.")
                 if instances:
-                    print(f"  - Contains {len(instances)} instance(s)")
+                    logger.info(f"  - Contains {len(instances)} instance(s)")
                 if profiles:
-                    print(f"  - Contains {len(profiles)} profile(s)")
+                    logger.info(f"  - Contains {len(profiles)} profile(s)")
                 if storage_volumes:
-                    print(f"  - Contains {len(storage_volumes)} storage volume(s)")
+                    logger.info(f"  - Contains {len(storage_volumes)} storage volume(s)")
             else:
                 # Delete the empty project
                 delete_project(remote_client, remote_node, project_name)
 
     if not project_found:
-        print(f"No associated project '{project_name}' found for user '{user_name}' on any remote.")
+        logger.error(f"No associated project '{project_name}' found for user '{user_name}' on any remote.")
     else:
-        print(f"User '{user_name}' has been deleted successfully.")
+        logger.info(f"User '{user_name}' has been deleted successfully.")
 
 def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None):
     """Generate key pair (CRT and PFX files) for the user.
@@ -1021,7 +1021,7 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
                     cryptography.hazmat.primitives.serialization.NoEncryption()
                 ))
         except IOError as e:
-            print(f"Failed to write private key to {key_file}: {e}")
+            logger.error(f"Failed to write private key to {key_file}: {e}")
             return False
 
         # Write the certificate to a file
@@ -1029,7 +1029,7 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
             with open(crt_file, "wb") as crt:
                 crt.write(certificate.public_bytes(cryptography.hazmat.primitives.serialization.Encoding.PEM))
         except IOError as e:
-            print(f"Failed to write certificate to {crt_file}: {e}")
+            logger.error(f"Failed to write certificate to {crt_file}: {e}")
             return False
 
         # Use OpenSSL to create the PFX file with specific settings
@@ -1050,31 +1050,31 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
         try:
             subprocess.run(openssl_cmd, check=True)
         except subprocess.CalledProcessError as e:
-            print(f"OpenSSL command failed: {e}")
+            logger.error(f"OpenSSL command failed: {e}")
             return False
         except FileNotFoundError:
-            print("OpenSSL is not installed or not found in the system's PATH.")
+            logger.error("OpenSSL is not installed or not found in the system's PATH.")
             return False
 
         # Delete the key file
         try:
             subprocess.run(["rm", key_file], check=True)
         except subprocess.CalledProcessError as e:
-            print(f"Failed to delete key file {key_file}: {e}")
+            logger.error(f"Failed to delete key file {key_file}: {e}")
             return False
 
         # Add a friendly name to the PFX file
         try:
             add_friendly_name(pfx_file, f"{FIGO_PREFIX}{user_name}", password=pfx_password)
         except Exception as e:
-            print(f"Failed to add a friendly name to the PFX file {pfx_file}: {e}")
+            logger.error(f"Failed to add a friendly name to the PFX file {pfx_file}: {e}")
             return False
 
-        print(f"PFX file generated: {pfx_file}")
+        logger.info(f"PFX file generated: {pfx_file}")
         return True
 
     except Exception as e:
-        print(f"An error occurred while generating the key pair: {e}")
+        logger.error(f"An error occurred while generating the key pair: {e}")
         return False
 
 def add_friendly_name(pfx_file, friendly_name, password=None):
@@ -1109,7 +1109,7 @@ def add_friendly_name(pfx_file, friendly_name, password=None):
     # Clean up temporary files
     subprocess.run(["rm", temp_pem_file])
 
-    print(f"PFX file with friendlyName updated: {pfx_file}")
+    logger.info(f"PFX file with friendlyName updated: {pfx_file}")
 
 def create_project(client, project_name):
     try:
@@ -1122,14 +1122,14 @@ def create_project(client, project_name):
 
         # Creating the project using the correct format
         client.api.projects.post(json=project_data)
-        print(f"Project '{project_name}' created successfully.")
+        logger.info(f"Project '{project_name}' created successfully.")
         return True
 
     except pylxd.exceptions.LXDAPIException as e:
-        print(f"Error creating project '{project_name}': {str(e)}")
+        logger.error(f"Error creating project '{project_name}': {str(e)}")
         return False
     except Exception as e:
-        print(f"An unexpected error occurred creating project '{project_name}': {str(e)}")
+        logger.error(f"An unexpected error occurred creating project '{project_name}': {str(e)}")
         return False
 
 def add_certificate_to_incus(user_name, crt_file, project_name, client, admin=False, description=""):
@@ -1162,23 +1162,23 @@ def add_certificate_to_incus(user_name, crt_file, project_name, client, admin=Fa
 
         # Execute the command
         subprocess.run(command, capture_output=True, text=True, check=True)
-        print(f"Certificate '{user_name}' added to Incus.")
+        logger.info(f"Certificate '{user_name}' added to Incus.")
 
         # Edit the certificate's description if provided
         if description:
             if not edit_certificate_description(user_name, description, client):
-                print(f"Failed to add description to certificate '{user_name}'.")
+                logger.error(f"Failed to add description to certificate '{user_name}'.")
                 return False
 
         return True
 
     except subprocess.CalledProcessError as e:
         # Print the exact error message from the command's stderr
-        print(f"Failed to add certificate to Incus: {e.stderr.strip()}")
+        logger.error(f"Failed to add certificate to Incus: {e.stderr.strip()}")
         return False
 
     except Exception as e:
-        print(f"Error: An unexpected error occurred: {e}")
+        logger.error(f"Error: An unexpected error occurred: {e}")
         return False
 
 def edit_certificate_description(user_name, description, client):
@@ -1201,7 +1201,7 @@ def edit_certificate_description(user_name, description, client):
                 break
         
         if not user_cert:
-            print(f"User '{user_name}' not found.")
+            logger.error(f"User '{user_name}' not found.")
             return
         
         fingerprint = user_cert.fingerprint[:24]
@@ -1239,54 +1239,21 @@ def edit_certificate_description(user_name, description, client):
         output, error = incus_process.communicate()
 
         if incus_process.returncode != 0:
-            print("Error in executing incus command:", error)
+            logger.error("Error in executing incus command:", error)
             return False
 
-        print(f"Description added to certificate '{user_name}'.")
+        logger.info(f"Description added to certificate '{user_name}'.")
 
         # Step 5: Remove the temporary file
         os.remove(temp_file)
         return True
 
     except subprocess.CalledProcessError as e:
-        print(f"Failed to edit certificate description: {e.stderr.strip()}")
+        logger.error(f"Failed to edit certificate description: {e.stderr.strip()}")
         return False
     
     except Exception as e:
-        print(f"Error: An unexpected error occurred while editing description: {e}")
-        return False
-
-
-    try:
-        # Retrieve the certificate to find the fingerprint
-        result = subprocess.run(["incus", "config", "trust", "list"],
-                                capture_output=True, text=True, check=True)
-        lines = result.stdout.splitlines()
-        fingerprint = ""
-        for line in lines:
-            if user_name in line:
-                fingerprint = line.split()[0]  # Assuming the fingerprint is the first entry
-                break
-
-        if not fingerprint:
-            print(f"No certificate found for user '{user_name}'.")
-            return False
-
-        # Execute the command to edit the certificate description
-        edit_command = [
-            "incus", "config", "trust", "edit", fingerprint,
-            f"--set-description={description}"
-        ]
-        subprocess.run(edit_command, capture_output=True, text=True, check=True)
-        print(f"Description added to certificate '{user_name}'.")
-        return True
-
-    except subprocess.CalledProcessError as e:
-        print(f"Failed to edit certificate description: {e.stderr.strip()}")
-        return False
-
-    except Exception as e:
-        print(f"Error: An unexpected error occurred while editing description: {e}")
+        logger.error(f"Error: An unexpected error occurred while editing description: {e}")
         return False
 
 #############################################
@@ -1340,10 +1307,10 @@ def handle_instance_list(args):
                 project_scope = None
 
             if args.remote and args.remote != remote_scope:
-                print(f"Error: Conflict between scope remote '{remote_scope}' and provided remote '{args.remote}'.")
+                logger.error(f"Error: Conflict between scope remote '{remote_scope}' and provided remote '{args.remote}'.")
                 return
             if args.project and project_scope and args.project != project_scope:
-                print(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
+                logger.error(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
                 return
 
             remote_node = remote_scope
@@ -1352,7 +1319,7 @@ def handle_instance_list(args):
             project_scope = args.scope
 
             if args.project and args.project != project_scope:
-                print(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
+                logger.error(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
                 return
 
             project_name = project_scope
@@ -1441,13 +1408,27 @@ def handle_profile_command(args, client, parser_dict):
         elif args.profile_name:
             dump_profile(client, args.profile_name)
         else:
-            print("You must provide a profile name or use the --all option.")
+            logger.error("You must provide a profile name or use the --all option.")
     elif args.profile_command in ["list", "l"]:
         list_profiles(client)
 
 #############################################
 ###### figo user command
 #############################################
+
+class NoCommaCheck(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if ',' in values:
+            parser.error(f"The {option_string} argument cannot contain commas.")
+        else:
+            setattr(namespace, self.dest, values)
+
+class NoUnderscoreCheck(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if '_' in values:
+            parser.error(f"The {self.dest} argument cannot contain underscore.")
+        else:
+            setattr(namespace, self.dest, values)
 
 def create_user_parser(subparsers):
     user_parser = subparsers.add_parser("user", help="Manage users")
@@ -1457,13 +1438,13 @@ def create_user_parser(subparsers):
     user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
 
     user_add_parser = user_subparsers.add_parser("add", aliases=["a"], help="Add a new user to the system")
-    user_add_parser.add_argument("username", help="Username of the new user")
+    user_add_parser.add_argument("username", action=NoUnderscoreCheck, help="Username of the new user")
     user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional)")
     user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
     user_add_parser.add_argument("-p", "--project", help="Project name to associate the user with an existing project")
-    user_add_parser.add_argument("-e", "--email", help="Email address of the new user")
-    user_add_parser.add_argument("-n", "--name", help="Full name of the new user")
-    user_add_parser.add_argument("-o", "--org", help="Organization of the new user")
+    user_add_parser.add_argument("-e", "--email", action=NoCommaCheck, help="User's email address")
+    user_add_parser.add_argument("-n", "--name", action=NoCommaCheck, help="User's full name")
+    user_add_parser.add_argument("-o", "--org", action=NoCommaCheck, help="User's organization")
 
     user_grant_parser = user_subparsers.add_parser("grant", help="Grant a user access to a specific project")
     user_grant_parser.add_argument("username", help="Username to grant access")
