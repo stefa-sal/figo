@@ -368,7 +368,7 @@ includes appropriate tests.
 
 # License
 
-FIGO is licensed under the MIT License. See the <span
+FIGO is licensed under the Apache 2.0 License. See the <span
 class="title-ref">LICENSE</span> file for details.
 
 # Acknowledgements
