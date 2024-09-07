@@ -35,6 +35,10 @@ PROJECT_PREFIX = FIGO_PREFIX
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+#############################################
+###### figo instance command functions #####
+#############################################
+
 def get_incus_remotes():
     """Fetches the list of Incus remotes as a JSON object.
     
@@ -51,6 +55,19 @@ def get_incus_remotes():
     try:
         remotes = json.loads(result.stdout)
         return remotes
+    except json.JSONDecodeError:
+        raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
+
+def get_projects(remote_node="local"): 
+    """Fetches and returns the list of projects as a JSON object."""
+    result = subprocess.run(['incus', 'project', 'list', f"{remote_node}:", '--format', 'json'], capture_output=True, text=True)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to retrieve projects: {result.stderr}")
+
+    try:
+        projects = json.loads(result.stdout)
+        return projects
     except json.JSONDecodeError:
         raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
 
@@ -78,19 +95,6 @@ def run_incus_list(remote_node="local", project_name="default"):
     except Exception as e:
         logger.error(f"Error: An unexpected error occurred while running 'incus list -f json': {e}")
         return None
-
-def get_projects(remote_node="local"): 
-    """Fetches and returns the list of projects as a JSON object."""
-    result = subprocess.run(['incus', 'project', 'list', f"{remote_node}:", '--format', 'json'], capture_output=True, text=True)
-
-    if result.returncode != 0:
-        raise RuntimeError(f"Failed to retrieve projects: {result.stderr}")
-
-    try:
-        projects = json.loads(result.stdout)
-        return projects
-    except json.JSONDecodeError:
-        raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
 
 def get_instances(remote_node=None, project_name=None, full=False):
     """Get instances from the specified remote node and project and print their details."""
@@ -164,19 +168,6 @@ def print_profiles(remote_node=None, project_name=None, full=False):
             # Get instances from the specified remote node and project
             get_instances(remote_node=remote_node, project_name=project_name, full=full)
 
-def stop_instance(instance_name, client):
-    """Stop a specific instance."""
-    try:
-        instance = client.instances.get(instance_name)
-        if instance.status != "Running":
-            logger.error(f"Instance '{instance_name}' is not running.")
-            return
-
-        instance.stop(wait=True)
-        logger.info(f"Instance '{instance_name}' stopped.")
-    except pylxd.exceptions.LXDAPIException as e:
-        logger.error(f"Failed to stop instance '{instance_name}': {e}")
-
 def start_instance(instance_name, client):
     """Start a specific instance."""
     try:
@@ -239,196 +230,66 @@ def start_instance(instance_name, client):
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to start instance '{instance_name}': {e}")
 
-def get_all_profiles(client):
-    """Get all available profiles."""
-    return [profile.name for profile in client.profiles.all()]
-
-def add_gpu_profile(instance_name, client):
-    """Add a GPU profile to an instance."""
+def stop_instance(instance_name, client):
+    """Stop a specific instance."""
     try:
         instance = client.instances.get(instance_name)
-        if instance.status != "Stopped":
-            logger.error(f"Instance '{instance_name}' is running or in error state.")
+        if instance.status != "Running":
+            logger.error(f"Instance '{instance_name}' is not running.")
             return
 
-        instance_profiles = instance.profiles
-        gpu_profiles_for_instance = [
-            profile for profile in instance_profiles if profile.startswith("gpu-")
-        ]
-
-        result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
-        total_gpus = len(result.stdout.strip().split('\n'))
-
-        if len(gpu_profiles_for_instance) >= total_gpus:
-            logger.error(
-                f"Instance '{instance_name}' already has the maximum number of GPU profiles."
-            )
-            return
-
-        all_profiles = get_all_profiles(client)
-        available_gpu_profiles = [
-            profile for profile in all_profiles if profile.startswith("gpu-")
-            and profile not in instance_profiles
-        ]
-
-        if not available_gpu_profiles:
-            logger.error(
-                f"No available GPU profiles to add to instance '{instance_name}'."
-            )
-            return
-
-        new_profile = available_gpu_profiles[0]
-        instance_profiles.append(new_profile)
-        instance.profiles = instance_profiles
-        instance.save(wait=True)
-
-        logger.info(
-            f"Added GPU profile '{new_profile}' to instance '{instance_name}'."
-        )
+        instance.stop(wait=True)
+        logger.info(f"Instance '{instance_name}' stopped.")
     except pylxd.exceptions.LXDAPIException as e:
-        logger.error(f"Failed to add GPU profile to instance '{instance_name}': {e}")
+        logger.error(f"Failed to stop instance '{instance_name}': {e}")
 
-def remove_gpu_profile(instance_name, client):
-    """Remove a GPU profile from an instance."""
+def set_user_key(instance_name, key_filename, client):
+    """Set a public key in the /home/mpi/.ssh/authorized_keys of the specified instance."""
     try:
+        # Read the public key from the file
+        with open(key_filename, 'r') as key_file:
+            public_key = key_file.read().strip()
+
+        # Get the instance
         instance = client.instances.get(instance_name)
-        if instance.status != "Stopped":
-            logger.error(f"Instance '{instance_name}' is running or in error state.")
+
+        # Check if the instance is running
+        if instance.status != "Running":
+            logger.error(f"Error: Instance '{instance_name}' is not running.")
             return
 
-        instance_profiles = instance.profiles
-        gpu_profiles_for_instance = [
-            profile for profile in instance_profiles if profile.startswith("gpu-")
-        ]
+        # Connect to the instance using LXD's exec
+        def exec_command(command):
+            try:
+                exec_result = instance.execute(command)
+                output, error = exec_result
+                if error:
+                    logger.error(f"Error executing command '{' '.join(command)}': {error}")
+                return output
+            except Exception as e:
+                logger.error(f"Exception while executing command '{' '.join(command)}': {e}")
+                return None
 
-        if not gpu_profiles_for_instance:
-            logger.error(f"Instance '{instance_name}' has no GPU profiles to remove.")
-            return
+        # Create .ssh directory
+        exec_command(['mkdir', '-p', '/home/mpi/.ssh'])
 
-        profile_to_remove = gpu_profiles_for_instance[0]
-        instance_profiles.remove(profile_to_remove)
-        instance.profiles = instance_profiles
-        instance.save(wait=True)
+        # Create authorized_keys file
+        exec_command(['touch', '/home/mpi/.ssh/authorized_keys'])
 
-        logger.info(
-            f"Removed GPU profile '{profile_to_remove}' from instance '{instance_name}'."
-        )
+        # Set permissions
+        exec_command(['chmod', '600', '/home/mpi/.ssh/authorized_keys'])
+        exec_command(['chown', 'mpi:mpi', '/home/mpi/.ssh/authorized_keys'])
+
+        # Add the public key
+        exec_command(['sh', '-c', f'echo "{public_key}" >> /home/mpi/.ssh/authorized_keys'])
+
+        logger.info(f"Public key from '{key_filename}' added to /home/mpi/.ssh/authorized_keys in instance '{instance_name}'.")
     except pylxd.exceptions.LXDAPIException as e:
-        logger.error(
-            f"Failed to remove GPU profile from instance '{instance_name}': {e}"
-        )
-
-def remove_gpu_all_profiles(instance_name, client):
-    """Remove all GPU profiles from an instance."""
-    try:
-        instance = client.instances.get(instance_name)
-        if instance.status != "Stopped":
-            logger.error(f"Instance '{instance_name}' is running or in error state.")
-            return
-
-        instance_profiles = instance.profiles
-        gpu_profiles_for_instance = [
-            profile for profile in instance_profiles if profile.startswith("gpu-")
-        ]
-
-        if not gpu_profiles_for_instance:
-            logger.error(f"Instance '{instance_name}' has no GPU profiles to remove.")
-            return
-
-        for gpu_profile in gpu_profiles_for_instance:
-            instance_profiles.remove(gpu_profile)
-
-        instance.profiles = instance_profiles
-        instance.save(wait=True)
-
-        logger.info(
-            f"Removed all GPU profiles from instance '{instance_name}'."
-        )
-    except pylxd.exceptions.LXDAPIException as e:
-        logger.error(
-            f"Failed to remove GPU profiles from instance '{instance_name}': {e}"
-        )
-
-def show_gpu_status(client):
-    """Show the status of GPUs."""
-    result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
-    total_gpus = len(result.stdout.strip().split('\n'))
-
-    running_instances = [
-        i for i in client.instances.all() if i.status == "Running"
-    ]
-    active_gpu_profiles = [
-        profile for instance in running_instances for profile in instance.profiles
-        if profile.startswith("gpu-")
-    ]
-
-    available_gpus = total_gpus - len(active_gpu_profiles)
-
-    gpu_profiles_str = ", ".join(active_gpu_profiles)
-    print("{:<10} {:<10} {:<10} {:<40}".format("TOTAL", "AVAILABLE", "ACTIVE", "PROFILES"))
-    print("{:<10} {:<10} {:<10} {:<40}".format(total_gpus, available_gpus, len(active_gpu_profiles), gpu_profiles_str))
-
-def list_gpu_profiles(client):
-    """List all GPU profiles."""
-    gpu_profiles = [
-        profile.name for profile in client.profiles.all() if profile.name.startswith("gpu-")
-    ]
-    print("{:<10} {:<30}".format("TOTAL", "PROFILES"))
-    print("{:<10} {:<30}".format(len(gpu_profiles), ", ".join(gpu_profiles)))
-
-def list_profiles(client):
-    """List all profiles and their associated instances."""
-    profiles = client.profiles.all()
-
-    print(f"{'PROFILE':<24}{'INSTANCES'}")
-
-    for profile in profiles:
-        instances = client.instances.all()
-        associated_instances = [
-            instance.name for instance in instances
-            if profile.name in instance.profiles
-        ]
-        associated_instances_str = ', '.join(associated_instances) if associated_instances else 'None'
-        print(f"{profile.name:<24}{associated_instances_str}")
-
-def dump_profile_to_file(profile, directory):
-    """Helper function to write a profile to a .yaml file."""
-    profile_data = {
-        'name': profile.name,
-        'description': profile.description,
-        'config': profile.config,
-        'devices': profile.devices
-    }
-    file_name = os.path.join(directory, f"{profile.name}.yaml")
-    with open(file_name, 'w') as file:
-        yaml.dump(profile_data, file)
-    logger.info(f"Profile '{profile.name}' saved to '{file_name}'.")
-
-def dump_profiles(client):
-    """Dump all profiles into .yaml files."""
-    profiles = client.profiles.all()
-    directory = os.path.expanduser(PROFILE_DIR)
-    
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    
-    for profile in profiles:
-        dump_profile_to_file(profile, directory)
-
-def dump_profile(client, profile_name):
-    """Dump a specific profile into a .yaml file."""
-    try:
-        profile = client.profiles.get(profile_name)
-        directory = os.path.expanduser(PROFILE_DIR)
-        
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-        
-        dump_profile_to_file(profile, directory)
-    
-    except pylxd.exceptions.NotFound:
-        logger.error(f"Profile '{profile_name}' not found.")
-        return
+        logger.error(f"Failed to set user key for instance '{instance_name}': {e}")
+    except FileNotFoundError:
+        logger.error(f"File '{key_filename}' not found.")
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
 
 def is_valid_ip(ip):
     """Check if the provided string is a valid IPv4 address."""
@@ -487,53 +348,208 @@ config:
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to set IP address for instance '{instance_name}': {e}")
 
-def set_user_key(instance_name, key_filename, client):
-    """Set a public key in the /home/mpi/.ssh/authorized_keys of the specified instance."""
+def get_all_profiles(client):
+    """Get all available profiles."""
+    return [profile.name for profile in client.profiles.all()]
+
+#############################################
+###### figo gpu command functions ###########
+#############################################
+
+def show_gpu_status(client):
+    """Show the status of GPUs."""
+    result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+    total_gpus = len(result.stdout.strip().split('\n'))
+
+    running_instances = [
+        i for i in client.instances.all() if i.status == "Running"
+    ]
+    active_gpu_profiles = [
+        profile for instance in running_instances for profile in instance.profiles
+        if profile.startswith("gpu-")
+    ]
+
+    available_gpus = total_gpus - len(active_gpu_profiles)
+
+    gpu_profiles_str = ", ".join(active_gpu_profiles)
+    print("{:<10} {:<10} {:<10} {:<40}".format("TOTAL", "AVAILABLE", "ACTIVE", "PROFILES"))
+    print("{:<10} {:<10} {:<10} {:<40}".format(total_gpus, available_gpus, len(active_gpu_profiles), gpu_profiles_str))
+
+def list_gpu_profiles(client):
+    """List all GPU profiles."""
+    gpu_profiles = [
+        profile.name for profile in client.profiles.all() if profile.name.startswith("gpu-")
+    ]
+    print("{:<10} {:<30}".format("TOTAL", "PROFILES"))
+    print("{:<10} {:<30}".format(len(gpu_profiles), ", ".join(gpu_profiles)))
+
+def add_gpu_profile(instance_name, client):
+    """Add a GPU profile to an instance."""
     try:
-        # Read the public key from the file
-        with open(key_filename, 'r') as key_file:
-            public_key = key_file.read().strip()
-
-        # Get the instance
         instance = client.instances.get(instance_name)
-
-        # Check if the instance is running
-        if instance.status != "Running":
-            logger.error(f"Error: Instance '{instance_name}' is not running.")
+        if instance.status != "Stopped":
+            logger.error(f"Instance '{instance_name}' is running or in error state.")
             return
 
-        # Connect to the instance using LXD's exec
-        def exec_command(command):
-            try:
-                exec_result = instance.execute(command)
-                output, error = exec_result
-                if error:
-                    logger.error(f"Error executing command '{' '.join(command)}': {error}")
-                return output
-            except Exception as e:
-                logger.error(f"Exception while executing command '{' '.join(command)}': {e}")
-                return None
+        instance_profiles = instance.profiles
+        gpu_profiles_for_instance = [
+            profile for profile in instance_profiles if profile.startswith("gpu-")
+        ]
 
-        # Create .ssh directory
-        exec_command(['mkdir', '-p', '/home/mpi/.ssh'])
+        result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+        total_gpus = len(result.stdout.strip().split('\n'))
 
-        # Create authorized_keys file
-        exec_command(['touch', '/home/mpi/.ssh/authorized_keys'])
+        if len(gpu_profiles_for_instance) >= total_gpus:
+            logger.error(
+                f"Instance '{instance_name}' already has the maximum number of GPU profiles."
+            )
+            return
 
-        # Set permissions
-        exec_command(['chmod', '600', '/home/mpi/.ssh/authorized_keys'])
-        exec_command(['chown', 'mpi:mpi', '/home/mpi/.ssh/authorized_keys'])
+        all_profiles = get_all_profiles(client)
+        available_gpu_profiles = [
+            profile for profile in all_profiles if profile.startswith("gpu-")
+            and profile not in instance_profiles
+        ]
 
-        # Add the public key
-        exec_command(['sh', '-c', f'echo "{public_key}" >> /home/mpi/.ssh/authorized_keys'])
+        if not available_gpu_profiles:
+            logger.error(
+                f"No available GPU profiles to add to instance '{instance_name}'."
+            )
+            return
 
-        logger.info(f"Public key from '{key_filename}' added to /home/mpi/.ssh/authorized_keys in instance '{instance_name}'.")
+        new_profile = available_gpu_profiles[0]
+        instance_profiles.append(new_profile)
+        instance.profiles = instance_profiles
+        instance.save(wait=True)
+
+        logger.info(
+            f"Added GPU profile '{new_profile}' to instance '{instance_name}'."
+        )
     except pylxd.exceptions.LXDAPIException as e:
-        logger.error(f"Failed to set user key for instance '{instance_name}': {e}")
-    except FileNotFoundError:
-        logger.error(f"File '{key_filename}' not found.")
-    except Exception as e:
-        logger.error(f"An error occurred: {e}")
+        logger.error(f"Failed to add GPU profile to instance '{instance_name}': {e}")
+
+def remove_gpu_all_profiles(instance_name, client):
+    """Remove all GPU profiles from an instance."""
+    try:
+        instance = client.instances.get(instance_name)
+        if instance.status != "Stopped":
+            logger.error(f"Instance '{instance_name}' is running or in error state.")
+            return
+
+        instance_profiles = instance.profiles
+        gpu_profiles_for_instance = [
+            profile for profile in instance_profiles if profile.startswith("gpu-")
+        ]
+
+        if not gpu_profiles_for_instance:
+            logger.error(f"Instance '{instance_name}' has no GPU profiles to remove.")
+            return
+
+        for gpu_profile in gpu_profiles_for_instance:
+            instance_profiles.remove(gpu_profile)
+
+        instance.profiles = instance_profiles
+        instance.save(wait=True)
+
+        logger.info(
+            f"Removed all GPU profiles from instance '{instance_name}'."
+        )
+    except pylxd.exceptions.LXDAPIException as e:
+        logger.error(
+            f"Failed to remove GPU profiles from instance '{instance_name}': {e}"
+        )
+
+def remove_gpu_profile(instance_name, client):
+    """Remove a GPU profile from an instance."""
+    try:
+        instance = client.instances.get(instance_name)
+        if instance.status != "Stopped":
+            logger.error(f"Instance '{instance_name}' is running or in error state.")
+            return
+
+        instance_profiles = instance.profiles
+        gpu_profiles_for_instance = [
+            profile for profile in instance_profiles if profile.startswith("gpu-")
+        ]
+
+        if not gpu_profiles_for_instance:
+            logger.error(f"Instance '{instance_name}' has no GPU profiles to remove.")
+            return
+
+        profile_to_remove = gpu_profiles_for_instance[0]
+        instance_profiles.remove(profile_to_remove)
+        instance.profiles = instance_profiles
+        instance.save(wait=True)
+
+        logger.info(
+            f"Removed GPU profile '{profile_to_remove}' from instance '{instance_name}'."
+        )
+    except pylxd.exceptions.LXDAPIException as e:
+        logger.error(
+            f"Failed to remove GPU profile from instance '{instance_name}': {e}"
+        )
+
+#############################################
+###### figo profile command functions #######
+#############################################
+
+def dump_profile_to_file(profile, directory):
+    """Helper function to write a profile to a .yaml file."""
+    profile_data = {
+        'name': profile.name,
+        'description': profile.description,
+        'config': profile.config,
+        'devices': profile.devices
+    }
+    file_name = os.path.join(directory, f"{profile.name}.yaml")
+    with open(file_name, 'w') as file:
+        yaml.dump(profile_data, file)
+    logger.info(f"Profile '{profile.name}' saved to '{file_name}'.")
+
+def dump_profiles(client):
+    """Dump all profiles into .yaml files."""
+    profiles = client.profiles.all()
+    directory = os.path.expanduser(PROFILE_DIR)
+    
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    
+    for profile in profiles:
+        dump_profile_to_file(profile, directory)
+
+def dump_profile(client, profile_name):
+    """Dump a specific profile into a .yaml file."""
+    try:
+        profile = client.profiles.get(profile_name)
+        directory = os.path.expanduser(PROFILE_DIR)
+        
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        
+        dump_profile_to_file(profile, directory)
+    
+    except pylxd.exceptions.NotFound:
+        logger.error(f"Profile '{profile_name}' not found.")
+        return
+
+def list_profiles(client):
+    """List all profiles and their associated instances."""
+    profiles = client.profiles.all()
+
+    print(f"{'PROFILE':<24}{'INSTANCES'}")
+
+    for profile in profiles:
+        instances = client.instances.all()
+        associated_instances = [
+            instance.name for instance in instances
+            if profile.name in instance.profiles
+        ]
+        associated_instances_str = ', '.join(associated_instances) if associated_instances else 'None'
+        print(f"{profile.name:<24}{associated_instances_str}")
+
+#############################################
+###### figo user command functions ##########
+#############################################
 
 def list_users(client, full=False):
     """List all installed certificates with optional full details."""
@@ -557,186 +573,164 @@ def list_users(client, full=False):
         else:
             print(f"{name:<20} {fingerprint:<12}")
 
-def resolve_hostname(hostname):
-    """Resolve the hostname to an IP address."""
-    try:
-        return socket.gethostbyname(hostname)
-    except socket.error:
-        return None
+def add_friendly_name(pfx_file, friendly_name, password=None):
+    """Add a friendlyName attribute to the existing PFX file, overwriting the original."""
+    temp_pem_file = "temp.pem"
+    temp_pfx_file = "temp_with_friendlyname.pfx"
+
+    # Convert the existing PFX to PEM format
+    openssl_cmd = [
+        "openssl", "pkcs12", "-in", pfx_file, "-out", temp_pem_file, "-nodes"
+    ]
+    if password:
+        openssl_cmd.extend(["-password", f"pass:{password}"])
     
-def delete_project(remote_client, remote_node, project_name):
-    """
-    Delete a project on a specific remote node.
+    subprocess.run(openssl_cmd, check=True)
+
+    # Prepare the command to create the new PFX file with friendlyName
+    openssl_cmd = [
+        "openssl", "pkcs12", "-export", "-in", temp_pem_file, "-out", temp_pfx_file,
+        "-name", friendly_name
+    ]
+    if password:
+        openssl_cmd.extend(["-passin", f"pass:{password}", "-passout", f"pass:{password}"])
+    else:
+        openssl_cmd.extend(["-passout", "pass:"])
+
+    subprocess.run(openssl_cmd, check=True)
+
+    # Replace the original PFX file with the new one
+    subprocess.run(["mv", temp_pfx_file, pfx_file])
+
+    # Clean up temporary files
+    subprocess.run(["rm", temp_pem_file])
+
+    logger.info(f"PFX file with friendlyName updated: {pfx_file}")
+
+def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None):
+    """Generate key pair (CRT and PFX files) for the user.
 
     Parameters:
-    - remote_client: pylxd.Client instance connected to the remote node
-    - project_name: Name of the project to delete
-    """
-    try:
-        # Retrieve the project from the remote node
-        project = remote_client.projects.get(project_name)
-        logger.info(f"Deleted project '{project_name}' on remote '{remote_node}'")
-        
-        # Delete the project
-        project.delete()
-
-    except pylxd.exceptions.NotFound:
-        logger.error(f"Project '{project_name}' not found on the remote node. No action taken.")
-        
-    except pylxd.exceptions.LXDAPIException as e:
-        logger.error(f"Failed to delete project '{project_name}': {e}")
-    
-    except Exception as e:
-        logger.error(f"An unexpected error occurred while deleting project '{project_name}': {e}")
-
-def list_remotes(client, full=False):
-    """Lists the available Incus remotes and their addresses."""
-    try:
-        remotes = get_incus_remotes()
-    except RuntimeError as e:
-        logger.error(f"Error: {e}")
-        return
-    except ValueError as e:
-        logger.error(f"Error: {e}")
-        return
-    except Exception as e:
-        logger.error(f"An unexpected error occurred: {e}")
-        return
-
-    if full:
-        for remote_name, remote_info in remotes.items():
-            print(f"REMOTE NAME: {remote_name}")
-            for key, value in remote_info.items():
-                print(f"  {key}: {value}")
-            print("-" * 60)
-    else:
-        print("{:<20} {:<40}".format("REMOTE NAME", "ADDRESS"))
-        for remote_name, remote_info in remotes.items():
-            print("{:<20} {:<40}".format(remote_name, remote_info['Addr']))
-
-def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus/client.crt",
-           user="ubuntu", loc_name="main"):
-    """Enroll a remote server by transferring the client certificate and adding it to the Incus daemon."""
-    ip_address, port = (ip_address_port.split(":") + ["8443"])[:2]
-
-    if not is_valid_ip(ip_address):
-        resolved_ip = resolve_hostname(ip_address)
-        if resolved_ip:
-            ip_address = resolved_ip
-        else:
-            logger.error(f"Invalid IP address or hostname: {ip_address}")
-            return
-
-    cert_filename = os.path.expanduser(cert_filename)
-    remote_cert_path = f"{user}@{ip_address}:~/figo/certs/{loc_name}.crt"
-
-    try:
-        # Check if the certificate already exists on the remote server
-        check_cmd = f"ssh {user}@{ip_address} '[ -f ~/figo/certs/{loc_name}.crt ]'"
-        result = subprocess.run(check_cmd, shell=True)
-
-        if result.returncode == 0:
-            logger.info(f"Warning: Certificate {loc_name}.crt already exists on {ip_address}.")
-        else:
-            # Ensure the destination directory exists
-            subprocess.run(
-                ["ssh", f"{user}@{ip_address}", "mkdir -p ~/figo/certs"],
-                check=True
-            )
-
-            # Transfer the certificate to the remote server
-            subprocess.run(
-                ["scp", cert_filename, remote_cert_path],
-                check=True
-            )
-            logger.info(f"Certificate {cert_filename} successfully transferred to {ip_address}.")
-
-            # Add the certificate to the Incus daemon on the remote server
-            try:
-                add_cert_cmd = (
-                    f"incus config trust add-certificate --name incus_{loc_name} ~/figo/certs/{loc_name}.crt"
-                )
-                subprocess.run(
-                    ["ssh", f"{user}@{ip_address}", add_cert_cmd],
-                    check=True
-                )
-                logger.info(f"Certificate {loc_name}.crt added to Incus on {ip_address}.")
-            except subprocess.CalledProcessError as e:
-                if "already exists" in str(e):
-                    logger.info(f"Warning: Certificate incus_{loc_name} already added to Incus on {ip_address}.")
-                else:
-                    logger.error(f"An error occurred while adding the certificate to Incus: {e}")
-                    return
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"An error occurred while processing the certificate: {e}")
-        return
-
-    # Check if the remote server already exists
-    try:
-        remotes = get_incus_remotes()
-        if remote_server in remotes:
-            logger.info(f"Warning: Remote server {remote_server} is already configured.")
-        else:
-            # Add the remote server to the client configuration
-            subprocess.run(
-                ["incus", "remote", "add", remote_server, f"https://{ip_address}:{port}", "--accept-certificate"],
-                check=True
-            )
-            logger.info(f"Remote server {remote_server} added to client configuration.")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"An error occurred while adding the remote server to the client configuration: {e}")
-
-def add_certificate_to_incus(client, user_name, crt_file, project_name, admin=False, email=None, name=None, org=None):
-    """Add user certificate to Incus
-    
-    If the user is an admin, the certificate is added without any restrictions.
-    If the user is not an admin, the certificate is restricted to the specified project.
-
-    Args:
-    - user_name: The username associated with the certificate.
-    - crt_file: Path to the certificate file.
-    - project_name: Name of the project to restrict the certificate to.
-    - admin: Specifies if the user has admin privileges.
-    - email: Email address of the user.
-    - name: Name of the user.
-    - org: Organization of the user.
+    - user_name: Name of the user
+    - crt_file: Path to the certificate file
+    - key_file: Path to the private key file (PEM format) temporary file
+    - pfx_file: Path to the PFX file
+    - pfx_password: Password for the PFX file (optional)
 
     Returns:
-    True if the certificate is added successfully, False otherwise.
+    - True if the key pair was generated successfully, False otherwise
     """
+
     try:
-        command = [
-            "incus", "config", "trust", "add-certificate", crt_file, 
-            f"--name={user_name}"
+        # Generate private key
+        private_key = cryptography.hazmat.primitives.asymmetric.rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+            backend=cryptography.hazmat.backends.default_backend()
+        )
+
+        # Generate a self-signed certificate with detailed subject and issuer information
+        subject = issuer = cryptography.x509.Name([
+            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.COUNTRY_NAME, u"IT"),
+            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.STATE_OR_PROVINCE_NAME, u"RM"),
+            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.ORGANIZATION_NAME, u"Restart"),
+            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.COMMON_NAME, f"{FIGO_PREFIX}{user_name}")  # Add the user_name as the Common Name (CN)
+        ])
+
+        # Set the certificate validity to 2 years
+        certificate = cryptography.x509.CertificateBuilder() \
+            .subject_name(subject) \
+            .issuer_name(issuer) \
+            .public_key(private_key.public_key()) \
+            .serial_number(cryptography.x509.random_serial_number()) \
+            .not_valid_before(datetime.datetime.utcnow()) \
+            .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=2*365)) \
+            .sign(private_key, cryptography.hazmat.primitives.hashes.SHA256(), cryptography.hazmat.backends.default_backend())
+
+        # Write the private key to a file
+        try:
+            with open(key_file, "wb") as key_out:
+                key_out.write(private_key.private_bytes(
+                    cryptography.hazmat.primitives.serialization.Encoding.PEM,
+                    cryptography.hazmat.primitives.serialization.PrivateFormat.TraditionalOpenSSL,
+                    cryptography.hazmat.primitives.serialization.NoEncryption()
+                ))
+        except IOError as e:
+            logger.error(f"Failed to write private key to {key_file}: {e}")
+            return False
+
+        # Write the certificate to a file
+        try:
+            with open(crt_file, "wb") as crt:
+                crt.write(certificate.public_bytes(cryptography.hazmat.primitives.serialization.Encoding.PEM))
+        except IOError as e:
+            logger.error(f"Failed to write certificate to {crt_file}: {e}")
+            return False
+
+        # Use OpenSSL to create the PFX file with specific settings
+        openssl_cmd = [
+            "openssl", "pkcs12", "-export",
+            "-out", pfx_file,
+            "-inkey", key_file,
+            "-in", crt_file,
+            "-certpbe", "PBE-SHA1-3DES",  # Use SHA1 and 3DES for encryption
+            "-keypbe", "PBE-SHA1-3DES",   # Use SHA1 and 3DES for the key
+            "-macalg", "sha1",             # Use SHA1 for MAC
+            "-iter", "2048"                # Set iteration count to 2048
         ]
 
-        if not admin:
-            command.extend([
-                "--restricted", 
-                f"--projects={project_name}"
-            ])
+        if pfx_password:
+            openssl_cmd.extend(["-passout", f"pass:{pfx_password}"])
 
-        # Execute the command
-        subprocess.run(command, capture_output=True, text=True, check=True)
-        logger.info(f"Certificate '{user_name}' added to Incus.")
+        try:
+            subprocess.run(openssl_cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"OpenSSL command failed: {e}")
+            return False
+        except FileNotFoundError:
+            logger.error("OpenSSL is not installed or not found in the system's PATH.")
+            return False
 
-        # Edit the certificate's description if needed
-        if email!=None or name!=None or org!=None:
-            logger.info(f"Adding description to certificate '{user_name}'")
-            if not edit_certificate_description(client, user_name, email, name, org):
-                logger.error(f"Failed to add description to certificate '{user_name}'.")
-                return False
+        # Delete the key file
+        try:
+            subprocess.run(["rm", key_file], check=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to delete key file {key_file}: {e}")
+            return False
 
+        # Add a friendly name to the PFX file
+        try:
+            add_friendly_name(pfx_file, f"{FIGO_PREFIX}{user_name}", password=pfx_password)
+        except Exception as e:
+            logger.error(f"Failed to add a friendly name to the PFX file {pfx_file}: {e}")
+            return False
+
+        logger.info(f"PFX file generated: {pfx_file}")
         return True
 
-    except subprocess.CalledProcessError as e:
-        # Print the exact error message from the command's stderr
-        logger.error(f"Failed to add certificate to Incus: {e.stderr.strip()}")
+    except Exception as e:
+        logger.error(f"An error occurred while generating the key pair: {e}")
         return False
 
+def create_project(client, project_name):
+    try:
+        # Explicitly define the project details as a dictionary
+        project_data = {
+            "name": project_name,  # The project's name (string)
+            "description": f"Project for user {project_name}",  # Optional description
+            "config": {}  # Empty configuration for now
+        }
+
+        # Creating the project using the correct format
+        client.api.projects.post(json=project_data)
+        logger.info(f"Project '{project_name}' created successfully.")
+        return True
+
+    except pylxd.exceptions.LXDAPIException as e:
+        logger.error(f"Error creating project '{project_name}': {str(e)}")
+        return False
     except Exception as e:
-        logger.error(f"Error: An unexpected error occurred: {e}")
+        logger.error(f"An unexpected error occurred creating project '{project_name}': {str(e)}")
         return False
 
 def edit_certificate_description(client, user_name, email=None, name=None, org=None):
@@ -851,6 +845,83 @@ def edit_certificate_description(client, user_name, email=None, name=None, org=N
         logger.error(f"Error: An unexpected error occurred while editing description: {e}")
         return False
 
+def add_certificate_to_incus(client, user_name, crt_file, project_name, admin=False, email=None, name=None, org=None):
+    """Add user certificate to Incus
+    
+    If the user is an admin, the certificate is added without any restrictions.
+    If the user is not an admin, the certificate is restricted to the specified project.
+
+    Args:
+    - user_name: The username associated with the certificate.
+    - crt_file: Path to the certificate file.
+    - project_name: Name of the project to restrict the certificate to.
+    - admin: Specifies if the user has admin privileges.
+    - email: Email address of the user.
+    - name: Name of the user.
+    - org: Organization of the user.
+
+    Returns:
+    True if the certificate is added successfully, False otherwise.
+    """
+    try:
+        command = [
+            "incus", "config", "trust", "add-certificate", crt_file, 
+            f"--name={user_name}"
+        ]
+
+        if not admin:
+            command.extend([
+                "--restricted", 
+                f"--projects={project_name}"
+            ])
+
+        # Execute the command
+        subprocess.run(command, capture_output=True, text=True, check=True)
+        logger.info(f"Certificate '{user_name}' added to Incus.")
+
+        # Edit the certificate's description if needed
+        if email!=None or name!=None or org!=None:
+            logger.info(f"Adding description to certificate '{user_name}'")
+            if not edit_certificate_description(client, user_name, email, name, org):
+                logger.error(f"Failed to add description to certificate '{user_name}'.")
+                return False
+
+        return True
+
+    except subprocess.CalledProcessError as e:
+        # Print the exact error message from the command's stderr
+        logger.error(f"Failed to add certificate to Incus: {e.stderr.strip()}")
+        return False
+
+    except Exception as e:
+        logger.error(f"Error: An unexpected error occurred: {e}")
+        return False
+
+def delete_project(remote_client, remote_node, project_name):
+    """
+    Delete a project on a specific remote node.
+
+    Parameters:
+    - remote_client: pylxd.Client instance connected to the remote node
+    - project_name: Name of the project to delete
+    """
+    try:
+        # Retrieve the project from the remote node
+        project = remote_client.projects.get(project_name)
+        logger.info(f"Deleted project '{project_name}' on remote '{remote_node}'")
+        
+        # Delete the project
+        project.delete()
+
+    except pylxd.exceptions.NotFound:
+        logger.error(f"Project '{project_name}' not found on the remote node. No action taken.")
+        
+    except pylxd.exceptions.LXDAPIException as e:
+        logger.error(f"Failed to delete project '{project_name}': {e}")
+    
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while deleting project '{project_name}': {e}")
+
 def add_user(user_name, cert_file, client, admin=False, project=None, email=None, name=None, org=None):
     global PROJECT_PREFIX  # Declare the use of the global variable
 
@@ -924,6 +995,42 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
     if not admin and project==None and not certificate_added:
         delete_project(client, 'local', project_name)
         return
+
+def grant_user_access(username, projectname, client):
+    try:
+        # Step 1: Retrieve the certificate by username
+        certificates = client.certificates.all()
+        user_cert = None
+        for cert in certificates:
+            if cert.name == username:
+                user_cert = cert
+                break
+        
+        if not user_cert:
+            logger.error(f"User '{username}' not found.")
+            return
+
+        # Step 3: Fetch the user's configuration
+        try:
+            # Assuming the 'projects' attribute exists on 'user_cert'
+            projects = user_cert.projects or []  # Get current projects or initialize an empty list
+            
+            # Step 4: Modify the user's configuration to add the project
+            if projectname not in projects:
+                projects.append(projectname)
+                user_cert.projects = projects
+
+                # Step 5: Save the updated user configuration
+                user_cert.save()  # Save the updated configuration
+                logger.info(f"User '{username}' has been granted access to project '{projectname}'.")
+            else:
+                logger.info(f"User '{username}' already has access to project '{projectname}'.")
+        except Exception as e:
+            logger.error(f"Error updating user configuration: {e}")
+            return
+
+    except Exception as e:
+        logger.error(f"Error retrieving certificate for user '{username}': {e}")
 
 def edit_user(username, client, email=None, name=None, org=None):
     """
@@ -1010,42 +1117,6 @@ def list_storage_volumes_in_project(remote_client, project_name):
                 storage_volumes_in_project.append(volume.name)
 
     return storage_volumes_in_project
-
-def grant_user_access(username, projectname, client):
-    try:
-        # Step 1: Retrieve the certificate by username
-        certificates = client.certificates.all()
-        user_cert = None
-        for cert in certificates:
-            if cert.name == username:
-                user_cert = cert
-                break
-        
-        if not user_cert:
-            logger.error(f"User '{username}' not found.")
-            return
-
-        # Step 3: Fetch the user's configuration
-        try:
-            # Assuming the 'projects' attribute exists on 'user_cert'
-            projects = user_cert.projects or []  # Get current projects or initialize an empty list
-            
-            # Step 4: Modify the user's configuration to add the project
-            if projectname not in projects:
-                projects.append(projectname)
-                user_cert.projects = projects
-
-                # Step 5: Save the updated user configuration
-                user_cert.save()  # Save the updated configuration
-                logger.info(f"User '{username}' has been granted access to project '{projectname}'.")
-            else:
-                logger.info(f"User '{username}' already has access to project '{projectname}'.")
-        except Exception as e:
-            logger.error(f"Error updating user configuration: {e}")
-            return
-
-    except Exception as e:
-        logger.error(f"Error retrieving certificate for user '{username}': {e}")
 
 def delete_user(user_name, client, purge=False, removefiles=False):
     """
@@ -1141,165 +1212,114 @@ def delete_user(user_name, client, purge=False, removefiles=False):
     else:
         logger.info(f"User '{user_name}' has been deleted successfully.")
 
-def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None):
-    """Generate key pair (CRT and PFX files) for the user.
+#############################################
+###### figo remote command functions ########
+#############################################
 
-    Parameters:
-    - user_name: Name of the user
-    - crt_file: Path to the certificate file
-    - key_file: Path to the private key file (PEM format) temporary file
-    - pfx_file: Path to the PFX file
-    - pfx_password: Password for the PFX file (optional)
-
-    Returns:
-    - True if the key pair was generated successfully, False otherwise
-    """
-
+def list_remotes(client, full=False):
+    """Lists the available Incus remotes and their addresses."""
     try:
-        # Generate private key
-        private_key = cryptography.hazmat.primitives.asymmetric.rsa.generate_private_key(
-            public_exponent=65537,
-            key_size=2048,
-            backend=cryptography.hazmat.backends.default_backend()
-        )
-
-        # Generate a self-signed certificate with detailed subject and issuer information
-        subject = issuer = cryptography.x509.Name([
-            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.COUNTRY_NAME, u"IT"),
-            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.STATE_OR_PROVINCE_NAME, u"RM"),
-            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.ORGANIZATION_NAME, u"Restart"),
-            cryptography.x509.NameAttribute(cryptography.x509.oid.NameOID.COMMON_NAME, f"{FIGO_PREFIX}{user_name}")  # Add the user_name as the Common Name (CN)
-        ])
-
-        # Set the certificate validity to 2 years
-        certificate = cryptography.x509.CertificateBuilder() \
-            .subject_name(subject) \
-            .issuer_name(issuer) \
-            .public_key(private_key.public_key()) \
-            .serial_number(cryptography.x509.random_serial_number()) \
-            .not_valid_before(datetime.datetime.utcnow()) \
-            .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=2*365)) \
-            .sign(private_key, cryptography.hazmat.primitives.hashes.SHA256(), cryptography.hazmat.backends.default_backend())
-
-        # Write the private key to a file
-        try:
-            with open(key_file, "wb") as key_out:
-                key_out.write(private_key.private_bytes(
-                    cryptography.hazmat.primitives.serialization.Encoding.PEM,
-                    cryptography.hazmat.primitives.serialization.PrivateFormat.TraditionalOpenSSL,
-                    cryptography.hazmat.primitives.serialization.NoEncryption()
-                ))
-        except IOError as e:
-            logger.error(f"Failed to write private key to {key_file}: {e}")
-            return False
-
-        # Write the certificate to a file
-        try:
-            with open(crt_file, "wb") as crt:
-                crt.write(certificate.public_bytes(cryptography.hazmat.primitives.serialization.Encoding.PEM))
-        except IOError as e:
-            logger.error(f"Failed to write certificate to {crt_file}: {e}")
-            return False
-
-        # Use OpenSSL to create the PFX file with specific settings
-        openssl_cmd = [
-            "openssl", "pkcs12", "-export",
-            "-out", pfx_file,
-            "-inkey", key_file,
-            "-in", crt_file,
-            "-certpbe", "PBE-SHA1-3DES",  # Use SHA1 and 3DES for encryption
-            "-keypbe", "PBE-SHA1-3DES",   # Use SHA1 and 3DES for the key
-            "-macalg", "sha1",             # Use SHA1 for MAC
-            "-iter", "2048"                # Set iteration count to 2048
-        ]
-
-        if pfx_password:
-            openssl_cmd.extend(["-passout", f"pass:{pfx_password}"])
-
-        try:
-            subprocess.run(openssl_cmd, check=True)
-        except subprocess.CalledProcessError as e:
-            logger.error(f"OpenSSL command failed: {e}")
-            return False
-        except FileNotFoundError:
-            logger.error("OpenSSL is not installed or not found in the system's PATH.")
-            return False
-
-        # Delete the key file
-        try:
-            subprocess.run(["rm", key_file], check=True)
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to delete key file {key_file}: {e}")
-            return False
-
-        # Add a friendly name to the PFX file
-        try:
-            add_friendly_name(pfx_file, f"{FIGO_PREFIX}{user_name}", password=pfx_password)
-        except Exception as e:
-            logger.error(f"Failed to add a friendly name to the PFX file {pfx_file}: {e}")
-            return False
-
-        logger.info(f"PFX file generated: {pfx_file}")
-        return True
-
+        remotes = get_incus_remotes()
+    except RuntimeError as e:
+        logger.error(f"Error: {e}")
+        return
+    except ValueError as e:
+        logger.error(f"Error: {e}")
+        return
     except Exception as e:
-        logger.error(f"An error occurred while generating the key pair: {e}")
-        return False
+        logger.error(f"An unexpected error occurred: {e}")
+        return
 
-def add_friendly_name(pfx_file, friendly_name, password=None):
-    """Add a friendlyName attribute to the existing PFX file, overwriting the original."""
-    temp_pem_file = "temp.pem"
-    temp_pfx_file = "temp_with_friendlyname.pfx"
-
-    # Convert the existing PFX to PEM format
-    openssl_cmd = [
-        "openssl", "pkcs12", "-in", pfx_file, "-out", temp_pem_file, "-nodes"
-    ]
-    if password:
-        openssl_cmd.extend(["-password", f"pass:{password}"])
-    
-    subprocess.run(openssl_cmd, check=True)
-
-    # Prepare the command to create the new PFX file with friendlyName
-    openssl_cmd = [
-        "openssl", "pkcs12", "-export", "-in", temp_pem_file, "-out", temp_pfx_file,
-        "-name", friendly_name
-    ]
-    if password:
-        openssl_cmd.extend(["-passin", f"pass:{password}", "-passout", f"pass:{password}"])
+    if full:
+        for remote_name, remote_info in remotes.items():
+            print(f"REMOTE NAME: {remote_name}")
+            for key, value in remote_info.items():
+                print(f"  {key}: {value}")
+            print("-" * 60)
     else:
-        openssl_cmd.extend(["-passout", "pass:"])
+        print("{:<20} {:<40}".format("REMOTE NAME", "ADDRESS"))
+        for remote_name, remote_info in remotes.items():
+            print("{:<20} {:<40}".format(remote_name, remote_info['Addr']))
 
-    subprocess.run(openssl_cmd, check=True)
-
-    # Replace the original PFX file with the new one
-    subprocess.run(["mv", temp_pfx_file, pfx_file])
-
-    # Clean up temporary files
-    subprocess.run(["rm", temp_pem_file])
-
-    logger.info(f"PFX file with friendlyName updated: {pfx_file}")
-
-def create_project(client, project_name):
+def resolve_hostname(hostname):
+    """Resolve the hostname to an IP address."""
     try:
-        # Explicitly define the project details as a dictionary
-        project_data = {
-            "name": project_name,  # The project's name (string)
-            "description": f"Project for user {project_name}",  # Optional description
-            "config": {}  # Empty configuration for now
-        }
+        return socket.gethostbyname(hostname)
+    except socket.error:
+        return None
 
-        # Creating the project using the correct format
-        client.api.projects.post(json=project_data)
-        logger.info(f"Project '{project_name}' created successfully.")
-        return True
+def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus/client.crt",
+           user="ubuntu", loc_name="main"):
+    """Enroll a remote server by transferring the client certificate and adding it to the Incus daemon."""
+    ip_address, port = (ip_address_port.split(":") + ["8443"])[:2]
 
-    except pylxd.exceptions.LXDAPIException as e:
-        logger.error(f"Error creating project '{project_name}': {str(e)}")
-        return False
-    except Exception as e:
-        logger.error(f"An unexpected error occurred creating project '{project_name}': {str(e)}")
-        return False
+    if not is_valid_ip(ip_address):
+        resolved_ip = resolve_hostname(ip_address)
+        if resolved_ip:
+            ip_address = resolved_ip
+        else:
+            logger.error(f"Invalid IP address or hostname: {ip_address}")
+            return
+
+    cert_filename = os.path.expanduser(cert_filename)
+    remote_cert_path = f"{user}@{ip_address}:~/figo/certs/{loc_name}.crt"
+
+    try:
+        # Check if the certificate already exists on the remote server
+        check_cmd = f"ssh {user}@{ip_address} '[ -f ~/figo/certs/{loc_name}.crt ]'"
+        result = subprocess.run(check_cmd, shell=True)
+
+        if result.returncode == 0:
+            logger.info(f"Warning: Certificate {loc_name}.crt already exists on {ip_address}.")
+        else:
+            # Ensure the destination directory exists
+            subprocess.run(
+                ["ssh", f"{user}@{ip_address}", "mkdir -p ~/figo/certs"],
+                check=True
+            )
+
+            # Transfer the certificate to the remote server
+            subprocess.run(
+                ["scp", cert_filename, remote_cert_path],
+                check=True
+            )
+            logger.info(f"Certificate {cert_filename} successfully transferred to {ip_address}.")
+
+            # Add the certificate to the Incus daemon on the remote server
+            try:
+                add_cert_cmd = (
+                    f"incus config trust add-certificate --name incus_{loc_name} ~/figo/certs/{loc_name}.crt"
+                )
+                subprocess.run(
+                    ["ssh", f"{user}@{ip_address}", add_cert_cmd],
+                    check=True
+                )
+                logger.info(f"Certificate {loc_name}.crt added to Incus on {ip_address}.")
+            except subprocess.CalledProcessError as e:
+                if "already exists" in str(e):
+                    logger.info(f"Warning: Certificate incus_{loc_name} already added to Incus on {ip_address}.")
+                else:
+                    logger.error(f"An error occurred while adding the certificate to Incus: {e}")
+                    return
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"An error occurred while processing the certificate: {e}")
+        return
+
+    # Check if the remote server already exists
+    try:
+        remotes = get_incus_remotes()
+        if remote_server in remotes:
+            logger.info(f"Warning: Remote server {remote_server} is already configured.")
+        else:
+            # Add the remote server to the client configuration
+            subprocess.run(
+                ["incus", "remote", "add", remote_server, f"https://{ip_address}:{port}", "--accept-certificate"],
+                check=True
+            )
+            logger.info(f"Remote server {remote_server} added to client configuration.")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"An error occurred while adding the remote server to the client configuration: {e}")
 
 
 #############################################
