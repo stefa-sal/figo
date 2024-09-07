@@ -559,6 +559,31 @@ def resolve_hostname(hostname):
         return socket.gethostbyname(hostname)
     except socket.error:
         return None
+    
+def delete_project(remote_client, remote_node, project_name):
+    """
+    Delete a project on a specific remote node.
+
+    Parameters:
+    - remote_client: pylxd.Client instance connected to the remote node
+    - project_name: Name of the project to delete
+    """
+    try:
+        # Retrieve the project from the remote node
+        project = remote_client.projects.get(project_name)
+        logger.info(f"Deleted project '{project_name}' on remote '{remote_node}'")
+        
+        # Delete the project
+        project.delete()
+
+    except pylxd.exceptions.NotFound:
+        logger.error(f"Project '{project_name}' not found on the remote node. No action taken.")
+        
+    except pylxd.exceptions.LXDAPIException as e:
+        logger.error(f"Failed to delete project '{project_name}': {e}")
+    
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while deleting project '{project_name}': {e}")
 
 def get_incus_remotes():
     """Fetches the list of Incus remotes as a JSON object.
@@ -677,7 +702,171 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
     except subprocess.CalledProcessError as e:
         logger.error(f"An error occurred while adding the remote server to the client configuration: {e}")
 
-def add_user(user_name, cert_file, client, admin=False, project=None, email='', name='', org=''):
+def add_certificate_to_incus(client, user_name, crt_file, project_name, admin=False, email=None, name=None, org=None):
+    """Add user certificate to Incus
+    
+    If the user is an admin, the certificate is added without any restrictions.
+    If the user is not an admin, the certificate is restricted to the specified project.
+
+    Args:
+    - user_name: The username associated with the certificate.
+    - crt_file: Path to the certificate file.
+    - project_name: Name of the project to restrict the certificate to.
+    - admin: Specifies if the user has admin privileges.
+    - email: Email address of the user.
+    - name: Name of the user.
+    - org: Organization of the user.
+
+    Returns:
+    True if the certificate is added successfully, False otherwise.
+    """
+    try:
+        command = [
+            "incus", "config", "trust", "add-certificate", crt_file, 
+            f"--name={user_name}"
+        ]
+
+        if not admin:
+            command.extend([
+                "--restricted", 
+                f"--projects={project_name}"
+            ])
+
+        # Execute the command
+        subprocess.run(command, capture_output=True, text=True, check=True)
+        logger.info(f"Certificate '{user_name}' added to Incus.")
+
+        # Edit the certificate's description if needed
+        if email!=None or name!=None or org!=None:
+            logger.info(f"Adding description to certificate '{user_name}'")
+            if not edit_certificate_description(client, user_name, email, name, org):
+                logger.error(f"Failed to add description to certificate '{user_name}'.")
+                return False
+
+        return True
+
+    except subprocess.CalledProcessError as e:
+        # Print the exact error message from the command's stderr
+        logger.error(f"Failed to add certificate to Incus: {e.stderr.strip()}")
+        return False
+
+    except Exception as e:
+        logger.error(f"Error: An unexpected error occurred: {e}")
+        return False
+
+def edit_certificate_description(client, user_name, email=None, name=None, org=None):
+    """Edit the description of a certificate in Incus by the user name.
+
+    Args:
+    - user_name: The username associated with the certificate.
+    - email: Email address of the user.
+    - name: Name of the user.
+    - org: Organization of the user.
+
+    Returns:
+    True if the description was successfully added, False otherwise.
+    """
+
+    if email==None and name==None and org==None:
+        logger.info("Warning: certificate description not changed.")
+        return True
+    
+    try:
+        # Step 1: Retrieve the certificate by username
+        certificates = client.certificates.all()
+        user_cert = None
+        for cert in certificates:
+            if cert.name == user_name:
+                user_cert = cert
+                break
+        
+        if not user_cert:
+            logger.error(f"User '{user_name}' not found.")
+            return
+        
+        fingerprint = user_cert.fingerprint[:24]
+
+        # Step 2: load the user_cert into a temporary .YAML object using incus config trust show
+        result = subprocess.run(["incus", "config", "trust", "show", fingerprint], capture_output=True, text=True, check=True)
+        user_cert_yaml = yaml.safe_load(result.stdout)   # Load the certificate configuration into a dictionary
+        
+        if not user_cert_yaml:
+            logger.error(f"Failed to load certificate configuration for '{user_name}'.")
+            return False
+        
+        if "description" not in user_cert_yaml:
+            user_cert_yaml["description"] = ""
+
+        original_description = user_cert_yaml["description"] # Get the original description
+        target_email = ''
+        target_name = ''
+        target_org = ''
+        if original_description == "":
+            pass
+        else:
+            target_email, target_name, target_org = original_description.split(",")
+
+        if email!=None:
+            target_email = email
+        if name!=None:
+            target_name = name
+        if org!=None:
+            target_org = org
+
+        # Format the description with the additional user details
+        description = f"{target_email},{target_name},{target_org}"  # Format: email,name,org
+
+        if description == ",,":
+            description = ""
+
+        user_cert_yaml["description"] = description  # Update the description
+
+        # Step 3: Save the updated configuration to a temporary file
+        temp_file = f"/tmp/{user_name}.yaml"
+        with open(temp_file, "w") as f:
+            yaml.dump(user_cert_yaml, f)
+        
+        # Step 4: Update the certificate configuration using incus config trust edit
+        # The command is: cat temp_file | incus config trust edit fingerprint
+
+        cat_process = subprocess.Popen(
+            ['cat', temp_file], 
+            stdout=subprocess.PIPE  # Redirect the output to a pipe
+        )
+
+        # Create a subprocess to run 'incus config trust edit fingerprint'
+        # using the output of the first command as input
+        incus_process = subprocess.Popen(
+            ['incus', 'config', 'trust', 'edit', fingerprint], 
+            stdin=cat_process.stdout,  # Use output of cat as input
+            stdout=subprocess.PIPE  # Redirect the output to a pipe if needed
+        )
+
+        # Close the output of the first process to allow it to receive a SIGPIPE if the second exits
+        cat_process.stdout.close()
+
+        # Get the output of the second command if needed
+        output, error = incus_process.communicate()
+
+        if incus_process.returncode != 0:
+            logger.error("Error in executing incus command:", error)
+            return False
+
+        logger.info(f"Description added to certificate '{user_name}'.")
+
+        # Step 5: Remove the temporary file
+        os.remove(temp_file)
+        return True
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to edit certificate description: {e.stderr.strip()}")
+        return False
+    
+    except Exception as e:
+        logger.error(f"Error: An unexpected error occurred while editing description: {e}")
+        return False
+
+def add_user(user_name, cert_file, client, admin=False, project=None, email=None, name=None, org=None):
     global PROJECT_PREFIX  # Declare the use of the global variable
 
     # Check if user already exists in the certificates
@@ -735,9 +924,6 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email='', 
             return
         logger.info(f"Generated certificate and key pair for user: {user_name}")
 
-    # Format the description with the additional user details
-    description = f"{email},{name},{org}"  # Format: email,name,org
-
     # Create project for the user
     project_created = False
     if not admin and project==None:
@@ -748,11 +934,34 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email='', 
         return
 
     # Add the user certificate to Incus
-    certificate_added = add_certificate_to_incus(user_name, crt_file, project_name, client, admin=admin, description=description)
+    certificate_added = add_certificate_to_incus(client, user_name, crt_file, project_name, admin=admin, email=email, name=name, org=org)
 
     if not admin and project==None and not certificate_added:
         delete_project(client, 'local', project_name)
         return
+
+def edit_user(username, client, email=None, name=None, org=None):
+    """
+    Edit user's certificate description in Incus.
+
+    Args:
+    - username (str): The username associated with the certificate.
+    - client (object): Client instance for interacting with Incus.
+    - email (str, optional): The new email address for the user.
+    - name (str, optional): The new full name for the user.
+    - org (str, optional): The new organization for the user.
+
+    Returns:
+    - bool: True if the edit was successful, False otherwise.
+    """
+
+    # Update the description using the edit_certificate_description function
+    if not edit_certificate_description(client, username, email, name, org):
+        print(f"Failed to update description for user '{username}'.")
+        return False
+
+    print(f"Updated description for user '{username}' successfully.")
+    return True
 
 def get_certificate_path(remote_node):
     """
@@ -852,31 +1061,6 @@ def grant_user_access(username, projectname, client):
 
     except Exception as e:
         logger.error(f"Error retrieving certificate for user '{username}': {e}")
-
-def delete_project(remote_client, remote_node, project_name):
-    """
-    Delete a project on a specific remote node.
-
-    Parameters:
-    - remote_client: pylxd.Client instance connected to the remote node
-    - project_name: Name of the project to delete
-    """
-    try:
-        # Retrieve the project from the remote node
-        project = remote_client.projects.get(project_name)
-        logger.info(f"Deleted project '{project_name}' on remote '{remote_node}'")
-        
-        # Delete the project
-        project.delete()
-
-    except pylxd.exceptions.NotFound:
-        logger.error(f"Project '{project_name}' not found on the remote node. No action taken.")
-        
-    except pylxd.exceptions.LXDAPIException as e:
-        logger.error(f"Failed to delete project '{project_name}': {e}")
-    
-    except Exception as e:
-        logger.error(f"An unexpected error occurred while deleting project '{project_name}': {e}")
 
 def delete_user(user_name, client, purge=False, removefiles=False):
     """
@@ -1132,129 +1316,6 @@ def create_project(client, project_name):
         logger.error(f"An unexpected error occurred creating project '{project_name}': {str(e)}")
         return False
 
-def add_certificate_to_incus(user_name, crt_file, project_name, client, admin=False, description=""):
-    """Add user certificate to Incus
-    
-    If the user is an admin, the certificate is added without any restrictions.
-    If the user is not an admin, the certificate is restricted to the specified project.
-
-    Args:
-    - user_name: The username associated with the certificate.
-    - crt_file: Path to the certificate file.
-    - project_name: Name of the project to restrict the certificate to.
-    - admin: Specifies if the user has admin privileges.
-    - description: Optional description for the certificate.
-
-    Returns:
-    True if the certificate is added successfully, False otherwise.
-    """
-    try:
-        command = [
-            "incus", "config", "trust", "add-certificate", crt_file, 
-            f"--name={user_name}"
-        ]
-
-        if not admin:
-            command.extend([
-                "--restricted", 
-                f"--projects={project_name}"
-            ])
-
-        # Execute the command
-        subprocess.run(command, capture_output=True, text=True, check=True)
-        logger.info(f"Certificate '{user_name}' added to Incus.")
-
-        # Edit the certificate's description if provided
-        if description:
-            if not edit_certificate_description(user_name, description, client):
-                logger.error(f"Failed to add description to certificate '{user_name}'.")
-                return False
-
-        return True
-
-    except subprocess.CalledProcessError as e:
-        # Print the exact error message from the command's stderr
-        logger.error(f"Failed to add certificate to Incus: {e.stderr.strip()}")
-        return False
-
-    except Exception as e:
-        logger.error(f"Error: An unexpected error occurred: {e}")
-        return False
-
-def edit_certificate_description(user_name, description, client):
-    """Edit the description of a certificate in Incus by the user name.
-
-    Args:
-    - user_name: The username associated with the certificate.
-    - description: Description to be added to the certificate.
-
-    Returns:
-    True if the description was successfully added, False otherwise.
-    """
-    try:
-        # Step 1: Retrieve the certificate by username
-        certificates = client.certificates.all()
-        user_cert = None
-        for cert in certificates:
-            if cert.name == user_name:
-                user_cert = cert
-                break
-        
-        if not user_cert:
-            logger.error(f"User '{user_name}' not found.")
-            return
-        
-        fingerprint = user_cert.fingerprint[:24]
-
-        # Step 2: load the user_cert into a temporary .YAML object using incus config trust show
-        result = subprocess.run(["incus", "config", "trust", "show", fingerprint], capture_output=True, text=True, check=True)
-        user_cert_yaml = yaml.safe_load(result.stdout)   # Load the certificate configuration into a dictionary
-        user_cert_yaml["description"] = description  # Update the description
-
-        # Step 3: Save the updated configuration to a temporary file
-        temp_file = f"/tmp/{user_name}.yaml"
-        with open(temp_file, "w") as f:
-            yaml.dump(user_cert_yaml, f)
-        
-        # Step 4: Update the certificate configuration using incus config trust edit
-        # The command is: cat temp_file | incus config trust edit fingerprint
-
-        cat_process = subprocess.Popen(
-            ['cat', temp_file], 
-            stdout=subprocess.PIPE  # Redirect the output to a pipe
-        )
-
-        # Create a subprocess to run 'incus config trust edit fingerprint'
-        # using the output of the first command as input
-        incus_process = subprocess.Popen(
-            ['incus', 'config', 'trust', 'edit', fingerprint], 
-            stdin=cat_process.stdout,  # Use output of cat as input
-            stdout=subprocess.PIPE  # Redirect the output to a pipe if needed
-        )
-
-        # Close the output of the first process to allow it to receive a SIGPIPE if the second exits
-        cat_process.stdout.close()
-
-        # Get the output of the second command if needed
-        output, error = incus_process.communicate()
-
-        if incus_process.returncode != 0:
-            logger.error("Error in executing incus command:", error)
-            return False
-
-        logger.info(f"Description added to certificate '{user_name}'.")
-
-        # Step 5: Remove the temporary file
-        os.remove(temp_file)
-        return True
-
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Failed to edit certificate description: {e.stderr.strip()}")
-        return False
-    
-    except Exception as e:
-        logger.error(f"Error: An unexpected error occurred while editing description: {e}")
-        return False
 
 #############################################
 ######### Command Line Interface (CLI) ######
@@ -1434,9 +1495,11 @@ def create_user_parser(subparsers):
     user_parser = subparsers.add_parser("user", help="Manage users")
     user_subparsers = user_parser.add_subparsers(dest="user_command")
 
+    # List subcommand
     user_list_parser = user_subparsers.add_parser("list", aliases=["l"], help="List installed certificates (use -f or --full for more details)")
     user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
 
+    # Add subcommand
     user_add_parser = user_subparsers.add_parser("add", aliases=["a"], help="Add a new user to the system")
     user_add_parser.add_argument("username", action=NoUnderscoreCheck, help="Username of the new user")
     user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional)")
@@ -1446,15 +1509,25 @@ def create_user_parser(subparsers):
     user_add_parser.add_argument("-n", "--name", action=NoCommaCheck, help="User's full name")
     user_add_parser.add_argument("-o", "--org", action=NoCommaCheck, help="User's organization")
 
+    # Grant subcommand
     user_grant_parser = user_subparsers.add_parser("grant", help="Grant a user access to a specific project")
     user_grant_parser.add_argument("username", help="Username to grant access")
     user_grant_parser.add_argument("projectname", help="Project name to grant access to")
 
+    # Edit subcommand
+    user_edit_parser = user_subparsers.add_parser("edit", help="Edit an existing user's details")
+    user_edit_parser.add_argument("username", action=NoUnderscoreCheck, help="Username to edit")
+    user_edit_parser.add_argument("-e", "--email", action=NoCommaCheck, help="New email for the user")
+    user_edit_parser.add_argument("-n", "--name", action=NoCommaCheck, help="New full name for the user")
+    user_edit_parser.add_argument("-o", "--org", action=NoCommaCheck, help="New organization for the user")
+
+    # Delete subcommand
     user_delete_parser = user_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete an existing user from the system")
     user_delete_parser.add_argument("username", help="Username of the user to delete")
     user_delete_parser.add_argument("-p", "--purge", action="store_true", help="Delete associated projects and user files (if -r) even if the user does not exist")
     user_delete_parser.add_argument("-r", "--removefiles", action="store_true", help="Remove the associated files of the user from the users folder")
 
+    # Link parsers back to the main command
     subparsers._name_parser_map["us"] = user_parser
     subparsers._name_parser_map["u"] = user_parser
 
@@ -1469,9 +1542,10 @@ def handle_user_command(args, client, parser_dict):
         add_user(args.username, args.cert, client, admin=args.admin, project=args.project, email=args.email, name=args.name, org=args.org)
     elif args.user_command == "grant":
         grant_user_access(args.username, args.projectname, client)
+    elif args.user_command == "edit":
+        edit_user(args.username, client, email=args.email, name=args.name, org=args.org)
     elif args.user_command in ["delete", "del", "d"]:
         delete_user(args.username, client, purge=args.purge, removefiles=args.removefiles)
-
 
 #############################################
 ###### figo remote command
