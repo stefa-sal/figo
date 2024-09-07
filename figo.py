@@ -957,10 +957,10 @@ def edit_user(username, client, email=None, name=None, org=None):
 
     # Update the description using the edit_certificate_description function
     if not edit_certificate_description(client, username, email, name, org):
-        print(f"Failed to update description for user '{username}'.")
+        logger.error(f"Failed to update description for user '{username}'.")
         return False
 
-    print(f"Updated description for user '{username}' successfully.")
+    logger.info(f"Updated description for user '{username}' successfully.")
     return True
 
 def get_certificate_path(remote_node):
