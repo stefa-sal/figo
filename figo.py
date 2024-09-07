@@ -552,11 +552,17 @@ def list_profiles(client):
 #############################################
 
 def list_users(client, full=False):
-    """List all installed certificates with optional full details."""
-    
+    """List all installed certificates with optional full details, adding email, name, and org details with specified lengths."""
+
+    def truncate(text, length):
+        """Helper function to truncate text to a specific length with '*>' at the end if trimmed."""
+        if len(text) > length:
+            return f"{text[:length-2]}*>"
+        return text
+
     if full:
-        print("{:<18} {:<12} {:<4} {:<5} {:<20}".format(
-            "NAME", "FINGERPRINT", "TYPE", "ADMIN", "PROJECTS"
+        print("{:<18} {:<12} {:<4} {:<5} {:<30} {:<20} {:<15} {:<20}".format(
+            "NAME", "FINGERPRINT", "TYPE", "ADMIN", "EMAIL", "REAL NAME", "ORGANIZATION", "PROJECTS"
         ))
     else:
         print("{:<20} {:<12}".format("NAME", "FINGERPRINT"))
@@ -565,14 +571,30 @@ def list_users(client, full=False):
         name = certificate.name or "N/A"
         fingerprint = certificate.fingerprint[:12]
 
+        # Fetch detailed information about the certificate using incus command
+        result = subprocess.run(["incus", "config", "trust", "show", fingerprint], capture_output=True, text=True, check=True)
+        user_cert_yaml = yaml.safe_load(result.stdout)  # Load the certificate configuration into a dictionary
+
+        # Parse email, name, and organization from the description if available
+        description = user_cert_yaml.get('description', '')
+        description_parts = description.split(',') if description else ['', '', '']
+        # Ensure that description_parts has exactly three elements
+        description_parts += [''] * (3 - len(description_parts))  # Pad list to avoid index errors
+
+        email = truncate(description_parts[0], 30)
+        real_name = truncate(description_parts[1], 20)
+        org = truncate(description_parts[2], 15)
+        projects = ", ".join(certificate.projects) if certificate.projects else "None"
+        admin_status = 'no' if certificate.restricted else 'yes'
+
         if full:
-            projects = ", ".join(certificate.projects)
-            print("{:<18} {:<12} {:<4} {:<5} {:<20}".format(
+            print("{:<18} {:<12} {:<4} {:<5} {:<30} {:<20} {:<15} {:<20}".format(
                 name, fingerprint, certificate.type[:3], 
-                'no' if certificate.restricted else 'yes', projects
+                admin_status, email, real_name, org, projects
             ))
         else:
             print(f"{name:<20} {fingerprint:<12}")
+
 
 def add_friendly_name(pfx_file, friendly_name, password=None):
     """Add a friendlyName attribute to the existing PFX file, overwriting the original."""
