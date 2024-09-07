@@ -555,8 +555,8 @@ def list_users(client, full=False):
     """List all installed certificates with optional full details."""
     
     if full:
-        print("{:<20} {:<12} {:<5} {:<10} {:<20}".format(
-            "NAME", "FINGERPRINT", "TYPE", "RESTRICTED", "PROJECTS"
+        print("{:<20} {:<12} {:<5} {:<5} {:<20}".format(
+            "NAME", "FINGERPRINT", "TYPE", "ADMIN", "PROJECTS"
         ))
     else:
         print("{:<20} {:<12}".format("NAME", "FINGERPRINT"))
@@ -567,8 +567,9 @@ def list_users(client, full=False):
 
         if full:
             projects = ", ".join(certificate.projects)
-            print("{:<20} {:<12} {:<5} {:<10} {:<20}".format(
-                name, fingerprint, certificate.type[:3], str(certificate.restricted), projects
+            print("{:<20} {:<12} {:<5} {:<5} {:<20}".format(
+                name, fingerprint, certificate.type[:3], 
+                'admin' if str(certificate.restricted) else 'user', projects
             ))
         else:
             print(f"{name:<20} {fingerprint:<12}")
@@ -1327,7 +1328,7 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
 #############################################
 
 #############################################
-###### figo instance command
+###### figo instance command CLI ############
 #############################################
 
 def create_instance_parser(subparsers):
@@ -1411,7 +1412,7 @@ def handle_instance_command(args, client, parser_dict):
         set_ip(args.instance_name, args.ip_address, args.gw_address, client)
 
 #############################################
-###### figo gpu command
+###### figo gpu command CLI #################
 #############################################
 
 def create_gpu_parser(subparsers):
@@ -1447,7 +1448,7 @@ def handle_gpu_command(args, client, parser_dict):
             remove_gpu_profile(args.instance_name, client)
 
 #############################################
-###### figo profile command
+###### figo profile command CLI #############
 #############################################
 
 def create_profile_parser(subparsers):
@@ -1479,7 +1480,7 @@ def handle_profile_command(args, client, parser_dict):
         list_profiles(client)
 
 #############################################
-###### figo user command
+###### figo user command CLI ################
 #############################################
 
 class NoCommaCheck(argparse.Action):
@@ -1553,7 +1554,7 @@ def handle_user_command(args, client, parser_dict):
         delete_user(args.username, client, purge=args.purge, removefiles=args.removefiles)
 
 #############################################
-###### figo remote command
+###### figo remote command CLI ##############
 #############################################
 
 def create_remote_parser(subparsers):
