@@ -168,24 +168,35 @@ def print_profiles(remote_node=None, project_name=None, full=False):
             # Get instances from the specified remote node and project
             get_instances(remote_node=remote_node, project_name=project_name, full=full)
 
-def start_instance(instance_name, client):
-    """Start a specific instance."""
+def start_instance(instance_name, remote, project):
+    """Start a specific instance on a given remote and within a specific project."""
     try:
-        instance = client.instances.get(instance_name)
+        # Connect to the specified remote 
+        remote_client = get_remote_client(remote, project_name=project)    
+
+        instance = remote_client.instances.get(instance_name)
+        
+        #print all the information about the instance
+        print('selected:', instance.name)
+
         if instance.status != "Stopped":
-            logger.error(f"Instance '{instance_name}' is not stopped.")
+            logger.error(f"Instance '{instance_name}' in project '{project}' on remote '{remote}' is not stopped.")
             return
 
+        return
+
+        # Get GPU profiles associated with this instance
         instance_profiles = instance.profiles
         gpu_profiles_for_instance = [
             profile for profile in instance_profiles if profile.startswith("gpu-")
         ]
         
+        # Check GPU availability
         result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
         total_gpus = len(result.stdout.strip().split('\n'))
         
         running_instances = [
-            i for i in client.instances.all() if i.status == "Running"
+            i for i in remote_client.instances.all() if i.status == "Running"
         ]
         active_gpu_profiles = [
             profile for my_instance in running_instances for profile in my_instance.profiles
@@ -199,6 +210,7 @@ def start_instance(instance_name, client):
             )
             return
 
+        # Resolve GPU conflicts
         conflict = False
         for gpu_profile in gpu_profiles_for_instance:
             for my_instance in running_instances:
@@ -210,7 +222,7 @@ def start_instance(instance_name, client):
                     )
                     instance_profiles.remove(gpu_profile)
                     new_profile = [
-                        p for p in client.profiles.all() 
+                        p for p in remote_client.profiles.all() 
                         if p.name.startswith("gpu-") and p.name not in active_gpu_profiles
                         and p.name not in instance_profiles
                     ][0].name
@@ -221,14 +233,17 @@ def start_instance(instance_name, client):
                     )
                     break
 
+        # Update profiles if needed and start the instance
         if conflict:
             instance.profiles = instance_profiles
             instance.save(wait=True)
 
         instance.start(wait=True)
-        logger.info(f"Instance '{instance_name}' started.")
+        logger.info(f"Instance '{instance_name}' started on '{remote}:{project}'.")
+
     except pylxd.exceptions.LXDAPIException as e:
-        logger.error(f"Failed to start instance '{instance_name}': {e}")
+        logger.error(f"Failed to start instance '{instance_name}' in project '{project}' on remote '{remote}': {e}")
+
 
 def stop_instance(instance_name, client):
     """Stop a specific instance."""
@@ -551,6 +566,9 @@ def list_profiles(client):
 ###### figo user command functions ##########
 #############################################
 
+import subprocess
+import yaml
+
 def list_users(client, full=False):
     """List all installed certificates with optional full details, adding email, name, and org details with specified lengths."""
 
@@ -560,15 +578,10 @@ def list_users(client, full=False):
             return f"{text[:length-2]}*>"
         return text
 
-    if full:
-        print("{:<18} {:<12} {:<4} {:<5} {:<30} {:<20} {:<15} {:<20}".format(
-            "NAME", "FINGERPRINT", "TYPE", "ADMIN", "EMAIL", "REAL NAME", "ORGANIZATION", "PROJECTS"
-        ))
-    else:
-        print("{:<20} {:<12}".format("NAME", "FINGERPRINT"))
+    certificates_info = []
 
     for certificate in client.certificates.all():
-        name = certificate.name or "N/A"
+        name = certificate.name or "__N/A__"
         fingerprint = certificate.fingerprint[:12]
 
         # Fetch detailed information about the certificate using incus command
@@ -587,13 +600,37 @@ def list_users(client, full=False):
         projects = ", ".join(certificate.projects) if certificate.projects else "None"
         admin_status = 'no' if certificate.restricted else 'yes'
 
+        certificates_info.append({
+            "name": name,
+            "fingerprint": fingerprint,
+            "type": certificate.type[:3],
+            "admin": admin_status,
+            "email": email,
+            "real_name": real_name,
+            "org": org,
+            "projects": projects
+        })
+
+    # Sort certificates by name
+    certificates_info.sort(key=lambda x: x["name"])
+
+    # Print headers
+    if full:
+        print("{:<18} {:<12} {:<4} {:<5} {:<30} {:<20} {:<15} {:<20}".format(
+            "NAME", "FINGERPRINT", "TYPE", "ADMIN", "EMAIL", "REAL NAME", "ORGANIZATION", "PROJECTS"
+        ))
+    else:
+        print("{:<20} {:<12}".format("NAME", "FINGERPRINT"))
+
+    # Print sorted certificates
+    for cert in certificates_info:
         if full:
             print("{:<18} {:<12} {:<4} {:<5} {:<30} {:<20} {:<15} {:<20}".format(
-                name, fingerprint, certificate.type[:3], 
-                admin_status, email, real_name, org, projects
+                cert["name"], cert["fingerprint"], cert["type"], 
+                cert["admin"], cert["email"], cert["real_name"], cert["org"], cert["projects"]
             ))
         else:
-            print(f"{name:<20} {fingerprint:<12}")
+            print(f"{cert['name']:<20} {cert['fingerprint']:<12}")
 
 
 def add_friendly_name(pfx_file, friendly_name, password=None):
@@ -922,10 +959,11 @@ def add_certificate_to_incus(client, user_name, crt_file, project_name, admin=Fa
 
 def delete_project(remote_client, remote_node, project_name):
     """
-    Delete a project on a specific remote node.
+    Delete a project on a specific remote node (can also be local:)
 
     Parameters:
-    - remote_client: pylxd.Client instance connected to the remote node
+    - remote_client: pylxd.Client instance connected to the remote node (can also be local:)
+    - remote_node: Name of the remote node where the project is located
     - project_name: Name of the project to delete
     """
     try:
@@ -1084,17 +1122,23 @@ def get_certificate_path(remote_node):
     """
     return os.path.join(CERTIFICATE_DIR, f"{remote_node}.crt")
 
-def get_remote_address(remotes, remote_node):
+def get_remote_address(remote_node):
     """Retrieve the address of the remote node."""
+
+    remotes = get_incus_remotes()
     remote_info = remotes.get(remote_node, None)
     if remote_info and "Addr" in remote_info:
         return remote_info["Addr"]
     else:
         raise ValueError(f"Error: Address not found for remote node '{remote_node}'")
 
-def list_instances_in_project(remote_client, project_name):
+def list_instances_in_project(remote_node, project_name):
     """List instances associated with a project on a specific remote node."""
     
+    #TODO it does not work because remote_client.instances.all() only returns instances in the project
+    # associated with the remote_client, not all instances in the remote node 
+    remote_client = get_remote_client(remote_node, remotes)
+
     # List all instances in the remote node
     instances = remote_client.instances.all()
 
@@ -1140,6 +1184,17 @@ def list_storage_volumes_in_project(remote_client, project_name):
                 storage_volumes_in_project.append(volume.name)
 
     return storage_volumes_in_project
+
+def get_remote_client(remote_node, project_name='default'):
+    """Create a pylxd.Client instance for the specified remote node and project."""
+    if remote_node == "local":
+        return pylxd.Client(project=project_name)
+    else:
+        address = get_remote_address(remote_node)
+        cert_path = get_certificate_path(remote_node)
+
+        # Create a pylxd.Client instance with SSL verification
+        return pylxd.Client(endpoint=address, verify=cert_path, project=project_name)
 
 def delete_user(user_name, client, purge=False, removefiles=False):
     """
@@ -1198,18 +1253,10 @@ def delete_user(user_name, client, purge=False, removefiles=False):
         if project_name in [project['name'] for project in projects]:
             project_found = True
 
-            # Connect a client to the remote Incus server
-            if remote_node == "local":
-                remote_client = pylxd.Client()
-            else:
-                address = get_remote_address(remotes, remote_node)
-                cert_path = get_certificate_path(remote_node)
-
-                # Create a pylxd.Client instance with SSL verification
-                remote_client = pylxd.Client(endpoint=address, verify=cert_path)
+            #remote_client = get_remote_client(remote_node, remotes)
 
             # Check if there are any instances in the project
-            instances = list_instances_in_project(remote_client, project_name)
+            instances = list_instances_in_project(remote_node, project_name)
             # Check if there are any profiles in the project
             profiles = list_profiles_in_project(remote_client, project_name)
             # Check if there are any storage volumes in the project
@@ -1357,33 +1404,42 @@ def create_instance_parser(subparsers):
     instance_parser = subparsers.add_parser("instance", help="Manage instances")
     instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
 
+    # Add common options for remote and project to a function to avoid repetition
+    def add_common_arguments(parser):
+        parser.add_argument("-r", "--remote", help="Specify the remote server name")
+        parser.add_argument("-p", "--project", help="Specify the project name")
+
     instance_list_parser = instance_subparsers.add_parser("list", aliases=["l"],
         help="List instances (use -f or --full for more details)"
     )
     instance_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of instance profiles")
-    instance_list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project' to limit the listing")
-    instance_list_parser.add_argument("-p", "--project", help="Project name to list instances from")
-    instance_list_parser.add_argument("-r", "--remote", help="Remote Incus server name")
+    instance_list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project', 'project', or 'remote:' to limit the listing")
+    add_common_arguments(instance_list_parser)
 
     start_parser = instance_subparsers.add_parser("start", help="Start a specific instance")
-    start_parser.add_argument("instance_name", help="Name of the instance to start")
+    start_parser.add_argument("instance_name", help="Name of the instance to start. Can include remote and project scope.")
+    add_common_arguments(start_parser)
 
     stop_parser = instance_subparsers.add_parser("stop", help="Stop a specific instance")
-    stop_parser.add_argument("instance_name", help="Name of the instance to stop")
+    stop_parser.add_argument("instance_name", help="Name of the instance to stop. Can include remote and project scope.")
+    add_common_arguments(stop_parser)
 
     set_key_parser = instance_subparsers.add_parser("set_key", help="Set a public key for a user in an instance")
-    set_key_parser.add_argument("instance_name", help="Name of the instance")
+    set_key_parser.add_argument("instance_name", help="Name of the instance. Can include remote and project scope.")
     set_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
+    add_common_arguments(set_key_parser)
 
     set_ip_parser = instance_subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance")
-    set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for")
+    set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for. Can include remote and project scope.")
     set_ip_parser.add_argument("ip_address", help="Static IP address to assign to the instance")
     set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
+    add_common_arguments(set_ip_parser)
 
     subparsers._name_parser_map["in"] = instance_parser
     subparsers._name_parser_map["i"] = instance_parser
 
     return instance_parser
+
 
 def handle_instance_list(args):
     remote_node = args.remote
@@ -1418,20 +1474,63 @@ def handle_instance_list(args):
     else:
         print_profiles(remote_node, project_name=project_name, full=False)
 
-def handle_instance_command(args, client, parser_dict):
-
+def handle_instance_command(args, parser_dict):
     if not args.instance_command:
         parser_dict['instance_parser'].print_help()
-    elif args.instance_command in ["list", "l"]:
+        return
+
+    # Function to handle parsing of remote and project from the instance name and arguments
+    def parse_instance_scope(instance_name, provided_remote, provided_project):
+        remote, project, instance = '', '', instance_name  # Default values
+
+        if ':' in instance_name:
+            parts = instance_name.split(':')
+            if len(parts) == 2:
+                if '.' in parts[1]:
+                    remote, project_instance = parts
+                    project, instance = project_instance.split('.', 1)
+                else:
+                    remote, instance = parts
+        elif '.' in instance_name:
+            project, instance = instance_name.split('.', 1)
+
+        # Resolve conflicts
+        if provided_remote and remote != '' and provided_remote != remote:
+            print(f"Error: Conflict between scope remote '{remote}' and provided remote '{provided_remote}'.")
+            return None, None, None
+        if provided_project and project != '' and provided_project != project:
+            print(f"Error: Conflict between scope project '{project}' and provided project '{provided_project}'.")
+            return None, None, None
+
+        # Use provided flags if there's no conflict and they are provided
+        remote = provided_remote if provided_remote else remote
+        project = provided_project if provided_project else project
+
+        if remote == '':
+            remote = 'local'
+
+        if project == '':
+            project = 'default'
+
+        return remote, project, instance
+
+    # Check the command type and handle appropriately
+    if args.instance_command in ["list", "l"]:
         handle_instance_list(args)
-    elif args.instance_command == "start":
-        start_instance(args.instance_name, client)
-    elif args.instance_command == "stop":
-        stop_instance(args.instance_name, client)
-    elif args.instance_command == "set_key":
-        set_user_key(args.instance_name, args.key_filename, client)
-    elif args.instance_command == "set_ip":
-        set_ip(args.instance_name, args.ip_address, args.gw_address, client)
+    else:
+        remote, project, instance = parse_instance_scope(args.instance_name, args.remote, args.project)
+        if remote is None or project is None:
+            return  # Error already printed by parse_instance_scope
+
+        if args.instance_command == "start":
+            start_instance(instance, remote, project)
+        elif args.instance_command == "stop":
+            stop_instance(instance, remote, project)
+        elif args.instance_command == "set_key":
+            set_user_key(instance, args.key_filename, remote, project)
+        elif args.instance_command == "set_ip":
+            set_ip(instance, args.ip_address, args.gw_address, remote, project)
+
 
 #############################################
 ###### figo gpu command CLI #################
@@ -1629,7 +1728,7 @@ def create_parser():
 
     return parser, parser_dict
 
-def handle_command(args, client, parser, parser_dict):
+def handle_command(args, parser, parser_dict):
 
     # if --version is provided, print the version and exit
     if hasattr(args, 'version'):
@@ -1638,26 +1737,29 @@ def handle_command(args, client, parser, parser_dict):
     
     # Handle the command based on the subparser
     if args.command in ["instance", "in", "i"]:
-        handle_instance_command(args, client, parser_dict)
+        handle_instance_command(args, parser_dict)
     elif args.command in ["gpu", "gp", "g"]:
+        client = pylxd.Client()
         handle_gpu_command(args, client, parser_dict)
     elif args.command in ["profile", "pr", "p"]:
+        client = pylxd.Client()
         handle_profile_command(args, client, parser_dict)
     elif args.command in ["user", "us", "u"]:
+        client = pylxd.Client()
         handle_user_command(args, client, parser_dict)
     elif args.command in ["remote", "re", "r"]:
+        client = pylxd.Client()
         handle_remote_command(args, client, parser_dict)
 
 def main():
     parser, parser_dict = create_parser()
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
-    client = pylxd.Client()
 
     if not args.command:
         parser.print_help()
     else:
-        handle_command(args, client, parser, parser_dict)   
+        handle_command(args, parser, parser_dict)   
 
 if __name__ == "__main__":
     main()
