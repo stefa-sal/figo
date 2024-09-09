@@ -183,8 +183,6 @@ def start_instance(instance_name, remote, project):
             logger.error(f"Instance '{instance_name}' in project '{project}' on remote '{remote}' is not stopped.")
             return
 
-        return
-
         # Get GPU profiles associated with this instance
         instance_profiles = instance.profiles
         gpu_profiles_for_instance = [
