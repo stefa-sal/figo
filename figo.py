@@ -370,6 +370,48 @@ def get_all_profiles(client):
     """Get all available profiles."""
     return [profile.name for profile in client.profiles.all()]
 
+def create_instance(image, instance_name, remote, project, instance_type):
+    """Create a new instance from an image on the specified remote and project, with specified type."""
+    try:
+        # Set up the LXD client for the remote server
+        if remote == "local":
+            client = pylxd.Client(project=project)
+        else:
+            remote_address = get_remote_address(remote)  # Function to retrieve the remote address
+            client = pylxd.Client(endpoint=remote_address, verify=True, project=project)
+
+        # Check if the instance already exists
+        try:
+            existing_instance = client.instances.get(instance_name)
+            if existing_instance:
+                print(f"Instance '{instance_name}' already exists in project '{project}' on remote '{remote}'.")
+                return
+        except pylxd.exceptions.LXDAPIException:
+            # Instance does not exist, so proceed with creation
+            pass
+
+        # Create the new instance
+        config = {
+            'name': instance_name,
+            'source': {
+                'type': 'image',
+                'alias': image,
+            },
+            'type': instance_type
+        }
+
+        print(f"Creating instance '{instance_name}' of type '{instance_type}' from image '{image}' on project '{project}' and remote '{remote}'...")
+        instance = client.instances.create(config, wait=True)
+        print(f"Instance '{instance_name}' created successfully.")
+
+    except pylxd.exceptions.LXDAPIException as e:
+        print(f"Failed to create instance '{instance_name}': {e}")
+        return
+
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return
+
 #############################################
 ###### figo gpu command functions ###########
 #############################################
@@ -1443,6 +1485,13 @@ def create_instance_parser(subparsers):
     set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
     add_common_arguments(set_ip_parser)
 
+    create_parser = instance_subparsers.add_parser("create", help="Create a new instance")
+    create_parser.add_argument("image", 
+            help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
+    create_parser.add_argument("instance_name", help="Name of the new instance. Can include remote and project scope in the format 'remote:project.instance_name'")
+    create_parser.add_argument("-t", "--type", choices=["vm", "container", "cnt"], default="container", help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container').")
+    add_common_arguments(create_parser)    
+
     subparsers._name_parser_map["in"] = instance_parser
     subparsers._name_parser_map["i"] = instance_parser
 
@@ -1495,18 +1544,31 @@ def handle_instance_command(args, parser_dict):
             if len(parts) == 2:
                 if '.' in parts[1]:
                     remote, project_instance = parts
-                    project, instance = project_instance.split('.', 1)
+                    parts_pro_inst = project_instance.split('.')
+                    if len(parts_pro_inst) == 2:
+                        project, instance = parts_pro_inst
+                    else:
+                        logger.error(f"Syntax error in instance name '{instance_name}'.")
+                        return None, None, None
                 else:
                     remote, instance = parts
+            else:
+                logger.error(f"Syntax error in instance name '{instance_name}'.")
+                return None, None, None
         elif '.' in instance_name:
-            project, instance = instance_name.split('.', 1)
-
+            parts_pro_inst = instance_name.split('.')
+            if len(parts_pro_inst) == 2:
+                project, instance = parts_pro_inst
+            else:
+                logger.error(f"Syntax error in instance name '{instance_name}'.")
+                return None, None, None
+            
         # Resolve conflicts
         if provided_remote and remote != '' and provided_remote != remote:
-            print(f"Error: Conflict between scope remote '{remote}' and provided remote '{provided_remote}'.")
+            logger.error(f"Error: Conflict between scope remote '{remote}' and provided remote '{provided_remote}'.")
             return None, None, None
         if provided_project and project != '' and provided_project != project:
-            print(f"Error: Conflict between scope project '{project}' and provided project '{provided_project}'.")
+            logger.error(f"Error: Conflict between scope project '{project}' and provided project '{provided_project}'.")
             return None, None, None
 
         # Use provided flags if there's no conflict and they are provided
@@ -1520,6 +1582,17 @@ def handle_instance_command(args, parser_dict):
             project = 'default'
 
         return remote, project, instance
+
+    def parse_image(image_name):
+        if ':' in image_name:
+            parts = image_name.split(':')
+            if len(parts) == 2:
+                return image_name
+            else:
+                logger.error(f"Syntax error in image name '{image_name}'.")
+                return None
+        else:
+            return f"images:{image_name}"
 
     # Check the command type and handle appropriately
     if args.instance_command in ["list", "l"]:
@@ -1537,7 +1610,17 @@ def handle_instance_command(args, parser_dict):
             set_user_key(instance, remote, project, args.key_filename)
         elif args.instance_command == "set_ip":
             set_ip(instance, remote, project, args.ip_address, args.gw_address)
+        elif args.instance_command == "create":
+            image = parse_image(args.image)
+            if image is None:
+                return  # Error already printed by parse_image
 
+            # Determine instance type
+            instance_type = args.type
+            if instance_type == "cnt":
+                instance_type = "container"  # Convert 'cnt' to 'container'
+
+            create_instance(image, instance, remote, project, instance_type)
 
 #############################################
 ###### figo gpu command CLI #################
