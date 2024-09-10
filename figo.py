@@ -93,7 +93,7 @@ def run_incus_list(remote_node="local", project_name="default"):
         logger.error(f"Error: Failed to parse JSON output. {e}")
         return None
     except Exception as e:
-        logger.error(f"Error: An unexpected error occurred while running 'incus list -f json': {e}")
+        logger.error(f"Unexpected error while running 'incus list -f json': {e}")
         return None
 
 def get_instances(remote_node=None, project_name=None, full=False):
@@ -171,14 +171,11 @@ def print_profiles(remote_node=None, project_name=None, full=False):
 def start_instance(instance_name, remote, project):
     """Start a specific instance on a given remote and within a specific project."""
     try:
-        # Connect to the specified remote 
-        remote_client = get_remote_client(remote, project_name=project)    
+        # Connect to the specified remote and project 
+        remote_client = get_remote_client(remote, project_name=project)
 
         instance = remote_client.instances.get(instance_name)
         
-        #print all the information about the instance
-        print('selected:', instance.name)
-
         if instance.status != "Stopped":
             logger.error(f"Instance '{instance_name}' in project '{project}' on remote '{remote}' is not stopped.")
             return
@@ -243,28 +240,33 @@ def start_instance(instance_name, remote, project):
         logger.error(f"Failed to start instance '{instance_name}' in project '{project}' on remote '{remote}': {e}")
 
 
-def stop_instance(instance_name, client):
+def stop_instance(instance_name, remote, project):
     """Stop a specific instance."""
+
     try:
-        instance = client.instances.get(instance_name)
+        # get the specified instance in project and remote  
+        remote_client = get_remote_client(remote, project_name=project)
+        instance = remote_client.instances.get(instance_name)
+
         if instance.status != "Running":
-            logger.error(f"Instance '{instance_name}' is not running.")
+            logger.error(f"Instance '{instance_name}' in project '{project}' on remote '{remote}' is not running.")
             return
 
         instance.stop(wait=True)
         logger.info(f"Instance '{instance_name}' stopped.")
     except pylxd.exceptions.LXDAPIException as e:
-        logger.error(f"Failed to stop instance '{instance_name}': {e}")
+        logger.error(f"Failed to stop instance '{instance_name}' in project '{project}' on remote '{remote}': {e}")
 
-def set_user_key(instance_name, key_filename, client):
+def set_user_key(instance_name, remote, project, key_filename, client):
     """Set a public key in the /home/mpi/.ssh/authorized_keys of the specified instance."""
     try:
         # Read the public key from the file
         with open(key_filename, 'r') as key_file:
             public_key = key_file.read().strip()
 
-        # Get the instance
-        instance = client.instances.get(instance_name)
+        # get the specified instance in project and remote  
+        remote_client = get_remote_client(remote, project_name=project)
+        instance = remote_client.instances.get(instance_name)
 
         # Check if the instance is running
         if instance.status != "Running":
@@ -313,7 +315,7 @@ def is_valid_ip(ip):
             return True
     return False
 
-def set_ip(instance_name, ip_address, gw_address, client):
+def set_ip(instance_name, remote, project, ip_address, gw_address, client):
     """Set a static IP address and gateway for a stopped instance."""
     if not is_valid_ip(ip_address):
         logger.error(f"Error: '{ip_address}' is not a valid IP address.")
@@ -324,7 +326,10 @@ def set_ip(instance_name, ip_address, gw_address, client):
         return
 
     try:
-        instance = client.instances.get(instance_name)
+        # get the specified instance in project and remote  
+        remote_client = get_remote_client(remote, project_name=project)
+        instance = remote_client.instances.get(instance_name)
+
         if instance.status != "Stopped":
             logger.error(f"Error: Instance '{instance_name}' is not stopped.")
             return
@@ -788,7 +793,7 @@ def create_project(client, project_name):
         logger.error(f"Error creating project '{project_name}': {str(e)}")
         return False
     except Exception as e:
-        logger.error(f"An unexpected error occurred creating project '{project_name}': {str(e)}")
+        logger.error(f"Unexpected error during creation of project: '{project_name}': {str(e)}")
         return False
 
 def edit_certificate_description(client, user_name, email=None, name=None, org=None):
@@ -900,7 +905,7 @@ def edit_certificate_description(client, user_name, email=None, name=None, org=N
         return False
     
     except Exception as e:
-        logger.error(f"Error: An unexpected error occurred while editing description: {e}")
+        logger.error(f"Unexpected error while editing description: {e}")
         return False
 
 def add_certificate_to_incus(client, user_name, crt_file, project_name, admin=False, email=None, name=None, org=None):
@@ -952,10 +957,10 @@ def add_certificate_to_incus(client, user_name, crt_file, project_name, admin=Fa
         return False
 
     except Exception as e:
-        logger.error(f"Error: An unexpected error occurred: {e}")
+        logger.error(f"Unexpected error while adding certificate: {e}")
         return False
 
-def delete_project(remote_client, remote_node, project_name):
+def delete_project(remote_node, project_name):
     """
     Delete a project on a specific remote node (can also be local:)
 
@@ -964,22 +969,24 @@ def delete_project(remote_client, remote_node, project_name):
     - remote_node: Name of the remote node where the project is located
     - project_name: Name of the project to delete
     """
+    remote_client = get_remote_client(remote_node, project_name=project_name)
+
     try:
         # Retrieve the project from the remote node
         project = remote_client.projects.get(project_name)
-        logger.info(f"Deleted project '{project_name}' on remote '{remote_node}'")
         
         # Delete the project
         project.delete()
+        logger.info(f"Deleted project '{project_name}' on remote '{remote_node}'")
 
     except pylxd.exceptions.NotFound:
         logger.error(f"Project '{project_name}' not found on the remote node. No action taken.")
         
     except pylxd.exceptions.LXDAPIException as e:
-        logger.error(f"Failed to delete project '{project_name}': {e}")
+        logger.error(f"Failed to delete project '{project_name}' on remote '{remote_node}: {e}")
     
     except Exception as e:
-        logger.error(f"An unexpected error occurred while deleting project '{project_name}': {e}")
+        logger.error(f"Unexpected error while deleting project '{project_name}' on remote '{remote_node}: {e}")
 
 def add_user(user_name, cert_file, client, admin=False, project=None, email=None, name=None, org=None):
     global PROJECT_PREFIX  # Declare the use of the global variable
@@ -1133,11 +1140,9 @@ def get_remote_address(remote_node):
 def list_instances_in_project(remote_node, project_name):
     """List instances associated with a project on a specific remote node."""
     
-    #TODO it does not work because remote_client.instances.all() only returns instances in the project
-    # associated with the remote_client, not all instances in the remote node 
-    remote_client = get_remote_client(remote_node, remotes)
+    remote_client = get_remote_client(remote_node, project_name=project_name)
 
-    # List all instances in the remote node
+    # List all instances in the remote node in the given project
     instances = remote_client.instances.all()
 
     # Filter instances by the project name
@@ -1146,8 +1151,10 @@ def list_instances_in_project(remote_node, project_name):
     ]
     return instances_in_project
 
-def list_profiles_in_project(remote_client, project_name):
+def list_profiles_in_project(remote_node, project_name):
     """List profiles associated with a project on a specific remote node."""
+
+    remote_client = get_remote_client(remote_node, project_name=project_name)
 
     profiles_in_project = []
 
@@ -1161,8 +1168,10 @@ def list_profiles_in_project(remote_client, project_name):
 
     return profiles_in_project
 
-def list_storage_volumes_in_project(remote_client, project_name):
+def list_storage_volumes_in_project(remote_node, project_name):
     """List storage volumes associated with a project on a specific remote node."""
+
+    remote_client = get_remote_client(remote_node, project_name=project_name)
 
     storage_volumes_in_project = []
 
@@ -1256,11 +1265,11 @@ def delete_user(user_name, client, purge=False, removefiles=False):
             # Check if there are any instances in the project
             instances = list_instances_in_project(remote_node, project_name)
             # Check if there are any profiles in the project
-            profiles = list_profiles_in_project(remote_client, project_name)
+            profiles = list_profiles_in_project(remote_node, project_name)
             # Check if there are any storage volumes in the project
             #TODO: Implement this function
             storage_volumes = None
-            #storage_volumes = list_storage_volumes_in_project(remote_client, project_name)
+            #storage_volumes = list_storage_volumes_in_project(remote_node, project_name)
 
             # Warn if the project is not empty
             if instances or profiles or storage_volumes:
@@ -1273,7 +1282,8 @@ def delete_user(user_name, client, purge=False, removefiles=False):
                     logger.info(f"  - Contains {len(storage_volumes)} storage volume(s)")
             else:
                 # Delete the empty project
-                delete_project(remote_client, remote_node, project_name)
+                #TODO
+                delete_project(remote_node, project_name)
 
     if not project_found:
         logger.error(f"No associated project '{project_name}' found for user '{user_name}' on any remote.")
@@ -1295,7 +1305,7 @@ def list_remotes(client, full=False):
         logger.error(f"Error: {e}")
         return
     except Exception as e:
-        logger.error(f"An unexpected error occurred: {e}")
+        logger.error(f"Unexpected error: {e}")
         return
 
     if full:
@@ -1438,7 +1448,6 @@ def create_instance_parser(subparsers):
 
     return instance_parser
 
-
 def handle_instance_list(args):
     remote_node = args.remote
     project_name = args.project
@@ -1525,9 +1534,9 @@ def handle_instance_command(args, parser_dict):
         elif args.instance_command == "stop":
             stop_instance(instance, remote, project)
         elif args.instance_command == "set_key":
-            set_user_key(instance, args.key_filename, remote, project)
+            set_user_key(instance, remote, project, args.key_filename)
         elif args.instance_command == "set_ip":
-            set_ip(instance, args.ip_address, args.gw_address, remote, project)
+            set_ip(instance, remote, project, args.ip_address, args.gw_address)
 
 
 #############################################
