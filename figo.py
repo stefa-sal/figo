@@ -432,6 +432,31 @@ def create_instance(image, instance_name, remote, project, instance_type):
         logger.error(f"An unexpected error occurred: {e}")
         return False
 
+def delete_instance(instance_name, remote, project):
+    """Delete a specific instance on the specified remote and project."""
+    try:
+        # Set up the LXD client for the remote server
+        if remote == "local":
+            client = pylxd.Client(project=project)
+        else:
+            remote_address = get_remote_address(remote)  # Function to retrieve the remote address
+            client = pylxd.Client(endpoint=remote_address, verify=True, project=project)
+
+        # Check if the instance exists
+        try:
+            instance = client.instances.get(instance_name)
+        except pylxd.exceptions.LXDAPIException:
+            logger.error(f"Instance '{instance_name}' not found in project '{project}' on remote '{remote}'.")
+            return
+
+        # Delete the instance
+        instance.delete(wait=True)
+        logger.info(f"Instance '{instance_name}' deleted successfully.")
+    except pylxd.exceptions.LXDAPIException as e:
+        logger.error(f"Failed to delete instance '{instance_name}': {e}")
+    except Exception as e:
+        logger.error(f"An unexpected error occurred: {e}")
+
 #############################################
 ###### figo gpu command functions ###########
 #############################################
@@ -1393,10 +1418,15 @@ def resolve_hostname(hostname):
         return socket.gethostbyname(hostname)
     except socket.error:
         return None
+    
 
 def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus/client.crt",
            user="ubuntu", loc_name="main"):
-    """Enroll a remote server by transferring the client certificate and adding it to the Incus daemon."""
+    """Enroll a remote server by transferring the client certificate and adding it to the remote Incus daemon.
+    
+    Before enrolling the remote server, the public key of the local incus user needs to be added 
+    to the remote server's authorized_keys file.
+    """
     ip_address, port = (ip_address_port.split(":") + ["8443"])[:2]
 
     if not is_valid_ip(ip_address):
@@ -1440,7 +1470,7 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
                     ["ssh", f"{user}@{ip_address}", add_cert_cmd],
                     check=True
                 )
-                logger.info(f"Certificate {loc_name}.crt added to Incus on {ip_address}.")
+                logger.info(f"Certificate incus_{loc_name}.crt added to Incus on {ip_address}.")
             except subprocess.CalledProcessError as e:
                 if "already exists" in str(e):
                     logger.info(f"Warning: Certificate incus_{loc_name} already added to Incus on {ip_address}.")
@@ -1516,7 +1546,11 @@ def create_instance_parser(subparsers):
             help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
     create_parser.add_argument("instance_name", help="Name of the new instance. Can include remote and project scope in the format 'remote:project.instance_name'")
     create_parser.add_argument("-t", "--type", choices=["vm", "container", "cnt"], default="container", help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container').")
-    add_common_arguments(create_parser)    
+    add_common_arguments(create_parser)
+
+    delete_parser = instance_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete a specific instance")
+    delete_parser.add_argument("instance_name", help="Name of the instance to delete. Can include remote and project scope.")
+    add_common_arguments(delete_parser)
 
     subparsers._name_parser_map["in"] = instance_parser
     subparsers._name_parser_map["i"] = instance_parser
@@ -1564,7 +1598,7 @@ def handle_instance_command(args, parser_dict):
     def check_instance_name(instance_name):
         """check validity of instance name"""
 
-        #instance name can only contain letters, numbers, hyphens, no underscores
+        # instance name can only contain letters, numbers, hyphens, no underscores
         if not re.match(r'^[a-zA-Z0-9-]+$', instance_name):
             return False
         return True
@@ -1648,7 +1682,7 @@ def handle_instance_command(args, parser_dict):
             set_user_key(instance, remote, project, args.key_filename)
         elif args.instance_command == "set_ip":
             set_ip(instance, remote, project, args.ip_address, args.gw_address)
-        elif args.instance_command in ["create", c]:
+        elif args.instance_command in ["create", "c"]:
             image = parse_image(args.image)
             if image is None:
                 return  # Error already printed by parse_image
@@ -1659,6 +1693,8 @@ def handle_instance_command(args, parser_dict):
                 instance_type = "container"  # Convert 'cnt' to 'container'
 
             create_instance(image, instance, remote, project, instance_type)
+        elif args.instance_command in ["delete", "del", "d"]:
+            delete_instance(instance, remote, project)
 
 #############################################
 ###### figo gpu command CLI #################
@@ -1818,8 +1854,8 @@ def create_remote_parser(subparsers):
     remote_enroll_parser.add_argument("ip_address", help="IP address or domain name of the remote server")
     remote_enroll_parser.add_argument("port", nargs="?", default="8443", help="Port of the remote server (default: 8443)")
     remote_enroll_parser.add_argument("user", nargs="?", default="ubuntu", help="Username for SSH (default: ubuntu)")
-    remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.cr", help="Client certificate file to transfer (default: ~/.config/incus/client.cr)")
-    remote_enroll_parser.add_argument("--loc_name", default="main", help="Name to use for local storage (default: main)")
+    remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.crt", help="Client certificate file to transfer (default: ~/.config/incus/client.cr)")
+    remote_enroll_parser.add_argument("--loc_name", default="main", help="Suffix of certificate name saved on the remote server (default: main)")
 
     subparsers._name_parser_map["re"] = remote_parser
     subparsers._name_parser_map["r"] = remote_parser
@@ -1832,7 +1868,8 @@ def handle_remote_command(args, client, parser_dict):
     elif args.remote_command in ["list", "l"]:
         list_remotes(client, full=args.full)
     elif args.remote_command == "enroll":
-        enroll_remote(args.remote_server, args.ip_address, args.port, args.user, args.cert_filename, args.loc_name)
+        ip_address_port = f"{args.ip_address}:{args.port}"
+        enroll_remote(args.remote_server, ip_address_port, args.cert_filename, user=args.user, loc_name=args.loc_name)
 
 #############################################
 ###### figo main functions
