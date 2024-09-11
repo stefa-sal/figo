@@ -371,7 +371,10 @@ def get_all_profiles(client):
     return [profile.name for profile in client.profiles.all()]
 
 def create_instance(image, instance_name, remote, project, instance_type):
-    """Create a new instance from an image on the specified remote and project, with specified type."""
+    """Create a new instance from an image on the specified remote and project, with specified type.
+    
+    Returns:    True if the instance was created successfully, False otherwise.
+    """
     try:
         # Set up the LXD client for the remote server
         if remote == "local":
@@ -384,33 +387,50 @@ def create_instance(image, instance_name, remote, project, instance_type):
         try:
             existing_instance = client.instances.get(instance_name)
             if existing_instance:
-                print(f"Instance '{instance_name}' already exists in project '{project}' on remote '{remote}'.")
-                return
+                logger.error(f"Instance '{instance_name}' already exists in project '{project}' on remote '{remote}'.")
+                return False
         except pylxd.exceptions.LXDAPIException:
             # Instance does not exist, so proceed with creation
             pass
 
-        # Create the new instance
+        # split the image name to get the server address
+        image_server, alias = image.split(':')
+
+        logger.info(f"Creating instance '{instance_name}' of type '{instance_type}' on project '{project}' and remote '{remote}'.")
+        logger.info(f"Using image '{alias}' from server '{image_server}'.") 
+
+        # get the server address from the image name
+        image_server_address, protocol = get_remote_address(image_server, get_protocol=True)   # Function to retrieve the image server address
+        if protocol != "simplestreams":
+            logger.error(f"Error: Image server '{image_server}' does not use the 'simplestreams' protocol.")
+            return False
+
+        # Create the instance configuration
         config = {
             'name': instance_name,
             'source': {
                 'type': 'image',
-                'alias': image,
+                "mode": "pull",
+                "server": image_server_address,
+                "protocol": "simplestreams",
+                'alias': alias
             },
-            'type': instance_type
         }
-
-        print(f"Creating instance '{instance_name}' of type '{instance_type}' from image '{image}' on project '{project}' and remote '{remote}'...")
+        
+        if instance_type == "vm":
+            config['type'] = "virtual-machine"
+        
         instance = client.instances.create(config, wait=True)
-        print(f"Instance '{instance_name}' created successfully.")
+        logger.info(f"Instance '{instance_name}' created successfully.")
+        return True
 
     except pylxd.exceptions.LXDAPIException as e:
-        print(f"Failed to create instance '{instance_name}': {e}")
-        return
+        logger.error(f"Failed to create instance '{instance_name}': {e}")
+        return False
 
     except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        return
+        logger.error(f"An unexpected error occurred: {e}")
+        return False
 
 #############################################
 ###### figo gpu command functions ###########
@@ -1169,13 +1189,19 @@ def get_certificate_path(remote_node):
     """
     return os.path.join(CERTIFICATE_DIR, f"{remote_node}.crt")
 
-def get_remote_address(remote_node):
+def get_remote_address(remote_node, get_protocol=False):
     """Retrieve the address of the remote node."""
 
     remotes = get_incus_remotes()
     remote_info = remotes.get(remote_node, None)
     if remote_info and "Addr" in remote_info:
-        return remote_info["Addr"]
+        if get_protocol:
+            if "Protocol" in remote_info:
+                return remote_info["Addr"], remote_info["Protocol"]
+            else:
+                raise ValueError(f"Error: Protocol not found for remote node '{remote_node}'") 
+        else:
+            return remote_info["Addr"]
     else:
         raise ValueError(f"Error: Address not found for remote node '{remote_node}'")
 
@@ -1485,7 +1511,7 @@ def create_instance_parser(subparsers):
     set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
     add_common_arguments(set_ip_parser)
 
-    create_parser = instance_subparsers.add_parser("create", help="Create a new instance")
+    create_parser = instance_subparsers.add_parser("create", aliases=["c"], help="Create a new instance")
     create_parser.add_argument("image", 
             help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
     create_parser.add_argument("instance_name", help="Name of the new instance. Can include remote and project scope in the format 'remote:project.instance_name'")
@@ -1535,6 +1561,14 @@ def handle_instance_command(args, parser_dict):
         parser_dict['instance_parser'].print_help()
         return
 
+    def check_instance_name(instance_name):
+        """check validity of instance name"""
+
+        #instance name can only contain letters, numbers, hyphens, no underscores
+        if not re.match(r'^[a-zA-Z0-9-]+$', instance_name):
+            return False
+        return True
+
     # Function to handle parsing of remote and project from the instance name and arguments
     def parse_instance_scope(instance_name, provided_remote, provided_project):
         remote, project, instance = '', '', instance_name  # Default values
@@ -1562,7 +1596,11 @@ def handle_instance_command(args, parser_dict):
             else:
                 logger.error(f"Syntax error in instance name '{instance_name}'.")
                 return None, None, None
-            
+
+        if not check_instance_name(instance):
+            logger.error(f"Error: Instance name can only contain letters, numbers, hyphens: '{instance_name}'.")
+            return None, None, None
+
         # Resolve conflicts
         if provided_remote and remote != '' and provided_remote != remote:
             logger.error(f"Error: Conflict between scope remote '{remote}' and provided remote '{provided_remote}'.")
@@ -1610,7 +1648,7 @@ def handle_instance_command(args, parser_dict):
             set_user_key(instance, remote, project, args.key_filename)
         elif args.instance_command == "set_ip":
             set_ip(instance, remote, project, args.ip_address, args.gw_address)
-        elif args.instance_command == "create":
+        elif args.instance_command in ["create", c]:
             image = parse_image(args.image)
             if image is None:
                 return  # Error already printed by parse_image
