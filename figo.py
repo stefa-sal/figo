@@ -370,7 +370,7 @@ def get_all_profiles(client):
     """Get all available profiles."""
     return [profile.name for profile in client.profiles.all()]
 
-def create_instance(image, instance_name, remote, project, instance_type):
+def create_instance(instance_name, image, remote, project, instance_type):
     """Create a new instance from an image on the specified remote and project, with specified type.
     
     Returns:    True if the instance was created successfully, False otherwise.
