@@ -1542,9 +1542,9 @@ def create_instance_parser(subparsers):
     add_common_arguments(set_ip_parser)
 
     create_parser = instance_subparsers.add_parser("create", aliases=["c"], help="Create a new instance")
+    create_parser.add_argument("instance_name", help="Name of the new instance. Can include remote and project scope in the format 'remote:project.instance_name'")
     create_parser.add_argument("image", 
             help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
-    create_parser.add_argument("instance_name", help="Name of the new instance. Can include remote and project scope in the format 'remote:project.instance_name'")
     create_parser.add_argument("-t", "--type", choices=["vm", "container", "cnt"], default="container", help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container').")
     add_common_arguments(create_parser)
 
@@ -1692,7 +1692,7 @@ def handle_instance_command(args, parser_dict):
             if instance_type == "cnt":
                 instance_type = "container"  # Convert 'cnt' to 'container'
 
-            create_instance(image, instance, remote, project, instance_type)
+            create_instance(instance, image, remote, project, instance_type)
         elif args.instance_command in ["delete", "del", "d"]:
             delete_instance(instance, remote, project)
 
