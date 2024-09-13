@@ -1596,9 +1596,8 @@ def handle_instance_command(args, parser_dict):
         return
 
     def check_instance_name(instance_name):
-        """check validity of instance name"""
-
-        # instance name can only contain letters, numbers, hyphens, no underscores
+        """Check validity of instance name."""
+        # Instance name can only contain letters, numbers, hyphens, no underscores
         if not re.match(r'^[a-zA-Z0-9-]+$', instance_name):
             return False
         return True
@@ -1666,13 +1665,29 @@ def handle_instance_command(args, parser_dict):
         else:
             return f"images:{image_name}"
 
+    # Handle the user parameter logic
+    def derive_project_from_user(user_name):
+        FIGO_PREFIX = "figo_"  # Example prefix, replace with the actual one
+        return f"{FIGO_PREFIX}{user_name}"
+
     # Check the command type and handle appropriately
     if args.instance_command in ["list", "l"]:
         handle_instance_list(args)
     else:
+        # Handle project based on user if provided
+        user_project = derive_project_from_user(args.user) if args.user else None
+
         remote, project, instance = parse_instance_scope(args.instance_name, args.remote, args.project)
         if remote is None or project is None:
             return  # Error already printed by parse_instance_scope
+
+        # If user_project is set, check for conflicts
+        if user_project:
+            if project and user_project != project:
+                logger.error(f"Error: Conflict between derived project '{user_project}' from user '{args.user}' and provided project '{project}'.")
+                return
+            else:
+                project = user_project  # Use the derived project
 
         if args.instance_command == "start":
             start_instance(instance, remote, project)
