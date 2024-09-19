@@ -59,17 +59,28 @@ def get_incus_remotes():
         raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
 
 def get_projects(remote_node="local"): 
-    """Fetches and returns the list of projects as a JSON object."""
-    result = subprocess.run(['incus', 'project', 'list', f"{remote_node}:", '--format', 'json'], capture_output=True, text=True)
+    """Fetches and returns the list of projects as a JSON object.
+    
+    Returns:    A list of projects as JSON objects if successful. Otherwise, returns None.
+    """
+    try:
+        result = subprocess.run(['incus', 'project', 'list', f"{remote_node}:", '--format', 'json'], capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error: {e.stderr.strip()}")
+        return None
 
     if result.returncode != 0:
-        raise RuntimeError(f"Failed to retrieve projects: {result.stderr}")
+        logger.error(f"Failed to retrieve projects: {result.stderr}")
+        return None
+        #raise RuntimeError(f"Failed to retrieve projects: {result.stderr}")
 
     try:
         projects = json.loads(result.stdout)
         return projects
     except json.JSONDecodeError:
-        raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
+        logger.error("Failed to parse JSON output.")
+        return None
+        #raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
 
 def run_incus_list(remote_node="local", project_name="default"):
     """Run the 'incus list -f json' command, optionally targeting a remote node and project, and return its output as JSON."""
@@ -151,9 +162,10 @@ def print_profiles(remote_node=None, project_name=None, full=False):
             if project_name is None:
                 # iterate over all projects
                 projects = get_projects(remote_node=my_remote_node)
-                for project in projects:
-                    my_project_name = project["name"]
-                    get_instances(remote_node=my_remote_node, project_name=my_project_name, full=full)
+                if projects is not None:
+                    for project in projects:
+                        my_project_name = project["name"]
+                        get_instances(remote_node=my_remote_node, project_name=my_project_name, full=full)
             else:
                 get_instances(remote_node=my_remote_node, project_name=project_name, full=full)
     else:
@@ -161,24 +173,75 @@ def print_profiles(remote_node=None, project_name=None, full=False):
         if project_name is None:
             # iterate over all projects
             projects = get_projects(remote_node=remote_node)
-            for project in projects:
-                my_project_name = project["name"]
-                get_instances(remote_node=remote_node, project_name=my_project_name, full=full)
+            if projects is not None:
+                for project in projects:
+                    my_project_name = project["name"]
+                    get_instances(remote_node=remote_node, project_name=my_project_name, full=full)
         else:
             # Get instances from the specified remote node and project
             get_instances(remote_node=remote_node, project_name=project_name, full=full)
 
+def get_remote_client(remote_node, project_name='default'):
+    """Create a pylxd.Client instance for the specified remote node and project.
+    
+    Returns:  A pylxd.Client instance for the remote node if successful, None otherwise.
+    """
+    #TODO add the code to handle the case when the remote node is not reachable and return None
+
+    if remote_node == "local":
+        # Create a pylxd.Client instance for the local server
+        try:
+            return pylxd.Client(project=project_name)
+        except pylxd.exceptions.ClientConnectionFailed as e:
+            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Client connection failed.")
+            return None
+        
+    else:
+        address = get_remote_address(remote_node)
+        cert_path = get_certificate_path(remote_node)
+
+        # Create a pylxd.Client instance with SSL verification
+        try:
+            client_instance = pylxd.Client(endpoint=address, verify=cert_path, project=project_name)
+            try:
+                client_instance.instances.get("x") # Test if the project exist by fetching a non-existent instance
+            except pylxd.exceptions.NotFound as e:
+                if "Project not found" in str(e):
+                    logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Project not found.")
+                    return None 
+            except Exception as e:
+                logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
+                return None
+            return client_instance   
+        except pylxd.exceptions.ClientConnectionFailed as e:
+            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Client connection failed.")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
+            return None
+
 def start_instance(instance_name, remote, project):
-    """Start a specific instance on a given remote and within a specific project."""
+    """Start a specific instance on a given remote and within a specific project.
+    
+    Returns:    True if the instance was started successfully, False otherwise.
+    """
     try:
         # Connect to the specified remote and project 
         remote_client = get_remote_client(remote, project_name=project)
 
-        instance = remote_client.instances.get(instance_name)
+        if not remote_client:
+            return False
         
+    except Exception as e:
+        logger.error(f"Failed to connect to remote '{remote}' and project '{project}': An unexpected error occurred: {e})")
+        return False
+    
+    try:
+        instance = remote_client.instances.get(instance_name)
+
         if instance.status != "Stopped":
             logger.error(f"Instance '{instance_name}' in project '{project}' on remote '{remote}' is not stopped.")
-            return
+            return False
 
         # Get GPU profiles associated with this instance
         instance_profiles = instance.profiles
@@ -203,7 +266,7 @@ def start_instance(instance_name, remote, project):
             logger.error(
                 f"Not enough available GPUs to start instance '{instance_name}'."
             )
-            return
+            return False
 
         # Resolve GPU conflicts
         conflict = False
@@ -235,9 +298,11 @@ def start_instance(instance_name, remote, project):
 
         instance.start(wait=True)
         logger.info(f"Instance '{instance_name}' started on '{remote}:{project}'.")
+        return True
 
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to start instance '{instance_name}' in project '{project}' on remote '{remote}': {e}")
+        return False
 
 
 def stop_instance(instance_name, remote, project):
@@ -376,16 +441,21 @@ def create_instance(instance_name, image, remote, project, instance_type):
     Returns:    True if the instance was created successfully, False otherwise.
     """
     try:
-        # Set up the LXD client for the remote server
-        if remote == "local":
-            client = pylxd.Client(project=project)
-        else:
-            remote_address = get_remote_address(remote)  # Function to retrieve the remote address
-            client = pylxd.Client(endpoint=remote_address, verify=True, project=project)
+        remote_client = get_remote_client(remote, project_name=project)  # Function to retrieve the remote client
+
+        # Check if the project exists
+        try:
+            remote_client.projects.get(project)
+            logger.info(f"Project '{project}' exists on remote '{remote}'.")
+        except pylxd.exceptions.NotFound:
+            logger.info(f"Project '{project}' does not exist on remote '{remote}'. Creating project.")
+            if not create_project(remote_client, project):
+                logger.error(f"Failed to create project '{project}' on remote '{remote}'.")
+                return False
 
         # Check if the instance already exists
         try:
-            existing_instance = client.instances.get(instance_name)
+            existing_instance = remote_client.instances.get(instance_name)
             if existing_instance:
                 logger.error(f"Instance '{instance_name}' already exists in project '{project}' on remote '{remote}'.")
                 return False
@@ -393,14 +463,14 @@ def create_instance(instance_name, image, remote, project, instance_type):
             # Instance does not exist, so proceed with creation
             pass
 
-        # split the image name to get the server address
+        # Split the image name to get the server address
         image_server, alias = image.split(':')
 
         logger.info(f"Creating instance '{instance_name}' of type '{instance_type}' on project '{project}' and remote '{remote}'.")
-        logger.info(f"Using image '{alias}' from server '{image_server}'.") 
+        logger.info(f"Using image '{alias}' from server '{image_server}'.")
 
-        # get the server address from the image name
-        image_server_address, protocol = get_remote_address(image_server, get_protocol=True)   # Function to retrieve the image server address
+        # Get the server address from the image name
+        image_server_address, protocol = get_remote_address(image_server, get_protocol=True)  # Function to retrieve the image server address
         if protocol != "simplestreams":
             logger.error(f"Error: Image server '{image_server}' does not use the 'simplestreams' protocol.")
             return False
@@ -415,12 +485,19 @@ def create_instance(instance_name, image, remote, project, instance_type):
                 "protocol": "simplestreams",
                 'alias': alias
             },
+            'devices': {
+                'root': {
+                    'type': 'disk',
+                    'pool': 'default',  # Replace 'default' with the name of your storage pool if it's different
+                    'path': '/'
+                }
+            }
         }
-        
+
         if instance_type == "vm":
             config['type'] = "virtual-machine"
-        
-        instance = client.instances.create(config, wait=True)
+
+        instance = remote_client.instances.create(config, wait=True)
         logger.info(f"Instance '{instance_name}' created successfully.")
         return True
 
@@ -435,16 +512,11 @@ def create_instance(instance_name, image, remote, project, instance_type):
 def delete_instance(instance_name, remote, project):
     """Delete a specific instance on the specified remote and project."""
     try:
-        # Set up the LXD client for the remote server
-        if remote == "local":
-            client = pylxd.Client(project=project)
-        else:
-            remote_address = get_remote_address(remote)  # Function to retrieve the remote address
-            client = pylxd.Client(endpoint=remote_address, verify=True, project=project)
+        remote_client = get_remote_client(remote, project_name=project) # Function to retrieve the remote client
 
         # Check if the instance exists
         try:
-            instance = client.instances.get(instance_name)
+            instance = remote_client.instances.get(instance_name)
         except pylxd.exceptions.LXDAPIException:
             logger.error(f"Instance '{instance_name}' not found in project '{project}' on remote '{remote}'.")
             return
@@ -1076,6 +1148,9 @@ def delete_project(remote_node, project_name):
         logger.error(f"Unexpected error while deleting project '{project_name}' on remote '{remote_node}: {e}")
 
 def add_user(user_name, cert_file, client, admin=False, project=None, email=None, name=None, org=None):
+    #TODO: Add docstring
+    #TODO: return True if user is added successfully, False otherwise
+
     global PROJECT_PREFIX  # Declare the use of the global variable
 
     # Check if user already exists in the certificates
@@ -1096,15 +1171,17 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
                 continue
 
             projects = get_projects(remote_node=remote_node)
-            if project_name in [myproject['name'] for myproject in projects]:
-                logger.error(f"Error: Project '{project_name}' already exists on remote '{remote_node}'.")
-                return
+            if projects is not None:
+                if project_name in [myproject['name'] for myproject in projects]:
+                    logger.error(f"Error: Project '{project_name}' already exists on remote '{remote_node}'.")
+                    return
     else:
         # Check if the provided project exists on the local server
         projects = get_projects(remote_node="local")
-        if project not in [myproject['name'] for myproject in projects]:
-            logger.error(f"Error: Project '{project}' not found on the local server.")
-            return
+        if projects is not None:
+            if project not in [myproject['name'] for myproject in projects]:
+                logger.error(f"Error: Project '{project}' not found on the local server.")
+                return
 
     directory = os.path.expanduser(USER_DIR)
     # Ensure the directory exists
@@ -1285,17 +1362,6 @@ def list_storage_volumes_in_project(remote_node, project_name):
 
     return storage_volumes_in_project
 
-def get_remote_client(remote_node, project_name='default'):
-    """Create a pylxd.Client instance for the specified remote node and project."""
-    if remote_node == "local":
-        return pylxd.Client(project=project_name)
-    else:
-        address = get_remote_address(remote_node)
-        cert_path = get_certificate_path(remote_node)
-
-        # Create a pylxd.Client instance with SSL verification
-        return pylxd.Client(endpoint=address, verify=cert_path, project=project_name)
-
 def delete_user(user_name, client, purge=False, removefiles=False):
     """
     Delete a user from the system.
@@ -1350,33 +1416,35 @@ def delete_user(user_name, client, purge=False, removefiles=False):
 
         # Check if the project exists on the remote node
         projects = get_projects(remote_node=remote_node)
-        if project_name in [project['name'] for project in projects]:
-            project_found = True
+        if projects is not None:
+            if project_name in [project['name'] for project in projects]:
+                project_found = True
 
-            #remote_client = get_remote_client(remote_node, remotes)
+                #remote_client = get_remote_client(remote_node, remotes)
 
-            # Check if there are any instances in the project
-            instances = list_instances_in_project(remote_node, project_name)
-            # Check if there are any profiles in the project
-            profiles = list_profiles_in_project(remote_node, project_name)
-            # Check if there are any storage volumes in the project
-            #TODO: Implement this function
-            storage_volumes = None
-            #storage_volumes = list_storage_volumes_in_project(remote_node, project_name)
+                # Check if there are any instances in the project
+                instances = list_instances_in_project(remote_node, project_name)
+                # Check if there are any profiles in the project
+                profiles = list_profiles_in_project(remote_node, project_name)
+                # Check if there are any storage volumes in the project
+                #TODO: Implement this function
+                storage_volumes = None
+                #storage_volumes = list_storage_volumes_in_project(remote_node, project_name)
 
-            # Warn if the project is not empty
-            if instances or profiles or storage_volumes:
-                logger.info(f"Warning: Project '{project_name}' on remote '{remote_node}' is not empty.")
-                if instances:
-                    logger.info(f"  - Contains {len(instances)} instance(s)")
-                if profiles:
-                    logger.info(f"  - Contains {len(profiles)} profile(s)")
-                if storage_volumes:
-                    logger.info(f"  - Contains {len(storage_volumes)} storage volume(s)")
-            else:
-                # Delete the empty project
-                #TODO
-                delete_project(remote_node, project_name)
+                # Warn if the project is not empty
+                if instances or profiles or storage_volumes:
+                    logger.info(f"Warning: Project '{project_name}' on remote '{remote_node}' is not empty.")
+                    if instances:
+                        logger.info(f"  - Contains {len(instances)} instance(s)")
+                    if profiles:
+                        logger.info(f"  - Contains {len(profiles)} profile(s)")
+                    if storage_volumes:
+                        logger.info(f"  - Contains {len(storage_volumes)} storage volume(s)")
+                else:
+                    # Delete the empty project
+                    #TODO
+                    delete_project(remote_node, project_name)
+                    logger.info(f"Project '{project_name}' on remote '{remote_node}' has been deleted.")
 
     if not project_found:
         logger.error(f"No associated project '{project_name}' found for user '{user_name}' on any remote.")
@@ -1543,9 +1611,9 @@ def create_instance_parser(subparsers):
 
     create_parser = instance_subparsers.add_parser("create", aliases=["c"], help="Create a new instance")
     create_parser.add_argument("instance_name", help="Name of the new instance. Can include remote and project scope in the format 'remote:project.instance_name'")
-    create_parser.add_argument("image", 
-            help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
+    create_parser.add_argument("image", help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
     create_parser.add_argument("-t", "--type", choices=["vm", "container", "cnt"], default="container", help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container').")
+    create_parser.add_argument("-u", "--user", help="Specify the user who will own the instance")
     add_common_arguments(create_parser)
 
     delete_parser = instance_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete a specific instance")
@@ -1667,27 +1735,29 @@ def handle_instance_command(args, parser_dict):
 
     # Handle the user parameter logic
     def derive_project_from_user(user_name):
-        FIGO_PREFIX = "figo_"  # Example prefix, replace with the actual one
-        return f"{FIGO_PREFIX}{user_name}"
+        return f"{PROJECT_PREFIX}{user_name}"
 
     # Check the command type and handle appropriately
     if args.instance_command in ["list", "l"]:
         handle_instance_list(args)
     else:
         # Handle project based on user if provided
-        user_project = derive_project_from_user(args.user) if args.user else None
+        user_project = None
+        if 'user' in args:
+            user_project = derive_project_from_user(args.user) if args.user else None
+
+        # If user_project is set, check for conflicts
+        if user_project:
+            if args.project and user_project != args.project:
+                logger.error(f"Error: Conflict between derived project '{user_project}' from user '{args.user}'"
+                             f" and provided project '{args.project}'.")
+                return
+            else:
+                args.project = user_project  # Use the derived project
 
         remote, project, instance = parse_instance_scope(args.instance_name, args.remote, args.project)
         if remote is None or project is None:
             return  # Error already printed by parse_instance_scope
-
-        # If user_project is set, check for conflicts
-        if user_project:
-            if project and user_project != project:
-                logger.error(f"Error: Conflict between derived project '{user_project}' from user '{args.user}' and provided project '{project}'.")
-                return
-            else:
-                project = user_project  # Use the derived project
 
         if args.instance_command == "start":
             start_instance(instance, remote, project)
