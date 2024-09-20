@@ -36,6 +36,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 #############################################
+###### generic helper functions         #####
+#############################################
+
+def truncate(text, length):
+    """Helper function to truncate text to a specific length with '*>' at the end if trimmed."""
+    if len(text) > length:
+        return f"{text[:length-2]}*>"
+    return text
+
+#############################################
 ###### figo instance command functions #####
 #############################################
 
@@ -72,7 +82,6 @@ def get_projects(remote_node="local"):
     if result.returncode != 0:
         logger.error(f"Failed to retrieve projects: {result.stderr}")
         return None
-        #raise RuntimeError(f"Failed to retrieve projects: {result.stderr}")
 
     try:
         projects = json.loads(result.stdout)
@@ -80,7 +89,6 @@ def get_projects(remote_node="local"):
     except json.JSONDecodeError:
         logger.error("Failed to parse JSON output.")
         return None
-        #raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
 
 def run_incus_list(remote_node="local", project_name="default"):
     """Run the 'incus list -f json' command, optionally targeting a remote node and project, and return its output as JSON."""
@@ -132,13 +140,13 @@ def get_instances(remote_node=None, project_name=None, full=False):
         if full:
             # Print all profiles
             profiles_str = ", ".join(instance.get("profiles", []))
-            print("{:<14} {:<4} {:<5} {:<22} {:<30}".format(name, instance_type, state, context, profiles_str))
+            print("{:<14} {:<4} {:<5} {:<25} {:<30}".format(name, instance_type, state, truncate(context, 25), profiles_str))
         else:
             # Print only GPU profiles with color coding based on state
             gpu_profiles = [profile for profile in instance.get("profiles", []) if profile.startswith("gpu")]
             profiles_str = ", ".join(gpu_profiles)
             colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
-            print("{:<14} {:<4} {:<5} {:<22} {:<30}".format(name, instance_type, state, context, colored_profiles_str))
+            print("{:<14} {:<4} {:<5} {:<25} {:<30}".format(name, instance_type, state, truncate(context, 25), colored_profiles_str))
 
 def print_profiles(remote_node=None, project_name=None, full=False):
     """Print profiles of all instances, either from the local or a remote Incus node.
@@ -146,9 +154,9 @@ def print_profiles(remote_node=None, project_name=None, full=False):
     """
     # Determine the header and profile type based on the 'full' flag
     if full:
-        print("{:<14} {:<4} {:<5} {:<22} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "PROFILES"))
+        print("{:<14} {:<4} {:<5} {:<25} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "PROFILES"))
     else:
-        print("{:<14} {:<4} {:<5} {:<22} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "GPU PROFILES"))
+        print("{:<14} {:<4} {:<5} {:<25} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "GPU PROFILES"))
 
     if remote_node is None:
         #iterate over all remote nodes
@@ -728,17 +736,8 @@ def list_profiles(client):
 ###### figo user command functions ##########
 #############################################
 
-import subprocess
-import yaml
-
 def list_users(client, full=False):
     """List all installed certificates with optional full details, adding email, name, and org details with specified lengths."""
-
-    def truncate(text, length):
-        """Helper function to truncate text to a specific length with '*>' at the end if trimmed."""
-        if len(text) > length:
-            return f"{text[:length-2]}*>"
-        return text
 
     certificates_info = []
 
