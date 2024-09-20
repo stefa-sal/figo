@@ -33,7 +33,7 @@ PROJECT_PREFIX = FIGO_PREFIX
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("_")
 
 #############################################
 ###### generic helper functions         #####
@@ -76,11 +76,11 @@ def get_projects(remote_node="local"):
     try:
         result = subprocess.run(['incus', 'project', 'list', f"{remote_node}:", '--format', 'json'], capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
-        logger.error(f"Error: {e.stderr.strip()}")
+        #logger.error(f"Error: {e.stderr.strip()}")
         return None
 
     if result.returncode != 0:
-        logger.error(f"Failed to retrieve projects: {result.stderr}")
+        #logger.error(f"Failed to retrieve projects: {result.stderr}")
         return None
 
     try:
@@ -91,7 +91,10 @@ def get_projects(remote_node="local"):
         return None
 
 def run_incus_list(remote_node="local", project_name="default"):
-    """Run the 'incus list -f json' command, optionally targeting a remote node and project, and return its output as JSON."""
+    """Run the 'incus list -f json' command, optionally targeting a remote node and project
+    
+    Return the output as JSON if successful, otherwise return None.
+    """
     try:
         # Prepare the command with an optional remote node and project name using the correct syntax
         command = ["incus", "list", "-f", "json", "--project", project_name]
@@ -106,7 +109,7 @@ def run_incus_list(remote_node="local", project_name="default"):
         return instances
     except subprocess.CalledProcessError as e:
         # Print the exact error message from the command's stderr
-        logger.error(f"Error: {e.stderr.strip()}")
+        # logger.error(f"Error: {e.stderr.strip()}")
         return None
     except json.JSONDecodeError as e:
         logger.error(f"Error: Failed to parse JSON output. {e}")
@@ -115,8 +118,11 @@ def run_incus_list(remote_node="local", project_name="default"):
         logger.error(f"Unexpected error while running 'incus list -f json': {e}")
         return None
 
-def get_instances(remote_node=None, project_name=None, full=False):
-    """Get instances from the specified remote node and project and print their details."""
+def get_and_print_instances(remote_node=None, project_name=None, full=False):
+    """Get instances from the specified remote node and project and print their details.
+    
+    Returns:    False if fetching the instances failed, True otherwise.
+    """
 
     RED = "\033[91m"
     GREEN = "\033[92m"
@@ -125,7 +131,7 @@ def get_instances(remote_node=None, project_name=None, full=False):
     # Get the instances from 'incus list -f json'
     instances = run_incus_list(remote_node=remote_node, project_name=project_name)
     if instances is None:
-        return  # Exit if fetching the instances failed
+        return  False # Exit if fetching the instances failed
 
     # Iterate through instances and print their details in columns
     for instance in instances:
@@ -147,6 +153,8 @@ def get_instances(remote_node=None, project_name=None, full=False):
             profiles_str = ", ".join(gpu_profiles)
             colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
             print("{:<14} {:<4} {:<5} {:<25} {:<30}".format(name, instance_type, state, truncate(context, 25), colored_profiles_str))
+        
+    return True
 
 def print_profiles(remote_node=None, project_name=None, full=False):
     """Print profiles of all instances, either from the local or a remote Incus node.
@@ -158,6 +166,8 @@ def print_profiles(remote_node=None, project_name=None, full=False):
     else:
         print("{:<14} {:<4} {:<5} {:<25} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "GPU PROFILES"))
 
+    # use a set to store the remote nodes that failed to retrieve the projects
+    set_of_errored_remotes = set()
     if remote_node is None:
         #iterate over all remote nodes
         remotes = get_incus_remotes()
@@ -170,24 +180,39 @@ def print_profiles(remote_node=None, project_name=None, full=False):
             if project_name is None:
                 # iterate over all projects
                 projects = get_projects(remote_node=my_remote_node)
-                if projects is not None:
+                if projects is None:
+                    set_of_errored_remotes.add(my_remote_node)
+                else: # projects is not None:
                     for project in projects:
                         my_project_name = project["name"]
-                        get_instances(remote_node=my_remote_node, project_name=my_project_name, full=full)
+                        result = get_and_print_instances(remote_node=my_remote_node, project_name=my_project_name, full=full)
+                        if not result:
+                            set_of_errored_remotes.add(my_remote_node)
             else:
-                get_instances(remote_node=my_remote_node, project_name=project_name, full=full)
+                result = get_and_print_instances(remote_node=my_remote_node, project_name=project_name, full=full)
+                if not result:
+                    set_of_errored_remotes.add(my_remote_node)
     else:
         # Get instances from the specified remote node
         if project_name is None:
             # iterate over all projects
             projects = get_projects(remote_node=remote_node)
-            if projects is not None:
+            if projects is None:
+                set_of_errored_remotes.add(remote_node)
+            else:  # projects is not None:
                 for project in projects:
                     my_project_name = project["name"]
-                    get_instances(remote_node=remote_node, project_name=my_project_name, full=full)
+                    result = get_and_print_instances(remote_node=remote_node, project_name=my_project_name, full=full)
+                    if not result:
+                        set_of_errored_remotes.add(remote_node)
         else:
             # Get instances from the specified remote node and project
-            get_instances(remote_node=remote_node, project_name=project_name, full=full)
+            result = get_and_print_instances(remote_node=remote_node, project_name=project_name, full=full)
+            if not result:
+                set_of_errored_remotes.add(remote_node)
+
+    if set_of_errored_remotes:
+        logger.error(f"Error: Failed to retrieve projects from remote(s): {', '.join(set_of_errored_remotes)}")
 
 def get_remote_client(remote_node, project_name='default'):
     """Create a pylxd.Client instance for the specified remote node and project.
@@ -1161,6 +1186,8 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
     # Initialize the project name
     project_name = project if project else f"{PROJECT_PREFIX}{user_name}"
 
+
+    set_of_errored_remotes = set()
     if not project:
         # Retrieve the list of remote servers and check project existence on each
         remotes = get_incus_remotes()
@@ -1170,17 +1197,28 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
                 continue
 
             projects = get_projects(remote_node=remote_node)
-            if projects is not None:
+            if projects is None:
+                set_of_errored_remotes.add(remote_node)
+                continue
+
+            else: # projects is not None:
                 if project_name in [myproject['name'] for myproject in projects]:
                     logger.error(f"Error: Project '{project_name}' already exists on remote '{remote_node}'.")
-                    return
+                    return False
     else:
         # Check if the provided project exists on the local server
         projects = get_projects(remote_node="local")
+        if projects is None:
+            logger.error(f"Error: Failed to retrieve projects from the local server.")
+            return False
+        
         if projects is not None:
             if project not in [myproject['name'] for myproject in projects]:
                 logger.error(f"Error: Project '{project}' not found on the local server.")
-                return
+                return False
+    
+    if set_of_errored_remotes:
+        logger.warning(f"Failed to retrieve projects from the following remote nodes: {', '.join(set_of_errored_remotes)}")
 
     directory = os.path.expanduser(USER_DIR)
     # Ensure the directory exists
@@ -1407,6 +1445,7 @@ def delete_user(user_name, client, purge=False, removefiles=False):
     # Retrieve the list of remote servers
     remotes = get_incus_remotes()
 
+    set_of_errored_remotes = set()
     project_found = False
     for remote_node in remotes:
         # Skipping remote node with protocol simplestreams
@@ -1415,7 +1454,10 @@ def delete_user(user_name, client, purge=False, removefiles=False):
 
         # Check if the project exists on the remote node
         projects = get_projects(remote_node=remote_node)
-        if projects is not None:
+        if projects is None:
+            set_of_errored_remotes.add(remote_node)
+            continue
+        else: #if projects is not None:
             if project_name in [project['name'] for project in projects]:
                 project_found = True
 
@@ -1444,6 +1486,9 @@ def delete_user(user_name, client, purge=False, removefiles=False):
                     #TODO
                     delete_project(remote_node, project_name)
                     logger.info(f"Project '{project_name}' on remote '{remote_node}' has been deleted.")
+
+    if set_of_errored_remotes:
+        logger.warning(f"Failed to retrieve projects from the following remote nodes: {', '.join(set_of_errored_remotes)}")
 
     if not project_found:
         logger.error(f"No associated project '{project_name}' found for user '{user_name}' on any remote.")
