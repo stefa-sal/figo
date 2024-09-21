@@ -7,6 +7,7 @@ import pylxd
 import subprocess
 import logging
 import os
+import ipaddress
 import yaml
 import re
 import socket
@@ -24,7 +25,21 @@ NAME_SERVER_IP_ADDR = "160.80.1.8"
 NAME_SERVER_IP_ADDR_2 = "8.8.8.8"
 PROFILE_DIR = "./profiles"
 USER_DIR = "./users"
+
+# Directory that contains the remote node certificates
 CERTIFICATE_DIR = "./certs"
+
+# Base IP address to start the IP address generation for WireGuard VPN clients
+BASE_IP = "10.202.1.15"
+
+# WireGuard public key of the VPN server 
+PublicKey = "rdM5suGD/hTHdStf/K1SVc4rviUcUQbKnARnw0AAwT8="
+
+# Allowed IP addresses for the VPN server
+AllowedIPs = "10.192.0.0/10"
+
+# Endpoint of the VPN server
+Endpoint = "gpunet-vpn.netgroup.uniroma2.it:13232"
 
 FIGO_PREFIX="figo-"  
 
@@ -818,6 +833,64 @@ def list_users(client, full=False):
         else:
             print(f"{cert['name']:<20} {cert['fingerprint']:<12}")
 
+def get_next_wg_client_ip_address():
+    # List to contain the IP addresses found in .conf files
+    ip_addresses = []
+
+    directory = os.path.expanduser(USER_DIR)
+
+    # Search for all .conf files in the directory folder
+    for filename in os.listdir(directory):
+        if filename.endswith('.conf'):
+            with open(filename, 'r') as file:
+                for line in file:
+                    if line.startswith('Address ='):
+                        ip_str = line.split('=')[1].strip().split('/')[0]
+                        ip_addresses.append(ip_str)
+                        break
+    
+    if not ip_addresses:
+        # If no IP addresses are found, start from BASE_IP
+        return BASE_IP
+    
+    # Convert IP addresses to ip_address objects and sort
+    ip_addresses = sorted([ipaddress.ip_address(ip) for ip in ip_addresses])
+
+    # Find the next available IP address
+    last_ip = ip_addresses[-1]
+    next_ip = last_ip + 1
+    
+    return str(next_ip)
+
+def generate_wireguard_config(username, ip_address=None):
+    # If no IP address is provided, generate a new one
+    if not ip_address:
+        ip_address = get_next_wg_client_ip_address()
+
+    # Generate the private and public keys using wg
+    private_key = subprocess.check_output(f"wg genkey | tee {username}.key", shell=True).decode('utf-8').strip()
+    public_key = subprocess.check_output(f"wg pubkey < {username}.key", shell=True).decode('utf-8').strip()
+
+    # WireGuard configuration template
+    config_content = f"""[Interface]
+PrivateKey = {private_key}
+Address = {ip_address}/24
+
+[Peer]
+PublicKey = {PublicKey}
+AllowedIPs = {AllowedIPs}
+Endpoint = {Endpoint}
+"""
+    
+    directory = os.path.expanduser(USER_DIR)
+
+    # Writes the content to the username.conf file in the directory folder
+    config_filename = os.path.join(directory, f"{username}.conf")
+    
+    with open(config_filename, 'w') as config_file:
+        config_file.write(config_content)
+    
+    print(f"Generated WireGuard configuration: {config_filename}")
 
 def add_friendly_name(pfx_file, friendly_name, password=None):
     """Add a friendlyName attribute to the existing PFX file, overwriting the original."""
@@ -1171,7 +1244,7 @@ def delete_project(remote_node, project_name):
     except Exception as e:
         logger.error(f"Unexpected error while deleting project '{project_name}' on remote '{remote_node}: {e}")
 
-def add_user(user_name, cert_file, client, admin=False, project=None, email=None, name=None, org=None):
+def add_user(user_name, cert_file, client, admin=False, wireguard=False, project=None, email=None, name=None, org=None):
     """
     Add a user to Incus with a certificate.
 
@@ -1180,6 +1253,7 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
     - cert_file (str): The certificate file (in .crt format) or None if generating a new key pair.
     - client (object): Client instance for interacting with Incus.
     - admin (bool, optional): Specifies if the user has admin privileges.
+    - wireguard (bool, optional): Specifies if WireGuard config for the user has to be generated.
     - project (str, optional): Name of the project to restrict the certificate to.
       if not provided, a project will be created with the name 'figo-<user_name>'.
     - email (str, optional): Email address of the user.
@@ -1189,7 +1263,6 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
     Returns:
     True if the user is added successfully, False otherwise.
     """
-
 
     global PROJECT_PREFIX  # Declare the use of the global variable
 
@@ -1278,6 +1351,9 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
         delete_project(client, 'local', project_name)
         return False
     
+    if wireguard:
+        generate_wireguard_config(user_name)
+
     return True
 
 def grant_user_access(username, projectname, client):
@@ -1942,6 +2018,7 @@ def create_user_parser(subparsers):
     user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional, "
                                  "if not provided a new key pair will be generated)")  
     user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
+    user_add_parser.add_argument("-w", "--wireguard", action="store_true", help="Generate WireGuard config for the user in .conf file") 
     user_add_parser.add_argument("-p", "--project", help="Project name to associate the user with an existing project")
     user_add_parser.add_argument("-e", "--email", action=NoCommaCheck, help="User's email address")
     user_add_parser.add_argument("-n", "--name", action=NoCommaCheck, help="User's full name")
@@ -1977,7 +2054,7 @@ def handle_user_command(args, client, parser_dict):
     elif args.user_command in ["list", "l"]:
         list_users(client, full=args.full)
     elif args.user_command == "add":
-        add_user(args.username, args.cert, client, admin=args.admin, project=args.project, email=args.email, name=args.name, org=args.org)
+        add_user(args.username, args.cert, client, admin=args.admin, wireguard=args.wireguard, project=args.project, email=args.email, name=args.name, org=args.org)
     elif args.user_command == "grant":
         grant_user_access(args.username, args.projectname, client)
     elif args.user_command == "edit":
