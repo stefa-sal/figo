@@ -1172,6 +1172,23 @@ def delete_project(remote_node, project_name):
         logger.error(f"Unexpected error while deleting project '{project_name}' on remote '{remote_node}: {e}")
 
 def add_user(user_name, cert_file, client, admin=False, project=None, email=None, name=None, org=None):
+    """
+    Add a user to Incus with a certificate.
+
+    Args:
+    - user_name (str): The username associated with the certificate.
+    - cert_file (str): The certificate file (in .crt format).
+    - client (object): Client instance for interacting with Incus.
+    - admin (bool, optional): Specifies if the user has admin privileges.
+    - project (str, optional): Name of the project to restrict the certificate to.
+      if not provided, a project will be created with the name 'figo-<user_name>'.
+    - email (str, optional): Email address of the user.
+    - name (str, optional): Name of the user.
+    - org (str, optional): Organization of the user.
+
+    Returns:
+    True if the user is added successfully, False otherwise.
+    """
     #TODO: Add docstring
     #TODO: return True if user is added successfully, False otherwise
 
@@ -1181,11 +1198,10 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
     for cert in client.certificates.all():
         if cert.name == user_name:
             logger.error(f"Error: User '{user_name}' already exists.")
-            return
+            return False
 
     # Initialize the project name
     project_name = project if project else f"{PROJECT_PREFIX}{user_name}"
-
 
     set_of_errored_remotes = set()
     if not project:
@@ -1234,7 +1250,7 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
         crt_file = os.path.join(directory, cert_file)
         if not os.path.exists(crt_file):
             logger.error(f"Error: Certificate file '{crt_file}' not found.")
-            return
+            return False
         logger.info(f"Using provided certificate: {crt_file}")
 
     else:
@@ -1244,7 +1260,7 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
         key_file = os.path.join(directory, f"{user_name}.key")
         if not generate_key_pair(user_name, crt_file, key_file, pfx_file):
             logger.error(f"Failed to generate key pair and certificate for user: {user_name}") 
-            return
+            return False
         logger.info(f"Generated certificate and key pair for user: {user_name}")
 
     # Create project for the user
@@ -1254,14 +1270,16 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
 
     if not project_created:
         logger.error(f"Error: Failed to create project '{project_name}', no certificate added.")
-        return
+        return False
 
     # Add the user certificate to Incus
     certificate_added = add_certificate_to_incus(client, user_name, crt_file, project_name, admin=admin, email=email, name=name, org=org)
 
     if not admin and project==None and not certificate_added:
         delete_project(client, 'local', project_name)
-        return
+        return False
+    
+    return True
 
 def grant_user_access(username, projectname, client):
     try:
