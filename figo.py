@@ -1177,7 +1177,7 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
 
     Args:
     - user_name (str): The username associated with the certificate.
-    - cert_file (str): The certificate file (in .crt format).
+    - cert_file (str): The certificate file (in .crt format) or None if generating a new key pair.
     - client (object): Client instance for interacting with Incus.
     - admin (bool, optional): Specifies if the user has admin privileges.
     - project (str, optional): Name of the project to restrict the certificate to.
@@ -1189,8 +1189,7 @@ def add_user(user_name, cert_file, client, admin=False, project=None, email=None
     Returns:
     True if the user is added successfully, False otherwise.
     """
-    #TODO: Add docstring
-    #TODO: return True if user is added successfully, False otherwise
+
 
     global PROJECT_PREFIX  # Declare the use of the global variable
 
@@ -1940,7 +1939,8 @@ def create_user_parser(subparsers):
     # Add subcommand
     user_add_parser = user_subparsers.add_parser("add", aliases=["a"], help="Add a new user to the system")
     user_add_parser.add_argument("username", action=NoUnderscoreCheck, help="Username of the new user")
-    user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional)")
+    user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional, "
+                                 "if not provided a new key pair will be generated)")  
     user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
     user_add_parser.add_argument("-p", "--project", help="Project name to associate the user with an existing project")
     user_add_parser.add_argument("-e", "--email", action=NoCommaCheck, help="User's email address")
