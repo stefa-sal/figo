@@ -60,6 +60,20 @@ def truncate(text, length):
         return f"{text[:length-2]}*>"
     return text
 
+def is_valid_ip(ip):
+    """Check if the provided string is a valid IPv4 address."""
+    pattern = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
+    if pattern.match(ip):
+        octets = ip.split('.')
+        if all(0 <= int(octet) <= 255 for octet in octets):
+            # paranoid double check
+            try:
+                ipaddress.ip_address(ip)
+                return True
+            except ValueError:
+                return False
+    return False
+
 #############################################
 ###### figo instance command functions #####
 #############################################
@@ -419,15 +433,6 @@ def set_user_key(instance_name, remote, project, key_filename, client):
     except Exception as e:
         logger.error(f"An error occurred: {e}")
 
-def is_valid_ip(ip):
-    """Check if the provided string is a valid IPv4 address."""
-    pattern = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
-    if pattern.match(ip):
-        octets = ip.split('.')
-        if all(0 <= int(octet) <= 255 for octet in octets):
-            return True
-    return False
-
 def set_ip(instance_name, remote, project, ip_address, gw_address, client):
     """Set a static IP address and gateway for a stopped instance."""
     if not is_valid_ip(ip_address):
@@ -483,7 +488,7 @@ def get_all_profiles(client):
     """Get all available profiles."""
     return [profile.name for profile in client.profiles.all()]
 
-def create_instance(instance_name, image, remote, project, instance_type):
+def create_instance(instance_name, image, remote, project, instance_type, ip_address, gw_address):
     """Create a new instance from an image on the specified remote and project, with specified type.
     
     Returns:    True if the instance was created successfully, False otherwise.
@@ -842,7 +847,8 @@ def get_next_wg_client_ip_address():
     # Search for all .conf files in the directory folder
     for filename in os.listdir(directory):
         if filename.endswith('.conf'):
-            with open(filename, 'r') as file:
+            file_path = os.path.join(directory, filename)  # Construct the full path to the file
+            with open(file_path, 'r') as file:
                 for line in file:
                     if line.startswith('Address ='):
                         ip_str = line.split('=')[1].strip().split('/')[0]
@@ -890,7 +896,7 @@ Endpoint = {Endpoint}
     with open(config_filename, 'w') as config_file:
         config_file.write(config_content)
     
-    print(f"Generated WireGuard configuration: {config_filename}")
+    logger.info(f"Generated WireGuard configuration: {config_filename}, IP address: {ip_address}")
 
 def add_friendly_name(pfx_file, friendly_name, password=None):
     """Add a friendlyName attribute to the existing PFX file, overwriting the original."""
@@ -1037,12 +1043,15 @@ def create_project(client, project_name):
         project_data = {
             "name": project_name,  # The project's name (string)
             "description": f"Project for user {project_name}",  # Optional description
-            "config": {}  # Empty configuration for now
+            "config": {
+                "features.profiles": "false"  # Disable separate profiles for this project; 
+                                              # profiles from the default project will be inherited
+            }
         }
 
         # Creating the project using the correct format
         client.api.projects.post(json=project_data)
-        logger.info(f"Project '{project_name}' created successfully.")
+        logger.info(f"Project '{project_name}' created successfully with features.profiles set to false.")
         return True
 
     except pylxd.exceptions.LXDAPIException as e:
@@ -1715,10 +1724,13 @@ def create_instance_parser(subparsers):
     instance_parser = subparsers.add_parser("instance", help="Manage instances")
     instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
 
-    # Add common options for remote and project to a function to avoid repetition
+    # Add common options for remote, project, user, IP, and gateway
     def add_common_arguments(parser):
         parser.add_argument("-r", "--remote", help="Specify the remote server name")
         parser.add_argument("-p", "--project", help="Specify the project name")
+        parser.add_argument("-u", "--user", help="Specify the user who will own the instance")
+        parser.add_argument("-i", "--ip", help="Specify a static IP address for the instance")
+        parser.add_argument("-g", "--gw", help="Specify the gateway address for the instance")
 
     instance_list_parser = instance_subparsers.add_parser("list", aliases=["l"],
         help="List instances (use -f or --full for more details)"
@@ -1742,15 +1754,12 @@ def create_instance_parser(subparsers):
 
     set_ip_parser = instance_subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance")
     set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for. Can include remote and project scope.")
-    set_ip_parser.add_argument("ip_address", help="Static IP address to assign to the instance")
-    set_ip_parser.add_argument("gw_address", help="Gateway address to assign to the instance")
     add_common_arguments(set_ip_parser)
 
     create_parser = instance_subparsers.add_parser("create", aliases=["c"], help="Create a new instance")
     create_parser.add_argument("instance_name", help="Name of the new instance. Can include remote and project scope in the format 'remote:project.instance_name'")
     create_parser.add_argument("image", help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
     create_parser.add_argument("-t", "--type", choices=["vm", "container", "cnt"], default="container", help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container').")
-    create_parser.add_argument("-u", "--user", help="Specify the user who will own the instance")
     add_common_arguments(create_parser)
 
     delete_parser = instance_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete a specific instance")
@@ -1874,6 +1883,14 @@ def handle_instance_command(args, parser_dict):
     def derive_project_from_user(user_name):
         return f"{PROJECT_PREFIX}{user_name}"
 
+    # Validate the IP address
+    def is_valid_ip(ip):
+        try:
+            ipaddress.ip_address(ip)
+            return True
+        except ValueError:
+            return False
+
     # Check the command type and handle appropriately
     if args.instance_command in ["list", "l"]:
         handle_instance_list(args)
@@ -1896,6 +1913,16 @@ def handle_instance_command(args, parser_dict):
         if remote is None or project is None:
             return  # Error already printed by parse_instance_scope
 
+        # Validate the IP address if provided
+        if args.ip and not is_valid_ip(args.ip):
+            logger.error(f"Error: Invalid IP address '{args.ip}'.")
+            return
+
+        # Validate the gateway address if provided
+        if args.gw and not is_valid_ip(args.gw):
+            logger.error(f"Error: Invalid gateway address '{args.gw}'.")
+            return
+
         if args.instance_command == "start":
             start_instance(instance, remote, project)
         elif args.instance_command == "stop":
@@ -1903,7 +1930,10 @@ def handle_instance_command(args, parser_dict):
         elif args.instance_command == "set_key":
             set_user_key(instance, remote, project, args.key_filename)
         elif args.instance_command == "set_ip":
-            set_ip(instance, remote, project, args.ip_address, args.gw_address)
+            if not args.ip or not args.gw:
+                logger.error("Error: Both IP address and gateway must be provided.")
+                return
+            set_ip(instance, remote, project, args.ip, args.gw)
         elif args.instance_command in ["create", "c"]:
             image = parse_image(args.image)
             if image is None:
@@ -1914,9 +1944,10 @@ def handle_instance_command(args, parser_dict):
             if instance_type == "cnt":
                 instance_type = "container"  # Convert 'cnt' to 'container'
 
-            create_instance(instance, image, remote, project, instance_type)
+            create_instance(instance, image, remote, project, instance_type, args.ip, args.gw)
         elif args.instance_command in ["delete", "del", "d"]:
             delete_instance(instance, remote, project)
+
 
 #############################################
 ###### figo gpu command CLI #################
