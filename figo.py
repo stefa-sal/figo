@@ -614,12 +614,10 @@ def exec_instance_bash(instance_name, remote, project):
         command = ["incus", "exec", full_instance_name, "--project", project, "--", "bash"]
 
         # Execute the bash command interactively using subprocess
-        subprocess.run(command, check=True, capture_output=True, text=True)
-
-        logger.info(f"Started bash in instance '{remote}:{project}.{instance_name}'")
+        subprocess.run(command, check=False, text=True)
 
     except subprocess.CalledProcessError as e:
-        logger.error(f"Failed to execute bash in instance '{remote}:{project}.{instance_name}': {e.stderr.strip()}")
+        logger.error(f"Failed to execute bash in instance '{remote}:{project}.{instance_name}': {e}")
 
     except Exception as e:
         logger.error(f"An unexpected error occurred while executing bash in instance '{remote}:{project}.{instance_name}': {e}")
