@@ -46,6 +46,8 @@ FIGO_PREFIX="figo-"
 # NB: PROJECT_PREFIX cannot contain underscores
 PROJECT_PREFIX = FIGO_PREFIX 
 
+DEFAULT_INSTANCE_SIZE = 'instance-medium'  # Global default instance size
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("_")
@@ -312,7 +314,12 @@ def start_instance(instance_name, remote, project):
         ]
         
         # Check GPU availability
-        result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+        try:
+            result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error in lspci: {e.stderr.strip()}")
+            return False
+        
         total_gpus = len(result.stdout.strip().split('\n'))
         
         running_instances = [
@@ -488,13 +495,30 @@ def get_all_profiles(client):
     """Get all available profiles."""
     return [profile.name for profile in client.profiles.all()]
 
-def create_instance(instance_name, image, remote, project, instance_type, ip_address, gw_address):
-    """Create a new instance from an image on the specified remote and project, with specified type.
-    
-    Returns:    True if the instance was created successfully, False otherwise.
+def create_instance(instance_name, image, remote, project, instance_type, ip_address, gw_address, instance_size=None):
+    """Create a new instance from an image on the specified remote and project, with specified type and size.
+
+    The instance will import the "default" profile and a second profile based on the provided instance size.
+
+    Args:
+    - instance_name: Name of the instance.
+    - image: Image source in the format 'remote:image' or 'image' which defaults to 'images:image'.
+    - remote: Remote server name.
+    - project: Project name.
+    - instance_type: Type of the instance ('vm' or 'container').
+    - ip_address: Static IP address for the instance.
+    - gw_address: Gateway address for the instance.
+    - instance_size: Optional size profile for the instance (defaults to global DEFAULT_INSTANCE_SIZE).
+
+    Returns:
+    True if the instance was created successfully, False otherwise.
     """
     try:
         remote_client = get_remote_client(remote, project_name=project)  # Function to retrieve the remote client
+
+        # Set instance_size to DEFAULT_INSTANCE_SIZE if not provided
+        if not instance_size:
+            instance_size = DEFAULT_INSTANCE_SIZE
 
         # Check if the project exists
         try:
@@ -538,19 +562,15 @@ def create_instance(instance_name, image, remote, project, instance_type, ip_add
                 "protocol": "simplestreams",
                 'alias': alias
             },
-            'devices': {
-                'root': {
-                    'type': 'disk',
-                    'pool': 'default',  # Replace 'default' with the name of your storage pool if it's different
-                    'path': '/'
-                }
-            }
+            'profiles': ['default', instance_size],  # Add the default and specified instance size profiles
         }
 
         if instance_type == "vm":
             config['type'] = "virtual-machine"
 
+        # Create the instance
         instance = remote_client.instances.create(config, wait=True)
+
         logger.info(f"Instance '{instance_name}' created successfully.")
         return True
 
@@ -582,13 +602,39 @@ def delete_instance(instance_name, remote, project):
     except Exception as e:
         logger.error(f"An unexpected error occurred: {e}")
 
+def exec_instance_bash(instance_name, remote, project):
+    try:
+        # Determine the correct full instance name format
+        if remote != 'local':
+            full_instance_name = f"{remote}:{instance_name}"
+        else:
+            full_instance_name = instance_name
+
+        # Build the command with the --project option if the project is not default
+        command = ["incus", "exec", full_instance_name, "--project", project, "--", "bash"]
+
+        # Execute the bash command interactively using subprocess
+        subprocess.run(command, check=True, capture_output=True, text=True)
+
+        logger.info(f"Started bash in instance '{remote}:{project}.{instance_name}'")
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to execute bash in instance '{remote}:{project}.{instance_name}': {e.stderr.strip()}")
+
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while executing bash in instance '{remote}:{project}.{instance_name}': {e}")
+
 #############################################
 ###### figo gpu command functions ###########
 #############################################
 
 def show_gpu_status(client):
     """Show the status of GPUs."""
-    result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+    try:
+        result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error in lspci: {e.stderr.strip()}")
+        return
     total_gpus = len(result.stdout.strip().split('\n'))
 
     running_instances = [
@@ -614,26 +660,30 @@ def list_gpu_profiles(client):
     print("{:<10} {:<30}".format(len(gpu_profiles), ", ".join(gpu_profiles)))
 
 def add_gpu_profile(instance_name, client):
-    """Add a GPU profile to an instance."""
+    """Add a GPU profile to an instance.
+    
+    Returns:    True if the GPU profile was added successfully, False otherwise.
+    """
     try:
         instance = client.instances.get(instance_name)
         if instance.status != "Stopped":
             logger.error(f"Instance '{instance_name}' is running or in error state.")
-            return
+            return False
 
         instance_profiles = instance.profiles
         gpu_profiles_for_instance = [
             profile for profile in instance_profiles if profile.startswith("gpu-")
         ]
-
-        result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+        try:
+            result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error in lspci: {e.stderr.strip()}")
+            return False
         total_gpus = len(result.stdout.strip().split('\n'))
 
         if len(gpu_profiles_for_instance) >= total_gpus:
-            logger.error(
-                f"Instance '{instance_name}' already has the maximum number of GPU profiles."
-            )
-            return
+            logger.error(f"Instance '{instance_name}' already has the maximum number of GPU profiles.")
+            return False
 
         all_profiles = get_all_profiles(client)
         available_gpu_profiles = [
@@ -642,21 +692,20 @@ def add_gpu_profile(instance_name, client):
         ]
 
         if not available_gpu_profiles:
-            logger.error(
-                f"No available GPU profiles to add to instance '{instance_name}'."
-            )
-            return
+            logger.error(f"No available GPU profiles to add to instance '{instance_name}'.")
+            return False
 
         new_profile = available_gpu_profiles[0]
         instance_profiles.append(new_profile)
         instance.profiles = instance_profiles
         instance.save(wait=True)
 
-        logger.info(
-            f"Added GPU profile '{new_profile}' to instance '{instance_name}'."
-        )
+        logger.info(f"Added GPU profile '{new_profile}' to instance '{instance_name}'.")
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to add GPU profile to instance '{instance_name}': {e}")
+        return False
+    
+    return True
 
 def remove_gpu_all_profiles(instance_name, client):
     """Remove all GPU profiles from an instance."""
@@ -791,7 +840,11 @@ def list_users(client, full=False):
         fingerprint = certificate.fingerprint[:12]
 
         # Fetch detailed information about the certificate using incus command
-        result = subprocess.run(["incus", "config", "trust", "show", fingerprint], capture_output=True, text=True, check=True)
+        try:
+            result = subprocess.run(["incus", "config", "trust", "show", fingerprint], capture_output=True, text=True, check=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to retrieve certificate details: {e.stderr.strip()}")
+            continue
         user_cert_yaml = yaml.safe_load(result.stdout)  # Load the certificate configuration into a dictionary
 
         # Parse email, name, and organization from the description if available
@@ -899,38 +952,54 @@ Endpoint = {Endpoint}
     logger.info(f"Generated WireGuard configuration: {config_filename}, IP address: {ip_address}")
 
 def add_friendly_name(pfx_file, friendly_name, password=None):
-    """Add a friendlyName attribute to the existing PFX file, overwriting the original."""
+    """Add a friendlyName attribute to the existing PFX file, overwriting the original.
+    
+    Return true if the friendlyName was added successfully, false otherwise.
+    """
     temp_pem_file = "temp.pem"
     temp_pfx_file = "temp_with_friendlyname.pfx"
 
-    # Convert the existing PFX to PEM format
-    openssl_cmd = [
-        "openssl", "pkcs12", "-in", pfx_file, "-out", temp_pem_file, "-nodes"
-    ]
-    if password:
-        openssl_cmd.extend(["-password", f"pass:{password}"])
-    
-    subprocess.run(openssl_cmd, check=True)
+    try:    
 
-    # Prepare the command to create the new PFX file with friendlyName
-    openssl_cmd = [
-        "openssl", "pkcs12", "-export", "-in", temp_pem_file, "-out", temp_pfx_file,
-        "-name", friendly_name
-    ]
-    if password:
-        openssl_cmd.extend(["-passin", f"pass:{password}", "-passout", f"pass:{password}"])
-    else:
-        openssl_cmd.extend(["-passout", "pass:"])
+        # Convert the existing PFX to PEM format
+        openssl_cmd = [
+            "openssl", "pkcs12", "-in", pfx_file, "-out", temp_pem_file, "-nodes"
+        ]
+        if password:
+            openssl_cmd.extend(["-password", f"pass:{password}"])
 
-    subprocess.run(openssl_cmd, check=True)
+        subprocess.run(openssl_cmd, check=True, capture_output=True, text=True)
 
-    # Replace the original PFX file with the new one
-    subprocess.run(["mv", temp_pfx_file, pfx_file])
+        # Prepare the command to create the new PFX file with friendlyName
+        openssl_cmd = [
+            "openssl", "pkcs12", "-export", "-in", temp_pem_file, "-out", temp_pfx_file,
+            "-name", friendly_name
+        ]
+        if password:
+            openssl_cmd.extend(["-passin", f"pass:{password}", "-passout", f"pass:{password}"])
+        else:
+            openssl_cmd.extend(["-passout", "pass:"])
 
-    # Clean up temporary files
-    subprocess.run(["rm", temp_pem_file])
+        subprocess.run(openssl_cmd, check=True, capture_output=True, text=True)
+
+        # Replace the original PFX file with the new one
+        subprocess.run(["mv", temp_pfx_file, pfx_file], capture_output=True, text=True)
+
+        # Clean up temporary files
+        subprocess.run(["rm", temp_pem_file], capture_output=True, text=True)
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to add friendlyName to PFX file: {e.stderr.strip()}")
+        return False
+    except FileNotFoundError:
+        logger.error("OpenSSL is not installed or not found in the system's PATH.")
+        return False
+    except Exception as e:
+        logger.error(f"An error occurred while adding friendlyName to PFX file: {e.stderr.strip()}")
+        return False
 
     logger.info(f"PFX file with friendlyName updated: {pfx_file}")
+    return True
 
 def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None):
     """Generate key pair (CRT and PFX files) for the user.
@@ -1018,15 +1087,15 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
 
         # Delete the key file
         try:
-            subprocess.run(["rm", key_file], check=True)
+            subprocess.run(["rm", key_file], check=True, text=True, capture_output=True)
         except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to delete key file {key_file}: {e}")
+            logger.error(f"Failed to delete key file {key_file}: {e.stderr.strip()}")
             return False
 
         # Add a friendly name to the PFX file
-        try:
-            add_friendly_name(pfx_file, f"{FIGO_PREFIX}{user_name}", password=pfx_password)
-        except Exception as e:
+        result = add_friendly_name(pfx_file, f"{FIGO_PREFIX}{user_name}", password=pfx_password)
+        
+        if not result:
             logger.error(f"Failed to add a friendly name to the PFX file {pfx_file}: {e}")
             return False
 
@@ -1640,6 +1709,16 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
     
     Before enrolling the remote server, the public key of the local incus user needs to be added 
     to the remote server's authorized_keys file.
+
+    Parameters:
+    - remote_server: The name of the remote server
+    - ip_address_port: The IP address and port of the remote server in the format 'IP:PORT'
+    - cert_filename: The path to the client certificate file
+    - user: The username to use for SSH connection
+    - loc_name: The location name for the certificate
+
+    Returns: True if the remote server was successfully enrolled, False otherwise.
+
     """
     ip_address, port = (ip_address_port.split(":") + ["8443"])[:2]
 
@@ -1649,7 +1728,7 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
             ip_address = resolved_ip
         else:
             logger.error(f"Invalid IP address or hostname: {ip_address}")
-            return
+            return False
 
     cert_filename = os.path.expanduser(cert_filename)
     remote_cert_path = f"{user}@{ip_address}:~/figo/certs/{loc_name}.crt"
@@ -1657,7 +1736,7 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
     try:
         # Check if the certificate already exists on the remote server
         check_cmd = f"ssh {user}@{ip_address} '[ -f ~/figo/certs/{loc_name}.crt ]'"
-        result = subprocess.run(check_cmd, shell=True)
+        result = subprocess.run(check_cmd, shell=True, capture_output=True, text=True)
 
         if result.returncode == 0:
             logger.info(f"Warning: Certificate {loc_name}.crt already exists on {ip_address}.")
@@ -1665,13 +1744,13 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
             # Ensure the destination directory exists
             subprocess.run(
                 ["ssh", f"{user}@{ip_address}", "mkdir -p ~/figo/certs"],
-                check=True
+                check=True, capture_output=True, text=True
             )
 
             # Transfer the certificate to the remote server
             subprocess.run(
                 ["scp", cert_filename, remote_cert_path],
-                check=True
+                check=True, capture_output=True, text=True
             )
             logger.info(f"Certificate {cert_filename} successfully transferred to {ip_address}.")
 
@@ -1682,7 +1761,7 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
                 )
                 subprocess.run(
                     ["ssh", f"{user}@{ip_address}", add_cert_cmd],
-                    check=True
+                    check=True, capture_output=True, text=True
                 )
                 logger.info(f"Certificate incus_{loc_name}.crt added to Incus on {ip_address}.")
             except subprocess.CalledProcessError as e:
@@ -1690,11 +1769,11 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
                     logger.info(f"Warning: Certificate incus_{loc_name} already added to Incus on {ip_address}.")
                 else:
                     logger.error(f"An error occurred while adding the certificate to Incus: {e}")
-                    return
+                    return False
 
     except subprocess.CalledProcessError as e:
         logger.error(f"An error occurred while processing the certificate: {e}")
-        return
+        return False
 
     # Check if the remote server already exists
     try:
@@ -1710,6 +1789,9 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
             logger.info(f"Remote server {remote_server} added to client configuration.")
     except subprocess.CalledProcessError as e:
         logger.error(f"An error occurred while adding the remote server to the client configuration: {e}")
+        return False
+    
+    return True
 
 
 #############################################
@@ -1765,6 +1847,10 @@ def create_instance_parser(subparsers):
     delete_parser = instance_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete a specific instance")
     delete_parser.add_argument("instance_name", help="Name of the instance to delete. Can include remote and project scope.")
     add_common_arguments(delete_parser)
+
+    bash_parser = instance_subparsers.add_parser("bash", aliases=["b"], help="Execute bash in a specific instance")
+    bash_parser.add_argument("instance_name", help="Name of the instance to execute bash. Can include remote and project scope.")
+    add_common_arguments(bash_parser)
 
     subparsers._name_parser_map["in"] = instance_parser
     subparsers._name_parser_map["i"] = instance_parser
@@ -1947,6 +2033,9 @@ def handle_instance_command(args, parser_dict):
             create_instance(instance, image, remote, project, instance_type, args.ip, args.gw)
         elif args.instance_command in ["delete", "del", "d"]:
             delete_instance(instance, remote, project)
+        elif args.instance_command in ["bash", "b"]:
+            exec_instance_bash(instance, remote, project)
+
 
 
 #############################################
