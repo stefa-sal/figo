@@ -867,6 +867,54 @@ def list_profiles(client):
         associated_instances_str = ', '.join(associated_instances) if associated_instances else 'None'
         print("{:<25} {:<80}".format(truncate(profile.name,25), associated_instances_str))
 
+import warnings
+
+# Suppress a specific warning from the pylxd library
+warnings.filterwarnings("ignore", message="Attempted to set unknown attribute", module="pylxd.models._model")
+
+def copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile):
+    """Copy a profile from one location to another with error handling."""
+    try:
+        # Get the source and target clients
+        source_client = get_remote_client(source_remote, project_name=source_project)
+        target_client = get_remote_client(target_remote, project_name=target_project)
+
+        # Verify if the source profile exists
+        try:
+            profile = source_client.profiles.get(source_profile)
+        except pylxd.exceptions.NotFound:
+            logger.error(f"Source profile '{source_profile}' not found in '{source_remote}:{source_project}'.")
+            return
+        except pylxd.exceptions.LXDAPIException as e:
+            logger.error(f"Failed to retrieve source profile '{source_profile}' from '{source_remote}:{source_project}': {e}")
+            return
+
+        # Check if the target profile already exists
+        try:
+            target_client.profiles.get(target_profile)
+            logger.error(f"Target profile '{target_profile}' already exists in '{target_remote}:{target_project}'.")
+            return
+        except pylxd.exceptions.NotFound:
+            pass  # Profile does not exist, proceed with creation
+        except pylxd.exceptions.LXDAPIException as e:
+            logger.error(f"Failed to check if target profile '{target_profile}' exists on '{target_remote}:{target_project}': {e}")
+            return
+
+        # Prepare and create the target profile with the correct structure
+        try:
+            target_client.profiles.create(
+                name=target_profile,
+                config=profile.config.copy(),
+                devices=profile.devices.copy()
+            )
+            logger.info(f"Profile '{source_remote}:{source_project}.{source_profile}' successfully copied to '{target_remote}:{target_project}.{target_profile}'.")
+        except pylxd.exceptions.LXDAPIException as e:
+            logger.error(f"Failed to create target profile '{target_profile}' on '{target_remote}:{target_project}': {e}")
+
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while copying profile: {e}")
+
+
 #############################################
 ###### figo user command functions ##########
 #############################################
@@ -2061,13 +2109,11 @@ def handle_instance_command(args, parser_dict):
                 instance_type = "container"  # Convert 'cnt' to 'container'
 
             create_instance(instance, image, remote, project, instance_type,
-                            ip_address=args.ip, gw_address=args.gw, nic_device_name=args.nic)
+                            ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
         elif args.instance_command in ["delete", "del", "d"]:
             delete_instance(instance, remote, project)
         elif args.instance_command in ["bash", "b"]:
             exec_instance_bash(instance, remote, project)
-
-
 
 #############################################
 ###### figo gpu command CLI #################
@@ -2119,10 +2165,30 @@ def create_profile_parser(subparsers):
 
     profile_subparsers.add_parser("list", aliases=["l"], help="List profiles and associated instances")
 
+    copy_parser = profile_subparsers.add_parser("copy", help="Copy a profile to a new profile name or remote/project")
+    copy_parser.add_argument("source_profile", help="Source profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'")
+    copy_parser.add_argument("target_profile", nargs="?", help="Target profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'")
+
     subparsers._name_parser_map["pr"] = profile_parser
     subparsers._name_parser_map["p"] = profile_parser
 
     return profile_parser
+
+def parse_profile_scope(profile_scope):
+    """Parse a profile scope string and return remote, project, and profile names."""
+    remote = "local"
+    project = "default"
+    profile = profile_scope
+
+    if ':' in profile_scope and '.' in profile_scope:
+        remote, rest = profile_scope.split(':', 1)
+        project, profile = rest.split('.', 1)
+    elif ':' in profile_scope:
+        remote, profile = profile_scope.split(':', 1)
+    elif '.' in profile_scope:
+        project, profile = profile_scope.split('.', 1)
+
+    return remote, project, profile
 
 def handle_profile_command(args, client, parser_dict):
     if not args.profile_command:
@@ -2136,6 +2202,22 @@ def handle_profile_command(args, client, parser_dict):
             logger.error("You must provide a profile name or use the --all option.")
     elif args.profile_command in ["list", "l"]:
         list_profiles(client)
+    elif args.profile_command == "copy":
+        # Parse source and target profile details
+        source_remote, source_project, source_profile = parse_profile_scope(args.source_profile)
+        target_remote, target_project, target_profile = parse_profile_scope(args.target_profile if args.target_profile else source_profile)
+
+        if source_profile is None or source_profile == "":
+            logger.error("Error: Source profile name cannot be empty.")
+            return
+        
+        # Ensure target profile name defaults to source profile name if not provided
+        if target_profile is None or target_profile == "":
+            target_profile = source_profile
+
+        # Call the placeholder copy function with parsed values
+        copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile)
+
 
 #############################################
 ###### figo user command CLI ################
