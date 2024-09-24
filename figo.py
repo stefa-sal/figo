@@ -20,6 +20,11 @@ import cryptography.x509.oid
 import datetime
 from urllib.parse import urlparse
 
+import warnings
+# Suppress a specific warning from the pylxd library, needed in copy_profile()
+warnings.filterwarnings("ignore", message="Attempted to set unknown attribute", module="pylxd.models._model")
+
+
 NET_PROFILE = "net-bridged-br-200-3"
 #NAME_SERVER_IP_ADDR = "160.80.1.8"
 NAME_SERVER_IP_ADDR = "8.8.8.8"
@@ -867,11 +872,6 @@ def list_profiles(client):
         associated_instances_str = ', '.join(associated_instances) if associated_instances else 'None'
         print("{:<25} {:<80}".format(truncate(profile.name,25), associated_instances_str))
 
-import warnings
-
-# Suppress a specific warning from the pylxd library
-warnings.filterwarnings("ignore", message="Attempted to set unknown attribute", module="pylxd.models._model")
-
 def copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile):
     """Copy a profile from one location to another with error handling."""
     try:
@@ -881,6 +881,8 @@ def copy_profile(source_remote, source_project, source_profile, target_remote, t
 
         # Verify if the source profile exists
         try:
+            # the following operation always generates a warning "Attempted to set unknown attribute"
+            # IMHO because the pylxd library does not support the 'project' attribute
             profile = source_client.profiles.get(source_profile)
         except pylxd.exceptions.NotFound:
             logger.error(f"Source profile '{source_profile}' not found in '{source_remote}:{source_project}'.")
