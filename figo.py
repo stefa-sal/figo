@@ -21,8 +21,10 @@ import datetime
 from urllib.parse import urlparse
 
 NET_PROFILE = "net-bridged-br-200-3"
-NAME_SERVER_IP_ADDR = "160.80.1.8"
-NAME_SERVER_IP_ADDR_2 = "8.8.8.8"
+#NAME_SERVER_IP_ADDR = "160.80.1.8"
+NAME_SERVER_IP_ADDR = "8.8.8.8"
+NAME_SERVER_IP_ADDR_2 = "8.8.8.4"
+
 PROFILE_DIR = "./profiles"
 USER_DIR = "./users"
 
@@ -49,6 +51,9 @@ PROJECT_PREFIX = FIGO_PREFIX
 DEFAULT_INSTANCE_SIZE = 'instance-medium'  # Global default instance size
 
 DEFAULT_PREFIX_LEN = 25 # Default prefix length for IP addresses of instances
+
+DEFAULT_VM_NIC = "enp5s0"  # Default NIC for VM instances
+DEFAULT_CNT_NIC = "eth0"  # Default NIC for container instances
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -510,7 +515,8 @@ def get_all_profiles(client):
     return [profile.name for profile in client.profiles.all()]
 
 def create_instance(instance_name, image, remote, project, instance_type, 
-                    ip_address_and_prefix_len=None, gw_address=None, instance_size=None):
+                    ip_address_and_prefix_len=None, gw_address=None, nic_device_name=None,
+                    instance_size=None):
     """Create a new instance from an image on the specified remote and project, with specified type and size.
 
     The instance will import the "default" profile and a second profile based on the provided instance size.
@@ -523,6 +529,7 @@ def create_instance(instance_name, image, remote, project, instance_type,
     - instance_type: Type of the instance ('vm' or 'container').
     - ip_address: Static IP address for the instance.
     - gw_address: Gateway address for the instance.
+    - nic_device_name: Optional NIC device name for the instance (defaults to global DEFAULT_VM_NIC or DEFAULT_CNT_NIC).
     - instance_size: Optional size profile for the instance (defaults to global DEFAULT_INSTANCE_SIZE).
 
     Returns:
@@ -568,7 +575,11 @@ def create_instance(instance_name, image, remote, project, instance_type,
             logger.error(f"Error: Image server '{image_server}' does not use the 'simplestreams' protocol.")
             return False
 
-        device_name = "enp5s0" if instance_type == "vm" else "eth0"
+        if not nic_device_name:
+            device_name = DEFAULT_VM_NIC if instance_type == "vm" else DEFAULT_CNT_NIC
+        else:
+            device_name = nic_device_name # Use the specified NIC device name
+
         # Create the instance configuration
         config = {
             'name': instance_name,
@@ -591,8 +602,8 @@ def create_instance(instance_name, image, remote, project, instance_type,
                         gateway4: {gw_address}
                         nameservers:
                             addresses:
-                                - 8.8.8.8
-                                - 8.8.4.4
+                                - {NAME_SERVER_IP_ADDR}
+                                - {NAME_SERVER_IP_ADDR_2}
                 """
             }
         }
@@ -845,7 +856,7 @@ def list_profiles(client):
     """List all profiles and their associated instances."""
     profiles = client.profiles.all()
 
-    print(f"{'PROFILE':<24}{'INSTANCES'}")
+    print("{:<25} {:<80}".format("PROFILE", "INSTANCES"))
 
     for profile in profiles:
         instances = client.instances.all()
@@ -854,7 +865,7 @@ def list_profiles(client):
             if profile.name in instance.profiles
         ]
         associated_instances_str = ', '.join(associated_instances) if associated_instances else 'None'
-        print(f"{profile.name:<24}{associated_instances_str}")
+        print("{:<25} {:<80}".format(truncate(profile.name,25), associated_instances_str))
 
 #############################################
 ###### figo user command functions ##########
@@ -1372,8 +1383,6 @@ def add_user(user_name, cert_file, client, admin=False, wireguard=False, project
     True if the user is added successfully, False otherwise.
     """
 
-    global PROJECT_PREFIX  # Declare the use of the global variable
-
     # Check if user already exists in the certificates
     for cert in client.certificates.all():
         if cert.name == user_name:
@@ -1611,8 +1620,6 @@ def delete_user(user_name, client, purge=False, removefiles=False):
     - removefiles: If True, remove files associated with the user in the USER_DIR
     """
 
-    global PROJECT_PREFIX  # Declare the use of the global variable
-
     # Construct the project name associated with the user
     project_name = f"{PROJECT_PREFIX}{user_name}"
 
@@ -1836,13 +1843,15 @@ def create_instance_parser(subparsers):
     instance_parser = subparsers.add_parser("instance", help="Manage instances")
     instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
 
-    # Add common options for remote, project, user, IP, and gateway
+    # Add common options for remote, project, user, IP, gateway, and NIC
     def add_common_arguments(parser):
         parser.add_argument("-r", "--remote", help="Specify the remote server name")
         parser.add_argument("-p", "--project", help="Specify the project name")
         parser.add_argument("-u", "--user", help="Specify the user who will own the instance")
         parser.add_argument("-i", "--ip", help="Specify a static IP address for the instance")
         parser.add_argument("-g", "--gw", help="Specify the gateway address for the instance")
+        parser.add_argument("-n", "--nic", help="Specify the nic name for the instance, "
+                             "default: eth0 for containers, enp5s0 for VMs")
 
     instance_list_parser = instance_subparsers.add_parser("list", aliases=["l"],
         help="List instances (use -f or --full for more details)"
@@ -2040,7 +2049,7 @@ def handle_instance_command(args, parser_dict):
             if not args.ip or not args.gw:
                 logger.error("Error: Both IP address and gateway must be provided.")
                 return
-            set_ip(instance, remote, project, args.ip, args.gw)
+            set_ip(instance, remote, project, args.ip, args.gw, args.nic)
         elif args.instance_command in ["create", "c"]:
             image = parse_image(args.image)
             if image is None:
@@ -2051,8 +2060,8 @@ def handle_instance_command(args, parser_dict):
             if instance_type == "cnt":
                 instance_type = "container"  # Convert 'cnt' to 'container'
 
-            create_instance(instance, image, remote, project, instance_type, 
-                            ip_address_and_prefix_len=args.ip, gw_address=args.gw)
+            create_instance(instance, image, remote, project, instance_type,
+                            ip_address=args.ip, gw_address=args.gw, nic_device_name=args.nic)
         elif args.instance_command in ["delete", "del", "d"]:
             delete_instance(instance, remote, project)
         elif args.instance_command in ["bash", "b"]:
