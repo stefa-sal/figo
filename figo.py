@@ -822,7 +822,13 @@ def remove_gpu_profile(instance_name, client):
 #############################################
 
 def dump_profile_to_file(profile, directory):
-    """Helper function to write a profile to a .yaml file."""
+    """Helper function to write a profile to a .yaml file.
+
+    only the name, description, config, and devices are saved.
+    the file is saved in the specified directory with the profile name as the file name.
+    #TODO it only work for local profiles, not remote profiles.
+
+    """
     profile_data = {
         'name': profile.name,
         'description': profile.description,
@@ -860,11 +866,24 @@ def dump_profile(client, profile_name):
         logger.error(f"Profile '{profile_name}' not found.")
         return
 
-def list_profiles(client):
-    """List all profiles and their associated instances."""
-    profiles = client.profiles.all()
+def list_profiles(remote, project, profile_name=None):
+    """List all profiles on a remote and project and their associated instances.
+    
+    Returns:    False if fetching the profiles failed, True otherwise.
+    """
+    client = get_remote_client(remote, project_name=project)
+    if not client:
+        return False
 
     print("{:<25} {:<80}".format("PROFILE", "INSTANCES"))
+
+    if profile_name:
+        try:
+            profiles = [client.profiles.get(profile_name)]
+        except pylxd.exceptions.NotFound:
+            return False
+    else:
+        profiles = client.profiles.all()
 
     for profile in profiles:
         instances = client.instances.all()
@@ -874,6 +893,8 @@ def list_profiles(client):
         ]
         associated_instances_str = ', '.join(associated_instances) if associated_instances else 'None'
         print("{:<25} {:<80}".format(truncate(profile.name,25), associated_instances_str))
+
+    return True
 
 def copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile):
     """Copy a profile from one location to another with error handling, including the description."""
@@ -1201,6 +1222,14 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
         return False
 
 def create_project(client, project_name):
+    """Create a project with the specified name and disable separate profiles.
+
+    client: the incus client object, it can be local or remote.
+
+    Returns:
+    - True if the project was created successfully, False otherwise.
+    """
+
     try:
         # Explicitly define the project details as a dictionary
         project_data = {
@@ -1505,7 +1534,7 @@ def add_user(user_name, cert_file, client, admin=False, wireguard=False, project
             return False
         logger.info(f"Generated certificate and key pair for user: {user_name}")
 
-    # Create project for the user
+    # Create a project for the user in the main server (local)
     project_created = False
     if not admin and project==None:
         project_created = create_project(client, project_name)
@@ -1760,7 +1789,7 @@ def delete_user(user_name, client, purge=False, removefiles=False):
 ###### figo remote command functions ########
 #############################################
 
-def list_remotes(client, full=False):
+def list_remotes(full=False):
     """Lists the available Incus remotes and their addresses."""
     try:
         remotes = get_incus_remotes()
@@ -1995,8 +2024,18 @@ def handle_instance_command(args, parser_dict):
             return False
         return True
 
-    # Function to handle parsing of remote and project from the instance name and arguments
     def parse_instance_scope(instance_name, provided_remote, provided_project):
+        """Parse the instance name to extract remote, project, and instance.
+        
+        The instance name can be in the following formats:
+        
+        - remote:project.instance
+        - remote:instance
+        - project.instance
+        
+        Returns the remote, project, and instance names or None, None, None if there is an error.
+        """
+
         remote, project, instance = '', '', instance_name  # Default values
 
         if ':' in instance_name:
@@ -2168,7 +2207,8 @@ def create_profile_parser(subparsers):
     dump_profiles_parser.add_argument("-a", "--all", action="store_true", help="Dump all profiles to .yaml files")
     dump_profiles_parser.add_argument("profile_name", nargs="?", help="Name of the profile to dump")
 
-    profile_subparsers.add_parser("list", aliases=["l"], help="List profiles and associated instances")
+    list_parser = profile_subparsers.add_parser("list", aliases=["l"], help="List profiles and associated instances")
+    list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project.profile_name', 'remote:project', 'project.profile_name', 'profile_name', or defaults to 'local:default'")
 
     copy_parser = profile_subparsers.add_parser("copy", help="Copy a profile to a new profile name or remote/project")
     copy_parser.add_argument("source_profile", help="Source profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'")
@@ -2180,18 +2220,43 @@ def create_profile_parser(subparsers):
     return profile_parser
 
 def parse_profile_scope(profile_scope):
-    """Parse a profile scope string and return remote, project, and profile names."""
+    """Parse a profile scope string and return remote, project, and profile names.
+    
+    It is used for profile list and profile copy commands.
+    
+    """
     remote = "local"
     project = "default"
-    profile = profile_scope
+    profile = None
 
-    if ':' in profile_scope and '.' in profile_scope:
-        remote, rest = profile_scope.split(':', 1)
-        project, profile = rest.split('.', 1)
-    elif ':' in profile_scope:
-        remote, profile = profile_scope.split(':', 1)
-    elif '.' in profile_scope:
-        project, profile = profile_scope.split('.', 1)
+    if profile_scope:
+        if ':' in profile_scope and '.' in profile_scope:  # remote:project.profile or remote:project.
+            remote, rest = profile_scope.split(':', 1)
+            project, profile = rest.split('.', 1)
+            if remote == '':
+                logger.error("Error: Remote name cannot be empty.")
+                return None, None, None
+            if project == '':
+                logger.error("Error: Project name cannot be empty.")
+                return None, None, None
+            if profile == '':
+                profile = None
+        elif ':' in profile_scope: # remote:profile or remote:
+            remote, profile = profile_scope.split(':', 1)
+            if remote == '':
+                logger.error("Error: Remote name cannot be empty.")
+                return None, None, None
+            if profile == '':
+                profile = None
+        elif '.' in profile_scope: # project.profile or project.
+            project, profile = profile_scope.split('.', 1)
+            if project == '':
+                logger.error("Error: Project name cannot be empty.")
+                return None, None, None
+            if profile == '':
+                profile = None
+        else: # profile
+            profile = profile_scope
 
     return remote, project, profile
 
@@ -2206,9 +2271,11 @@ def handle_profile_command(args, client, parser_dict):
         else:
             logger.error("You must provide a profile name or use the --all option.")
     elif args.profile_command in ["list", "l"]:
-        list_profiles(client)
+        remote, project, profile = parse_profile_scope(args.scope)
+        if remote is None or project is None:
+            return        
+        list_profiles(remote, project, profile_name=profile)
     elif args.profile_command == "copy":
-        # Parse source and target profile details
         source_remote, source_project, source_profile = parse_profile_scope(args.source_profile)
         target_remote, target_project, target_profile = parse_profile_scope(args.target_profile if args.target_profile else source_profile)
 
@@ -2216,11 +2283,9 @@ def handle_profile_command(args, client, parser_dict):
             logger.error("Error: Source profile name cannot be empty.")
             return
         
-        # Ensure target profile name defaults to source profile name if not provided
         if target_profile is None or target_profile == "":
             target_profile = source_profile
 
-        # Call the placeholder copy function with parsed values
         copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile)
 
 
@@ -2324,11 +2389,11 @@ def create_remote_parser(subparsers):
 
     return remote_parser
 
-def handle_remote_command(args, client, parser_dict):
+def handle_remote_command(args, parser_dict):
     if not args.remote_command:
         parser_dict['remote_parser'].print_help()
     elif args.remote_command in ["list", "l"]:
-        list_remotes(client, full=args.full)
+        list_remotes(full=args.full)
     elif args.remote_command == "enroll":
         ip_address_port = f"{args.ip_address}:{args.port}"
         enroll_remote(args.remote_server, ip_address_port, args.cert_filename, user=args.user, loc_name=args.loc_name)
@@ -2375,8 +2440,7 @@ def handle_command(args, parser, parser_dict):
         client = pylxd.Client()
         handle_user_command(args, client, parser_dict)
     elif args.command in ["remote", "re", "r"]:
-        client = pylxd.Client()
-        handle_remote_command(args, client, parser_dict)
+        handle_remote_command(args, parser_dict)
 
 def main():
     parser, parser_dict = create_parser()
