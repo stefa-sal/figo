@@ -211,7 +211,7 @@ def get_and_print_instances(remote_node=None, project_name=None, full=False):
         
     return True
 
-def print_profiles(remote_node=None, project_name=None, full=False):
+def list_instances(remote_node=None, project_name=None, full=False):
     """Print profiles of all instances, either from the local or a remote Incus node.
     If full is False, prints only GPU profiles with color coding.
     """
@@ -2085,10 +2085,7 @@ def handle_instance_list(args):
 
             project_name = project_scope
 
-    if args.full:
-        print_profiles(remote_node, project_name=project_name, full=True)
-    else:
-        print_profiles(remote_node, project_name=project_name, full=False)
+    list_instances(remote_node, project_name=project_name, full=args.full)
 
 def handle_instance_command(args, parser_dict):
     if not args.instance_command:
