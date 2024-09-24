@@ -273,6 +273,8 @@ def get_remote_client(remote_node, project_name='default'):
     """Create a pylxd.Client instance for the specified remote node and project.
     
     Returns:  A pylxd.Client instance for the remote node if successful, None otherwise.
+
+    If not successful, the function logs an error message and returns None.
     """
     #TODO add the code to handle the case when the remote node is not reachable and return None
 
@@ -327,7 +329,7 @@ def start_instance(instance_name, remote, project):
     try:
         instance = remote_client.instances.get(instance_name)
 
-        if instance.status != "Stopped":
+        if instance.status.lower() != "stopped":
             logger.error(f"Instance '{instance_name}' in project '{project}' on remote '{remote}' is not stopped.")
             return False
 
@@ -399,24 +401,34 @@ def start_instance(instance_name, remote, project):
 
 
 def stop_instance(instance_name, remote, project):
-    """Stop a specific instance."""
+    """Stop a specific instance.
+    
+    Returns:    True if the instance was stopped successfully, False otherwise.
+    """
+    # get the specified instance in project and remote  
+    remote_client = get_remote_client(remote, project_name=project)
+    if not remote_client:
+        return False
 
     try:
-        # get the specified instance in project and remote  
-        remote_client = get_remote_client(remote, project_name=project)
         instance = remote_client.instances.get(instance_name)
 
-        if instance.status != "Running":
+        if instance.status.lower() != "running":
             logger.error(f"Instance '{instance_name}' in project '{project}' on remote '{remote}' is not running.")
-            return
+            return False
 
         instance.stop(wait=True)
         logger.info(f"Instance '{instance_name}' stopped.")
+        return True
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to stop instance '{instance_name}' in project '{project}' on remote '{remote}': {e}")
+        return False
 
 def set_user_key(instance_name, remote, project, key_filename, client):
-    """Set a public key in the /home/mpi/.ssh/authorized_keys of the specified instance."""
+    """Set a public key in the /home/mpi/.ssh/authorized_keys of the specified instance.
+    
+    Returns:    True if the key was set successfully, False otherwise.
+    """
     try:
         # Read the public key from the file
         with open(key_filename, 'r') as key_file:
@@ -424,15 +436,20 @@ def set_user_key(instance_name, remote, project, key_filename, client):
 
         # get the specified instance in project and remote  
         remote_client = get_remote_client(remote, project_name=project)
+        if not remote_client:
+            return False
         instance = remote_client.instances.get(instance_name)
 
         # Check if the instance is running
-        if instance.status != "Running":
+        if instance.status.lower() != "running":
             logger.error(f"Error: Instance '{instance_name}' is not running.")
-            return
+            return False
 
-        # Connect to the instance using LXD's exec
         def exec_command(command):
+            """Execute a command in the instance.
+            
+            Returns: The output of the command, None in case of exception.
+            """
             try:
                 exec_result = instance.execute(command)
                 output, error = exec_result
@@ -457,31 +474,48 @@ def set_user_key(instance_name, remote, project, key_filename, client):
         exec_command(['sh', '-c', f'echo "{public_key}" >> /home/mpi/.ssh/authorized_keys'])
 
         logger.info(f"Public key from '{key_filename}' added to /home/mpi/.ssh/authorized_keys in instance '{instance_name}'.")
+        
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to set user key for instance '{instance_name}': {e}")
+        return False
     except FileNotFoundError:
         logger.error(f"File '{key_filename}' not found.")
+        return False
     except Exception as e:
         logger.error(f"An error occurred: {e}")
+        return False
+    
+    return True
 
-def set_ip(instance_name, remote, project, ip_address, gw_address, client):
-    """Set a static IP address and gateway for a stopped instance."""
+
+def set_ip(instance_name, remote, project, ip_address, gw_address, nic_device_name):
+    """Set a static IP address and gateway for a stopped instance.
+    
+    Returns:    True if the IP address was set successfully, False otherwise.
+    
+    """
+    #TODO ip_address should be in the form of ip/prefix_len
+    #TODO check if the instance is stopped
+    #TODO align the code with create_instance
+
     if not is_valid_ip(ip_address):
         logger.error(f"Error: '{ip_address}' is not a valid IP address.")
-        return
+        return False
     
     if not is_valid_ip(gw_address):
         logger.error(f"Error: '{gw_address}' is not a valid IP address.")
-        return
+        return False
 
     try:
         # get the specified instance in project and remote  
         remote_client = get_remote_client(remote, project_name=project)
+        if not remote_client:
+            return False
         instance = remote_client.instances.get(instance_name)
 
-        if instance.status != "Stopped":
+        if instance.status.lower() != "stopped":
             logger.error(f"Error: Instance '{instance_name}' is not stopped.")
-            return
+            return False
         
         # Check if a profile starting with "net-" is associated with the instance
         net_profiles = [profile for profile in instance.profiles if profile.startswith("net-")]
@@ -508,12 +542,16 @@ config:
   - type: nameserver
     address: {NAME_SERVER_IP_ADDR_2}
 """
-
         instance.config['cloud-init.network-config'] = network_config
         instance.save(wait=True)
         logger.info(f"IP address '{ip_address}' and gateway '{gw_address}' assigned to instance '{instance_name}'.")
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to set IP address for instance '{instance_name}': {e}")
+        return False
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+        return False
+    return True
 
 def get_all_profiles(client):
     """Get all available profiles."""
@@ -543,6 +581,8 @@ def create_instance(instance_name, image, remote, project, instance_type,
 
     try:
         remote_client = get_remote_client(remote, project_name=project)  # Function to retrieve the remote client
+        if not remote_client:
+            return False
 
         # Set instance_size to DEFAULT_INSTANCE_SIZE if not provided
         if not instance_size:
@@ -631,16 +671,21 @@ def create_instance(instance_name, image, remote, project, instance_type,
         return False
 
 def delete_instance(instance_name, remote, project, force=False):
-    """Delete a specific instance on the specified remote and project."""
+    """Delete a specific instance on the specified remote and project.
+    
+    Returns:    True if the instance was deleted successfully, False otherwise.
+    """
     try:
         remote_client = get_remote_client(remote, project_name=project) # Function to retrieve the remote client
+        if not remote_client:
+            return False
 
         # Check if the instance exists
         try:
             instance = remote_client.instances.get(instance_name)
         except pylxd.exceptions.LXDAPIException:
             logger.error(f"Instance '{instance_name}' not found in project '{project}' on remote '{remote}'.")
-            return
+            return False
 
         # Delete the instance
         if force:
@@ -650,8 +695,11 @@ def delete_instance(instance_name, remote, project, force=False):
         logger.info(f"Instance '{instance_name}' deleted successfully.")
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to delete instance '{instance_name}': {e}")
+        return False
     except Exception as e:
         logger.error(f"An unexpected error occurred: {e}")
+        return False
+    return True
 
 def exec_instance_bash(instance_name, remote, project):
     try:
@@ -715,7 +763,7 @@ def add_gpu_profile(instance_name, client):
     """
     try:
         instance = client.instances.get(instance_name)
-        if instance.status != "Stopped":
+        if instance.status.lower() != "stopped":
             logger.error(f"Instance '{instance_name}' is running or in error state.")
             return False
 
@@ -760,7 +808,7 @@ def remove_gpu_all_profiles(instance_name, client):
     """Remove all GPU profiles from an instance."""
     try:
         instance = client.instances.get(instance_name)
-        if instance.status != "Stopped":
+        if instance.status.lower() != "stopped":
             logger.error(f"Instance '{instance_name}' is running or in error state.")
             return
 
@@ -791,7 +839,7 @@ def remove_gpu_profile(instance_name, client):
     """Remove a GPU profile from an instance."""
     try:
         instance = client.instances.get(instance_name)
-        if instance.status != "Stopped":
+        if instance.status.lower() != "stopped":
             logger.error(f"Instance '{instance_name}' is running or in error state.")
             return
 
@@ -897,11 +945,18 @@ def list_profiles(remote, project, profile_name=None):
     return True
 
 def copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile):
-    """Copy a profile from one location to another with error handling, including the description."""
+    """Copy a profile from one location to another with error handling, including the description.
+    
+    Return True if the profile was copied successfully, False otherwise.
+    """
     try:
         # Get the source and target clients
         source_client = get_remote_client(source_remote, project_name=source_project)
+        if not source_client:
+            return False 
         target_client = get_remote_client(target_remote, project_name=target_project)
+        if not target_client:
+            return False
 
         # Verify if the source profile exists
         try:
@@ -909,21 +964,21 @@ def copy_profile(source_remote, source_project, source_profile, target_remote, t
             profile = source_client.profiles.get(source_profile)
         except pylxd.exceptions.NotFound:
             logger.error(f"Source profile '{source_profile}' not found in '{source_remote}:{source_project}'.")
-            return
+            return False
         except pylxd.exceptions.LXDAPIException as e:
             logger.error(f"Failed to retrieve source profile '{source_profile}' from '{source_remote}:{source_project}': {e}")
-            return
+            return False
 
         # Check if the target profile already exists
         try:
             target_client.profiles.get(target_profile)
             logger.error(f"Target profile '{target_profile}' already exists in '{target_remote}:{target_project}'.")
-            return
+            return False
         except pylxd.exceptions.NotFound:
             pass  # Profile does not exist, proceed with creation
         except pylxd.exceptions.LXDAPIException as e:
             logger.error(f"Failed to check if target profile '{target_profile}' exists on '{target_remote}:{target_project}': {e}")
-            return
+            return False
 
         # Prepare and create the target profile with the correct structure, including the description
         try:
@@ -936,10 +991,11 @@ def copy_profile(source_remote, source_project, source_profile, target_remote, t
             logger.info(f"Profile '{source_remote}:{source_project}.{source_profile}' successfully copied to '{target_remote}:{target_project}.{target_profile}'.")
         except pylxd.exceptions.LXDAPIException as e:
             logger.error(f"Failed to create target profile '{target_profile}' on '{target_remote}:{target_project}': {e}")
-
+            return False
     except Exception as e:
         logger.error(f"An unexpected error occurred while copying profile: {e}")
-
+        return False
+    return True
 
 #############################################
 ###### figo user command functions ##########
@@ -1425,8 +1481,12 @@ def delete_project(remote_node, project_name):
     - remote_client: pylxd.Client instance connected to the remote node (can also be local:)
     - remote_node: Name of the remote node where the project is located
     - project_name: Name of the project to delete
+
+    Returns: True if the project was deleted successfully, False otherwise.
     """
     remote_client = get_remote_client(remote_node, project_name=project_name)
+    if not remote_client:
+        return False
 
     try:
         # Retrieve the project from the remote node
@@ -1438,12 +1498,17 @@ def delete_project(remote_node, project_name):
 
     except pylxd.exceptions.NotFound:
         logger.error(f"Project '{project_name}' not found on the remote node. No action taken.")
+        return False
         
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to delete project '{project_name}' on remote '{remote_node}: {e}")
+        return False
     
     except Exception as e:
         logger.error(f"Unexpected error while deleting project '{project_name}' on remote '{remote_node}: {e}")
+        return False
+    
+    return True
 
 def add_user(user_name, cert_file, client, admin=False, wireguard=False, project=None, email=None, name=None, org=None):
     """
@@ -1637,9 +1702,14 @@ def get_remote_address(remote_node, get_protocol=False):
         raise ValueError(f"Error: Address not found for remote node '{remote_node}'")
 
 def list_instances_in_project(remote_node, project_name):
-    """List instances associated with a project on a specific remote node."""
+    """List instances associated with a project on a specific remote node.
+    
+    Returns a list of instance names in the project or None if an error occurs.
+    """
     
     remote_client = get_remote_client(remote_node, project_name=project_name)
+    if not remote_client:
+        return None
 
     # List all instances in the remote node in the given project
     instances = remote_client.instances.all()
@@ -1651,9 +1721,14 @@ def list_instances_in_project(remote_node, project_name):
     return instances_in_project
 
 def list_profiles_in_project(remote_node, project_name):
-    """List profiles associated with a project on a specific remote node."""
+    """List profiles associated with a project on a specific remote node.
+    
+    Returns a list of profile names in the project or None if an error occurs.
+    """
 
     remote_client = get_remote_client(remote_node, project_name=project_name)
+    if not remote_client:
+        return None
 
     profiles_in_project = []
 
@@ -1668,9 +1743,14 @@ def list_profiles_in_project(remote_node, project_name):
     return profiles_in_project
 
 def list_storage_volumes_in_project(remote_node, project_name):
-    """List storage volumes associated with a project on a specific remote node."""
+    """List storage volumes associated with a project on a specific remote node.
+    
+    Returns a list of storage volume names in the project or None if an error occurs.
+    """
 
     remote_client = get_remote_client(remote_node, project_name=project_name)
+    if not remote_client:
+        return None
 
     storage_volumes_in_project = []
 
@@ -1750,8 +1830,6 @@ def delete_user(user_name, client, purge=False, removefiles=False):
         else: #if projects is not None:
             if project_name in [project['name'] for project in projects]:
                 project_found = True
-
-                #remote_client = get_remote_client(remote_node, remotes)
 
                 # Check if there are any instances in the project
                 instances = list_instances_in_project(remote_node, project_name)
