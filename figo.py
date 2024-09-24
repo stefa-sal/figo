@@ -630,7 +630,7 @@ def create_instance(instance_name, image, remote, project, instance_type,
         logger.error(f"An unexpected error occurred: {e}")
         return False
 
-def delete_instance(instance_name, remote, project):
+def delete_instance(instance_name, remote, project, force=False):
     """Delete a specific instance on the specified remote and project."""
     try:
         remote_client = get_remote_client(remote, project_name=project) # Function to retrieve the remote client
@@ -643,6 +643,9 @@ def delete_instance(instance_name, remote, project):
             return
 
         # Delete the instance
+        if force:
+            if instance.status.lower() == 'running':
+                instance.stop(wait=True)
         instance.delete(wait=True)
         logger.info(f"Instance '{instance_name}' deleted successfully.")
     except pylxd.exceptions.LXDAPIException as e:
@@ -873,7 +876,7 @@ def list_profiles(client):
         print("{:<25} {:<80}".format(truncate(profile.name,25), associated_instances_str))
 
 def copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile):
-    """Copy a profile from one location to another with error handling."""
+    """Copy a profile from one location to another with error handling, including the description."""
     try:
         # Get the source and target clients
         source_client = get_remote_client(source_remote, project_name=source_project)
@@ -881,8 +884,7 @@ def copy_profile(source_remote, source_project, source_profile, target_remote, t
 
         # Verify if the source profile exists
         try:
-            # the following operation always generates a warning "Attempted to set unknown attribute"
-            # IMHO because the pylxd library does not support the 'project' attribute
+            # Fetch the source profile (may trigger a warning due to the 'project' attribute)
             profile = source_client.profiles.get(source_profile)
         except pylxd.exceptions.NotFound:
             logger.error(f"Source profile '{source_profile}' not found in '{source_remote}:{source_project}'.")
@@ -902,12 +904,13 @@ def copy_profile(source_remote, source_project, source_profile, target_remote, t
             logger.error(f"Failed to check if target profile '{target_profile}' exists on '{target_remote}:{target_project}': {e}")
             return
 
-        # Prepare and create the target profile with the correct structure
+        # Prepare and create the target profile with the correct structure, including the description
         try:
             target_client.profiles.create(
                 name=target_profile,
                 config=profile.config.copy(),
-                devices=profile.devices.copy()
+                devices=profile.devices.copy(),
+                description=profile.description  # Copy the description
             )
             logger.info(f"Profile '{source_remote}:{source_project}.{source_profile}' successfully copied to '{target_remote}:{target_project}.{target_profile}'.")
         except pylxd.exceptions.LXDAPIException as e:
@@ -1935,6 +1938,7 @@ def create_instance_parser(subparsers):
 
     delete_parser = instance_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete a specific instance")
     delete_parser.add_argument("instance_name", help="Name of the instance to delete. Can include remote and project scope.")
+    delete_parser.add_argument("-f", "--force", action="store_true", help="Force delete the instance even if it is running")
     add_common_arguments(delete_parser)
 
     bash_parser = instance_subparsers.add_parser("bash", aliases=["b"], help="Execute bash in a specific instance")
@@ -2113,10 +2117,9 @@ def handle_instance_command(args, parser_dict):
             create_instance(instance, image, remote, project, instance_type,
                             ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
         elif args.instance_command in ["delete", "del", "d"]:
-            delete_instance(instance, remote, project)
+            delete_instance(instance, remote, project, force=args.force)
         elif args.instance_command in ["bash", "b"]:
             exec_instance_bash(instance, remote, project)
-
 #############################################
 ###### figo gpu command CLI #################
 #############################################
