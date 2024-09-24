@@ -311,8 +311,15 @@ def get_remote_client(remote_node, project_name='default'):
             return None
         
     else:
-        address = get_remote_address(remote_node)
-        cert_path = get_certificate_path(remote_node)
+        try :
+            address = get_remote_address(remote_node)
+            cert_path = get_certificate_path(remote_node)
+        except FileNotFoundError:
+            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Certificate not found.")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
+            return
 
         # Create a pylxd.Client instance with SSL verification
         try:
@@ -955,7 +962,11 @@ def list_profiles(remote, project, profile_name=None):
         except pylxd.exceptions.NotFound:
             return False
     else:
-        profiles = client.profiles.all()
+        try:
+            profiles = client.profiles.all()
+        except pylxd.exceptions.LXDAPIException as e:
+            logger.error(f"Failed to retrieve profiles from '{remote}:{project}': {e}")
+            return False
 
     for profile in profiles:
         instances = client.instances.all()
