@@ -100,6 +100,14 @@ def is_valid_ip_prefix_len(ip_prefix):
     except ValueError:
         return False
 
+def matches(target_string, compare_string):
+    # Escape all regex characters except for '*'
+    compare_string = re.escape(compare_string)
+    # Replace the escaped '*' with '.*' which matches any sequence of characters
+    compare_string = compare_string.replace(r'\*', '.*')
+    # Use full match to check if target_string matches the compare_string pattern
+    return re.fullmatch(compare_string, target_string) is not None
+
 #############################################
 ###### figo instance command functions #####
 #############################################
@@ -146,34 +154,45 @@ def get_projects(remote_node="local"):
         return None
 
 def run_incus_list(remote_node="local", project_name="default"):
-    """Run the 'incus list -f json' command, optionally targeting a remote node and project
+    """Run the 'incus list -f json' command to show all the instances, optionally targeting a remote node and project.
     
-    Return the output as JSON if successful, otherwise return None.
+    Return the output as JSON if successful, return None if the project does not exist.
     """
     try:
-        # Prepare the command with an optional remote node and project name using the correct syntax
+        # Check if the project exists
+        command_check = ["incus", "project", "show", project_name]
+        if remote_node:
+            command_check = ["incus", "project", "show", f"{remote_node}:{project_name}"]
+
+        result_check = subprocess.run(command_check, capture_output=True, text=True, check=True)
+
+        # If the project exists, proceed to list instances
         command = ["incus", "list", "-f", "json", "--project", project_name]
         if remote_node:
             command = ["incus", "list", f"{remote_node}:", "-f", "json", "--project", project_name]
-        
-        # Run the command to get the list of instances in JSON format
+
         result = subprocess.run(command, capture_output=True, text=True, check=True)
-        
+
         # Parse the JSON output
         instances = json.loads(result.stdout)
+        
         return instances
+
     except subprocess.CalledProcessError as e:
-        # Print the exact error message from the command's stderr
-        # logger.error(f"Error: {e.stderr.strip()}")
+        #logger.error(f"Error: {e.stderr.strip()}")
         return None
+
     except json.JSONDecodeError as e:
         logger.error(f"Error: Failed to parse JSON output. {e}")
         return None
+
     except Exception as e:
         logger.error(f"Unexpected error while running 'incus list -f json': {e}")
         return None
 
-def get_and_print_instances(remote_node=None, project_name=None, full=False):
+
+
+def get_and_print_instances(remote_node=None, project_name=None, instance_scope=None, full=False):
     """Get instances from the specified remote node and project and print their details.
     
     Returns:    False if fetching the instances failed, True otherwise.
@@ -182,7 +201,6 @@ def get_and_print_instances(remote_node=None, project_name=None, full=False):
     RED = "\033[91m"
     GREEN = "\033[92m"
     RESET = "\033[0m"
-
     # Get the instances from 'incus list -f json'
     instances = run_incus_list(remote_node=remote_node, project_name=project_name)
     if instances is None:
@@ -191,6 +209,8 @@ def get_and_print_instances(remote_node=None, project_name=None, full=False):
     # Iterate through instances and print their details in columns
     for instance in instances:
         name = instance.get("name", "Unknown")
+        if instance_scope and not matches(name, instance_scope):
+            continue
         instance_type = "vm" if instance.get("type") == "virtual-machine" else "cnt"
         state = instance.get("status", "err")[:3].lower()  # Shorten the status
 
@@ -211,7 +231,7 @@ def get_and_print_instances(remote_node=None, project_name=None, full=False):
         
     return True
 
-def list_instances(remote_node=None, project_name=None, full=False):
+def list_instances(remote_node=None, project_name=None, instance_scope=None, full=False):
     """Print profiles of all instances, either from the local or a remote Incus node.
     If full is False, prints only GPU profiles with color coding.
     """
@@ -240,14 +260,16 @@ def list_instances(remote_node=None, project_name=None, full=False):
                 else: # projects is not None:
                     for project in projects:
                         my_project_name = project["name"]
-                        result = get_and_print_instances(remote_node=my_remote_node, project_name=my_project_name, full=full)
+                        result = get_and_print_instances(remote_node=my_remote_node, project_name=my_project_name,
+                                                         instance_scope=instance_scope, full=full)
                         if not result:
                             set_of_errored_remotes.add(my_remote_node)
             else:
-                result = get_and_print_instances(remote_node=my_remote_node, project_name=project_name, full=full)
+                result = get_and_print_instances(remote_node=my_remote_node, project_name=project_name,
+                                                 instance_scope=instance_scope, full=full)
                 if not result:
                     set_of_errored_remotes.add(my_remote_node)
-    else:
+    else: # remote_node is not None
         # Get instances from the specified remote node
         if project_name is None:
             # iterate over all projects
@@ -257,12 +279,14 @@ def list_instances(remote_node=None, project_name=None, full=False):
             else:  # projects is not None:
                 for project in projects:
                     my_project_name = project["name"]
-                    result = get_and_print_instances(remote_node=remote_node, project_name=my_project_name, full=full)
+                    result = get_and_print_instances(remote_node=remote_node, project_name=my_project_name,
+                                                     instance_scope=instance_scope, full=full)
                     if not result:
                         set_of_errored_remotes.add(remote_node)
-        else:
+        else: # remote_node is not None and project_name is not None
             # Get instances from the specified remote node and project
-            result = get_and_print_instances(remote_node=remote_node, project_name=project_name, full=full)
+            result = get_and_print_instances(remote_node=remote_node, project_name=project_name,
+                                             instance_scope=instance_scope, full=full)
             if not result:
                 set_of_errored_remotes.add(remote_node)
 
@@ -2062,30 +2086,50 @@ def handle_instance_list(args):
     project_name = args.project
 
     if args.scope:
-        if ":" in args.scope:
-            remote_scope, project_scope = args.scope.split(":", 1)
-            if project_scope == "":
+        if ":" in args.scope: # remote:project.instance or remote:project. or remote:instance or remote:
+            remote_scope, project_and_instance_scope = args.scope.split(":", 1)
+            if remote_scope == "":
+                logger.error(f"Error: Invalid remote scope '{remote_scope}'.")
+                return False
+            if "." in project_and_instance_scope:
+                project_scope, instance_scope = project_and_instance_scope.split(".", 1)
+                if project_scope == "":
+                    logger.error(f"Error: Invalid project scope '{project_scope}'.")
+                    return False
+                if instance_scope == "":
+                    instance_scope = None
+            elif project_and_instance_scope == "":
                 project_scope = None
+                instance_scope = None
+            else:
+                instance_scope = project_and_instance_scope
+                project_scope = None
+            
+        elif "." in args.scope: # project.instance or project. 
+            remote_scope = None
+            project_and_instance_scope = args.scope
+            project_scope, instance_scope = project_and_instance_scope.split(".", 1)
+            if project_scope == "":
+                logger.error(f"Error: Invalid project scope '{project_scope}'.")
+                return False
+            if instance_scope == "":
+                instance_scope = None
+        else: # instance
+            remote_scope = None
+            project_scope = None
+            instance_scope = args.scope
 
-            if args.remote and args.remote != remote_scope:
-                logger.error(f"Error: Conflict between scope remote '{remote_scope}' and provided remote '{args.remote}'.")
-                return
-            if args.project and project_scope and args.project != project_scope:
-                logger.error(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
-                return
+        if args.remote and args.remote != remote_scope:
+            logger.error(f"Error: Conflict between scope remote '{remote_scope}' and provided remote '{args.remote}'.")
+            return False
+        if args.project and project_scope and args.project != project_scope:
+            logger.error(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
+            return
 
-            remote_node = remote_scope
-            project_name = project_scope if project_scope else args.project
-        else:
-            project_scope = args.scope
-
-            if args.project and args.project != project_scope:
-                logger.error(f"Error: Conflict between scope project '{project_scope}' and provided project '{args.project}'.")
-                return
-
-            project_name = project_scope
-
-    list_instances(remote_node, project_name=project_name, full=args.full)
+        remote_node = remote_scope
+        project_name = project_scope if project_scope else args.project # Use provided project if no project scope
+        # project_name can be None if project_scope is None
+    list_instances(remote_node, project_name=project_name, instance_scope=instance_scope, full=args.full)
 
 def handle_instance_command(args, parser_dict):
     if not args.instance_command:
