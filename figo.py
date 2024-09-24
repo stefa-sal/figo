@@ -48,6 +48,8 @@ PROJECT_PREFIX = FIGO_PREFIX
 
 DEFAULT_INSTANCE_SIZE = 'instance-medium'  # Global default instance size
 
+DEFAULT_PREFIX_LEN = 25 # Default prefix length for IP addresses of instances
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("_")
@@ -75,6 +77,18 @@ def is_valid_ip(ip):
             except ValueError:
                 return False
     return False
+
+def is_valid_ip_prefix_len(ip_prefix):
+    try:
+        ip, prefix_len = ip_prefix.split('/')
+        if not is_valid_ip(ip):
+            return False
+        prefix_len = int(prefix_len)
+        if prefix_len < 1 or prefix_len > 32:
+            return False
+        return True
+    except ValueError:
+        return False
 
 #############################################
 ###### figo instance command functions #####
@@ -495,7 +509,8 @@ def get_all_profiles(client):
     """Get all available profiles."""
     return [profile.name for profile in client.profiles.all()]
 
-def create_instance(instance_name, image, remote, project, instance_type, ip_address, gw_address, instance_size=None):
+def create_instance(instance_name, image, remote, project, instance_type, 
+                    ip_address_and_prefix_len=None, gw_address=None, instance_size=None):
     """Create a new instance from an image on the specified remote and project, with specified type and size.
 
     The instance will import the "default" profile and a second profile based on the provided instance size.
@@ -513,6 +528,7 @@ def create_instance(instance_name, image, remote, project, instance_type, ip_add
     Returns:
     True if the instance was created successfully, False otherwise.
     """
+
     try:
         remote_client = get_remote_client(remote, project_name=project)  # Function to retrieve the remote client
 
@@ -552,6 +568,7 @@ def create_instance(instance_name, image, remote, project, instance_type, ip_add
             logger.error(f"Error: Image server '{image_server}' does not use the 'simplestreams' protocol.")
             return False
 
+        device_name = "enp5s0" if instance_type == "vm" else "eth0"
         # Create the instance configuration
         config = {
             'name': instance_name,
@@ -563,6 +580,21 @@ def create_instance(instance_name, image, remote, project, instance_type, ip_add
                 'alias': alias
             },
             'profiles': ['default', instance_size],  # Add the default and specified instance size profiles
+            'config': {
+                'user.network-config': f"""
+                version: 2
+                ethernets:
+                    {device_name}:
+                        dhcp4: false
+                        addresses:
+                            - {ip_address_and_prefix_len}
+                        gateway4: {gw_address}
+                        nameservers:
+                            addresses:
+                                - 8.8.8.8
+                                - 8.8.4.4
+                """
+            }
         }
 
         if instance_type == "vm":
@@ -1967,15 +1999,16 @@ def handle_instance_command(args, parser_dict):
     def derive_project_from_user(user_name):
         return f"{PROJECT_PREFIX}{user_name}"
 
-    # Validate the IP address
-    def is_valid_ip(ip):
-        try:
-            ipaddress.ip_address(ip)
-            return True
-        except ValueError:
-            return False
+    # Validate the IP address and prefix length
+    if args.ip and not is_valid_ip_prefix_len(args.ip):
+        logger.error(f"Error: Invalid IP address or prefix length '{args.ip}'.")
+        return
 
-    # Check the command type and handle appropriately
+    # Validate the gateway address if provided
+    if args.gw and not is_valid_ip(args.gw):
+        logger.error(f"Error: Invalid gateway address '{args.gw}'.")
+        return
+
     if args.instance_command in ["list", "l"]:
         handle_instance_list(args)
     else:
@@ -1996,16 +2029,6 @@ def handle_instance_command(args, parser_dict):
         remote, project, instance = parse_instance_scope(args.instance_name, args.remote, args.project)
         if remote is None or project is None:
             return  # Error already printed by parse_instance_scope
-
-        # Validate the IP address if provided
-        if args.ip and not is_valid_ip(args.ip):
-            logger.error(f"Error: Invalid IP address '{args.ip}'.")
-            return
-
-        # Validate the gateway address if provided
-        if args.gw and not is_valid_ip(args.gw):
-            logger.error(f"Error: Invalid gateway address '{args.gw}'.")
-            return
 
         if args.instance_command == "start":
             start_instance(instance, remote, project)
@@ -2028,7 +2051,8 @@ def handle_instance_command(args, parser_dict):
             if instance_type == "cnt":
                 instance_type = "container"  # Convert 'cnt' to 'container'
 
-            create_instance(instance, image, remote, project, instance_type, args.ip, args.gw)
+            create_instance(instance, image, remote, project, instance_type, 
+                            ip_address_and_prefix_len=args.ip, gw_address=args.gw)
         elif args.instance_command in ["delete", "del", "d"]:
             delete_instance(instance, remote, project)
         elif args.instance_command in ["bash", "b"]:
