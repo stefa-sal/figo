@@ -157,6 +157,10 @@ def extract_ip_addresses(ip_device_pairs):
 def print_header_line(COLS):
     print(gen_format_str(COLS).format(*gen_header_list(COLS)))
 
+def derive_project_from_user(user_name):
+    return f"{PROJECT_PREFIX}{user_name}"
+
+
 #############################################
 ###### figo instance command functions #####
 #############################################
@@ -2270,10 +2274,40 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
 
 def list_projects(remote, project):
     """List projects on the specified remote and project scope."""
-    if project:
-        print(f"Listing projects on '{remote}:{project}'")
+
+    COLS = [('PROJECT',20), ('REMOTE',25)]
+    print_header_line(COLS)
+
+    if remote is None:
+        # List all projects on all remotes
+        remotes = get_incus_remotes()
+        for remote_name in remotes:
+            # Skip remote nodes with protocol simplestreams
+            if remotes[remote_name]["Protocol"] == "simplestreams":
+                continue
+            projects = get_projects(remote_name)
+            if projects is not None:
+                for my_project in projects:
+                    if project:
+                        if project not in my_project['name']:
+                            continue
+                    print(gen_format_str(COLS).format(truncate(my_project['name'],col_width(COLS,'PROJECT')),
+                                                      truncate(remote_name,col_width(COLS,'REMOTE'))))
+
+            else:
+                print("  Error: Failed to retrieve projects.")
     else:
-        print(f"Listing all projects on '{remote}'")
+        # List projects on the specified remote
+        projects = get_projects(remote)
+        if projects is not None:
+            for my_project in projects:
+                if project:
+                    if project not in my_project['name']:
+                        continue
+                print(gen_format_str(COLS).format(truncate(my_project['name'],col_width(COLS,'PROJECT')),
+                                                   truncate(remote,col_width(COLS,'REMOTE'))))
+        else:
+            print(f"Error: Failed to retrieve projects on remote '{remote}'")
 
 def create_project(remote, project):
     """Create a new project on the specified remote."""
@@ -2485,10 +2519,6 @@ def handle_instance_command(args, parser_dict):
         else:
             return f"images:{image_name}"
 
-    # Handle the user parameter logic
-    def derive_project_from_user(user_name):
-        return f"{PROJECT_PREFIX}{user_name}"
-
     # Validate the IP address and prefix length
     if args.ip and not is_valid_ip_prefix_len(args.ip):
         logger.error(f"Error: Invalid IP address or prefix length '{args.ip}'.")
@@ -2613,13 +2643,8 @@ def parse_profile_scope(profile_scope,command='list'):
     command: list or copy
     
     """
-    if command == 'list':
-        remote = None
-        project = None
-    if command == 'copy':
-        remote = "local"
-        project = "default"
-    
+    remote = None
+    project = None
     profile = None
 
     if profile_scope:
@@ -2650,6 +2675,15 @@ def parse_profile_scope(profile_scope,command='list'):
                 profile = None
         else: # profile
             profile = profile_scope
+
+
+    if command == 'list':
+        pass
+    if command == 'copy':
+        if remote is None:
+            remote = "local"
+        if project is None:
+            project = "default"
 
     return remote, project, profile
 
@@ -2808,13 +2842,13 @@ def create_project_parser(subparsers):
     project_list_parser.add_argument("--user", help="Specify the user to filter projects")
 
     # Create a project
-    project_create_parser = project_subparsers.add_parser("create", help="Create a new project")
+    project_create_parser = project_subparsers.add_parser("create", aliases=["c"], help="Create a new project")
     project_create_parser.add_argument("scope", help="Scope in the format 'remote:project' or 'remote:'")
     project_create_parser.add_argument("--project", help="Project name if not provided directly in the scope")
     project_create_parser.add_argument("--user", help="Specify the user who will own the project")
 
     # Delete a project
-    project_delete_parser = project_subparsers.add_parser("delete", help="Delete an existing project")
+    project_delete_parser = project_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete an existing project")
     project_delete_parser.add_argument("project_name", help="Name of the project to delete, in the format 'remote:project' or 'project'")
 
     subparsers._name_parser_map["pr"] = project_parser
@@ -2822,42 +2856,113 @@ def create_project_parser(subparsers):
 
     return project_parser
 
-def parse_project_scope(scope):
-    """Parse a project scope string and return remote and project names."""
-    remote = "local"
-    project = "default"
+def parse_project_scope(project_scope,command='list'):
+    """Parse a profile scope string and return remote, project, and profile names.
+    
+    It is used for project list and project delete commands.
+    command: list or delete
+    
+    """
+    remote = None
+    project = None
+    
+    if project_scope:
+        if ':' in project_scope and '.' in project_scope:  # remote:project.
+            remote, rest = project_scope.split(':', 1)
+            project, token = rest.split('.', 1)
+            if remote == '':
+                logger.error("Error: Remote name cannot be empty if : is used.")
+                return None, None
+            if project == '':
+                logger.error("Error: Project name cannot be empty if : and . are used.")
+                return None, None
+            if token != '':
+                logger.error("Error: Invalid project scope format.")
+                return None, None
+        elif ':' in project_scope: # remote:project or remote:
+            remote, project = project_scope.split(':', 1)
+            if remote == '':
+                logger.error("Error: Remote name cannot be empty.")
+                return None, None
+            if project == '':
+                project = None
+        elif '.' in project_scope: # project.
+            project, token = project_scope.split('.', 1)
+            if project == '':
+                logger.error("Error: Project name cannot be empty.")
+                return None, None
+            if token != '':
+                logger.error("Error: Invalid project scope format.")
+                return None, None
+        else: # project
+            project = project_scope
 
-    if ':' in scope:
-        remote, project = scope.split(':')
-    else:
-        project = scope
+    if command == 'list':
+        pass
+    if command in ['delete', 'create']:
+        if remote is None:
+            remote = "local"
+        if project is None:
+            project = "default"
 
     return remote, project
 
 def handle_project_command(args, parser_dict):
+
+    def adjust_project_scope(args, remote, project):
+
+        if 'user' in args and args.user:
+            derived_project = derive_project_from_user(args.user)
+            if project and project != derived_project:
+                logger.error(f"Error: Conflict between derived project '{derived_project}' from user '{args.user}'"
+                             f" and provided project '{project}'.")
+                raise ValueError
+            project = derived_project
+
+        if 'project' in args and args.project and project is None:
+            project = args.project
+        if 'project' in args and args.project and project and args.project != project:
+            logger.error(f"Error: Conflict between scope project '{project}' and provided project '{args.project}'.")
+            raise ValueError
+        if 'remote' in args and args.remote and remote is None:
+            remote = args.remote
+        if 'remote' in args and args.remote and remote and args.remote != remote:
+            logger.error(f"Error: Conflict between scope remote '{remote}' and provided remote '{args.remote}'.")
+            raise ValueError
+        
+        return remote, project
+
     if not args.project_command:
         parser_dict['project_parser'].print_help()
-    elif args.project_command in ["list", "l"]:
-        remote, project = parse_project_scope(args.scope)
 
+    elif args.project_command in ["list", "l"]:
+        remote, project = parse_project_scope(args.scope, command='list')
         # Override remote and project based on additional arguments
-        if args.remote:
-            remote = args.remote
-        if args.user:
-            project = f"{FIGO_PREFIX}{args.user}"
+        try :
+            remote, project = adjust_project_scope(args, remote, project)
+        except ValueError:
+            return
 
         list_projects(remote, project)
-    elif args.project_command == "create":
-        remote, project = parse_project_scope(args.scope)
-        if args.project:
-            project = args.project
-        if args.user:
-            project = f"{FIGO_PREFIX}{args.user}"
-        create_project(remote, project)
-    elif args.project_command == "delete":
-        remote, project = parse_project_scope(args.project_name)
-        delete_project(remote, project)
 
+    elif args.project_command in ["create", "c"]:
+        remote, project = parse_project_scope(args.scope, command='create')
+
+        try :
+            remote, project = adjust_project_scope(args, remote, project)
+        except ValueError:
+            return
+
+        create_project(remote, project)
+
+    elif args.project_command in ["delete", "del", "d"]:
+        remote, project = parse_project_scope(args.project_name, command='delete')
+        try :
+            remote, project = adjust_project_scope(args, remote, project)
+        except ValueError:
+            return
+        
+        delete_project(remote, project)
 
 #############################################
 ###### figo main functions
@@ -2879,7 +2984,6 @@ def create_parser():
     parser_dict['user_parser'] = create_user_parser(subparsers)
     parser_dict['remote_parser'] = create_remote_parser(subparsers)
     parser_dict['project_parser'] = create_project_parser(subparsers)
-
 
     return parser, parser_dict
 
@@ -2904,8 +3008,8 @@ def handle_command(args, parser, parser_dict):
         handle_user_command(args, client, parser_dict)
     elif args.command in ["remote", "re", "r"]:
         handle_remote_command(args, parser_dict)
-    elif args.command in ["projects"]:
-        handle_remote_command(args, parser_dict)
+    elif args.command in ["project"]:
+        handle_project_command(args, parser_dict)
 
 def main():
     parser, parser_dict = create_parser()
