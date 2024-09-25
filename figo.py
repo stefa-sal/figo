@@ -2265,6 +2265,25 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
 
 
 #############################################
+###### figo project command functions #######
+#############################################
+
+def list_projects(remote, project):
+    """List projects on the specified remote and project scope."""
+    if project:
+        print(f"Listing projects on '{remote}:{project}'")
+    else:
+        print(f"Listing all projects on '{remote}'")
+
+def create_project(remote, project):
+    """Create a new project on the specified remote."""
+    print(f"Creating project '{project}' on remote '{remote}'")
+
+def delete_project(remote, project):
+    """Delete the specified project on the remote."""
+    print(f"Deleting project '{project}' on remote '{remote}'")
+
+#############################################
 ######### Command Line Interface (CLI) ######
 #############################################
 
@@ -2526,6 +2545,7 @@ def handle_instance_command(args, parser_dict):
             delete_instance(instance, remote, project, force=args.force)
         elif args.instance_command in ["bash", "b"]:
             exec_instance_bash(instance, remote, project)
+
 #############################################
 ###### figo gpu command CLI #################
 #############################################
@@ -2774,6 +2794,72 @@ def handle_remote_command(args, parser_dict):
         enroll_remote(args.remote_server, ip_address_port, args.cert_filename, user=args.user, loc_name=args.loc_name)
 
 #############################################
+###### figo project command CLI #############
+#############################################
+
+def create_project_parser(subparsers):
+    project_parser = subparsers.add_parser("project", help="Manage projects")
+    project_subparsers = project_parser.add_subparsers(dest="project_command")
+
+    # List projects
+    project_list_parser = project_subparsers.add_parser("list", aliases=["l"], help="List available projects")
+    project_list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project', 'remote:', or 'project'")
+    project_list_parser.add_argument("--remote", help="Specify the remote server name")
+    project_list_parser.add_argument("--user", help="Specify the user to filter projects")
+
+    # Create a project
+    project_create_parser = project_subparsers.add_parser("create", help="Create a new project")
+    project_create_parser.add_argument("scope", help="Scope in the format 'remote:project' or 'remote:'")
+    project_create_parser.add_argument("--project", help="Project name if not provided directly in the scope")
+    project_create_parser.add_argument("--user", help="Specify the user who will own the project")
+
+    # Delete a project
+    project_delete_parser = project_subparsers.add_parser("delete", help="Delete an existing project")
+    project_delete_parser.add_argument("project_name", help="Name of the project to delete, in the format 'remote:project' or 'project'")
+
+    subparsers._name_parser_map["pr"] = project_parser
+    subparsers._name_parser_map["p"] = project_parser
+
+    return project_parser
+
+def parse_project_scope(scope):
+    """Parse a project scope string and return remote and project names."""
+    remote = "local"
+    project = "default"
+
+    if ':' in scope:
+        remote, project = scope.split(':')
+    else:
+        project = scope
+
+    return remote, project
+
+def handle_project_command(args, parser_dict):
+    if not args.project_command:
+        parser_dict['project_parser'].print_help()
+    elif args.project_command in ["list", "l"]:
+        remote, project = parse_project_scope(args.scope)
+
+        # Override remote and project based on additional arguments
+        if args.remote:
+            remote = args.remote
+        if args.user:
+            project = f"{FIGO_PREFIX}{args.user}"
+
+        list_projects(remote, project)
+    elif args.project_command == "create":
+        remote, project = parse_project_scope(args.scope)
+        if args.project:
+            project = args.project
+        if args.user:
+            project = f"{FIGO_PREFIX}{args.user}"
+        create_project(remote, project)
+    elif args.project_command == "delete":
+        remote, project = parse_project_scope(args.project_name)
+        delete_project(remote, project)
+
+
+#############################################
 ###### figo main functions
 #############################################
 
@@ -2792,6 +2878,8 @@ def create_parser():
     parser_dict['profile_parser'] = create_profile_parser(subparsers)
     parser_dict['user_parser'] = create_user_parser(subparsers)
     parser_dict['remote_parser'] = create_remote_parser(subparsers)
+    parser_dict['project_parser'] = create_project_parser(subparsers)
+
 
     return parser, parser_dict
 
@@ -2815,6 +2903,8 @@ def handle_command(args, parser, parser_dict):
         client = pylxd.Client()
         handle_user_command(args, client, parser_dict)
     elif args.command in ["remote", "re", "r"]:
+        handle_remote_command(args, parser_dict)
+    elif args.command in ["projects"]:
         handle_remote_command(args, parser_dict)
 
 def main():
