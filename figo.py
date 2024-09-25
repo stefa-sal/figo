@@ -154,6 +154,9 @@ def extract_ip_addresses(ip_device_pairs):
     """Return a list of IP addresses without the prefix length."""
     return [ip.split('/')[0] for ip, _ in ip_device_pairs]
 
+def print_header_line(COLS):
+    print(gen_format_str(COLS).format(*gen_header_list(COLS)))
+
 #############################################
 ###### figo instance command functions #####
 #############################################
@@ -347,7 +350,7 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
     else:
         COLS = [('INSTANCE',14), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('GPU PROFILES',30)]
 
-    print(gen_format_str(COLS).format(*gen_header_list(COLS)))
+    print_header_line(COLS)
 
     # use a set to store the remote nodes that failed to retrieve the projects
     set_of_errored_remotes = set()
@@ -626,27 +629,79 @@ def set_user_key(instance_name, remote, project, key_filename, client):
     
     return True
 
+def assign_ip_address(remote, mode="next"):
+    """Assign a new IP address based on the highest assigned IP address.
+    
+    mode: "next" assigns the next available IP address,
+            "hole" assigns the first available hole starting from BASE_IP
+    """
+    assigned_ips = retrieve_assigned_ips(remote)
+    base_ip = ipaddress.ip_address(REMOTE_TO_IP_INFO_MAP[remote]["base_ip"])
+    if not assigned_ips:
+        new_ip = base_ip
+    if mode == "next":
+        highest_ip = max([ipaddress.ip_address(ip) for ip in assigned_ips])
+        new_ip = highest_ip + 1
+    elif mode == "hole":
+        new_ip = base_ip
+        while str(new_ip) in assigned_ips:
+            new_ip += 1 # Increment the IP address until an available one is found
+    return str(new_ip)
 
-def set_ip(instance_name, remote, project, ip_address, gw_address, nic_device_name):
+def retrieve_assigned_ips(remote):
+    # This function should interact with your environment to get all assigned IP addresses
+    # For now, it returns a placeholder list
+    #return ["192.168.1.10", "192.168.1.20", "192.168.1.30"]
+    assigned_ips = []
+    for project in iterator_over_projects(remote):
+        for instance in iterator_over_instances(remote, project["name"]):
+            ip_addresses = get_ip_addresses(instance)
+            assigned_ips.extend(ip_addresses)  
+    return assigned_ips
+
+def get_gw_address(remote):
+    """Get the gateway address for the remote."""
+    return REMOTE_TO_IP_INFO_MAP[remote]["gw"]
+
+def get_prefix_len(remote):
+    """Get the prefix length for the remote."""
+    return REMOTE_TO_IP_INFO_MAP[remote]["prefix_len"]
+
+
+def set_ip(instance_name, remote, project, ip_address_and_prefix_len=None, gw_address=None, nic_device_name=None):
     """Set a static IP address and gateway for a stopped instance.
     
-    Returns:    True if the IP address was set successfully, False otherwise.
-    
+    Returns: True if the IP address was set successfully, False otherwise.
     """
-    #TODO ip_address should be in the form of ip/prefix_len
-    #TODO check if the instance is stopped
-    #TODO align the code with create_instance
-
-    if not is_valid_ip(ip_address):
-        logger.error(f"Error: '{ip_address}' is not a valid IP address.")
-        return False
     
-    if not is_valid_ip(gw_address):
-        logger.error(f"Error: '{gw_address}' is not a valid IP address.")
-        return False
+    if ip_address_and_prefix_len:
+    # Split the IP address and prefix length
+        try:
+            if not is_valid_ip_prefix_len(ip_address_and_prefix_len):
+                logger.error(f"Error: '{ip_address_and_prefix_len}' is not a valid IP address with prefix length.")
+                return False
 
+            ip_interface = ipaddress.ip_interface(ip_address_and_prefix_len)
+            ip_address = str(ip_interface.ip)
+            prefix_length = ip_interface.network.prefixlen
+
+        except ValueError as e:
+            logger.error(f"Error: '{ip_address_and_prefix_len}' is not a valid IP address with prefix length: {e}")
+            return False
+    else:
+        # Assign the next available IP address
+        ip_address = assign_ip_address(remote, mode="next")
+        prefix_length = get_prefix_len(remote)
+
+    if gw_address :
+        if not is_valid_ip(gw_address):
+            logger.error(f"Error: gw address '{gw_address}' is not a valid IP address.")
+            return False
+    else:
+        gw_address = get_gw_address(remote)
+    
     try:
-        # get the specified instance in project and remote  
+        # Get the specified instance in project and remote  
         remote_client = get_remote_client(remote, project_name=project)
         if not remote_client:
             return False
@@ -656,34 +711,28 @@ def set_ip(instance_name, remote, project, ip_address, gw_address, nic_device_na
             logger.error(f"Error: Instance '{instance_name}' is not stopped.")
             return False
         
-        # Check if a profile starting with "net-" is associated with the instance
-        net_profiles = [profile for profile in instance.profiles if profile.startswith("net-")]
-        if not net_profiles:
-            logger.info(f"Instance '{instance_name}' does not have a 'net-' profile associated. Adding '{NET_PROFILE}' profile.")
-            # Add the NET_PROFILE profile to the instance
-            instance.profiles.append(NET_PROFILE)
-            instance.save(wait=True)
-
+        if not nic_device_name:
+            device_name = DEFAULT_VM_NIC if instance.type == "virtual-machine" else DEFAULT_CNT_NIC
+        else:
+            device_name = nic_device_name # Use the specified NIC device name    
+        
+        # Build the network config using the extracted IP address and prefix length
         network_config = f"""
-version: 1
-config:
-  - type: physical
-    name: enp5s0
-    subnets:
-      - type: static
-        ipv4: true
-        address: {ip_address}
-        netmask: 255.255.255.0
-        gateway: {gw_address}
-        control: auto
-  - type: nameserver
-    address: {NAME_SERVER_IP_ADDR}
-  - type: nameserver
-    address: {NAME_SERVER_IP_ADDR_2}
+version: 2
+ethernets:
+  {device_name}:
+    dhcp4: false
+    addresses:
+      - {ip_address}/{prefix_length}
+    gateway4: {gw_address}
+    nameservers:
+      addresses:
+        - {NAME_SERVER_IP_ADDR}
+        - {NAME_SERVER_IP_ADDR_2}
 """
-        instance.config['cloud-init.network-config'] = network_config
+        instance.config['user.network-config'] = network_config
         instance.save(wait=True)
-        logger.info(f"IP address '{ip_address}' and gateway '{gw_address}' assigned to instance '{instance_name}'.")
+        logger.info(f"IP address '{ip_address}' with prefix length '{prefix_length}' and gateway '{gw_address}' assigned to instance '{instance_name}'.")
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to set IP address for instance '{instance_name}': {e}")
         return False
@@ -691,6 +740,7 @@ config:
         logger.error(f"An error occurred: {e}")
         return False
     return True
+
 
 def get_all_profiles(client):
     """Get all available profiles."""
@@ -710,40 +760,12 @@ def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote):
     """
     #TODO: Implement the handling of the case when there are no available IP addresses
 
-    def retrieve_assigned_ips(remote):
-        # This function should interact with your environment to get all assigned IP addresses
-        # For now, it returns a placeholder list
-        #return ["192.168.1.10", "192.168.1.20", "192.168.1.30"]
-        assigned_ips = []
-        for project in iterator_over_projects(remote):
-            for instance in iterator_over_instances(remote, project["name"]):
-                ip_addresses = get_ip_addresses(instance)
-                assigned_ips.extend(ip_addresses)  
-        return assigned_ips
-
-    def get_gw_address(remote):
-        """Get the gateway address for the remote."""
-        return REMOTE_TO_IP_INFO_MAP[remote]["gw"]
-
-    def get_prefix_len(remote):
-        """Get the prefix length for the remote."""
-        return REMOTE_TO_IP_INFO_MAP[remote]["prefix_len"]
-
-    def assign_ip_address(remote):
-        """Assign a new IP address based on the highest assigned IP address."""
-        assigned_ips = retrieve_assigned_ips(remote)
-        if not assigned_ips:
-            return REMOTE_TO_IP_INFO_MAP[remote]["base_ip"]
-        highest_ip = max([ipaddress.ip_address(ip) for ip in assigned_ips])
-        new_ip = highest_ip + 1
-        return str(new_ip)
-
     # Retrieve all assigned IP addresses
     assigned_ips = retrieve_assigned_ips(remote)
     
     # If IP address is not provided, assign one
     if ip_address_and_prefix_len is None:
-        ip_address = assign_ip_address(remote)
+        ip_address = assign_ip_address(remote, mode="next")
         prefix_len = get_prefix_len(remote)
     else:
         ip_address, prefix_len = ip_address_and_prefix_len.split('/')
@@ -1120,8 +1142,10 @@ def dump_profile(client, profile_name):
         logger.error(f"Profile '{profile_name}' not found.")
         return
 
-def list_profiles(remote, project, profile_name=None):
-    """List all profiles on a remote and project and their associated instances.
+def list_profiles_specific(remote, project, profile_name=None):
+    """List all profiles on a remote and project optionally with a match on profile_name
+    
+    For each profile, list the associated instances.
     
     Returns:    False if fetching the profiles failed, True otherwise.
     """
@@ -1138,20 +1162,9 @@ def list_profiles(remote, project, profile_name=None):
     except pylxd.exceptions.NotFound:
         logger.error(f"Project '{project}' does not exist on remote '{remote}'.")
         return False
-
-    print("{:<25} {:<80}".format("PROFILE", "INSTANCES"))
-
-    # if profile_name:
-    #     try:
-    #         profiles = [client.profiles.get(profile_name)]
-    #     except pylxd.exceptions.NotFound:
-    #         return False
-    # else:
-    #     try:
-    #         profiles = client.profiles.all()
-    #     except pylxd.exceptions.LXDAPIException as e:
-    #         logger.error(f"Failed to retrieve profiles from '{remote}:{project}': {e}")
-    #         return False
+    
+    COLS = [('PROFILE',25), ('CONTEXT',25), ('INSTANCES',80)]
+    print_header_line(COLS)
 
     try:
         profiles = client.profiles.all()
@@ -1167,10 +1180,16 @@ def list_profiles(remote, project, profile_name=None):
             instance.name for instance in instances
             if profile.name in instance.profiles
         ]
+        context = f"{remote}:{project}" 
         associated_instances_str = ', '.join(associated_instances) if associated_instances else 'None'
-        print("{:<25} {:<80}".format(truncate(profile.name,25), associated_instances_str))
+        print(gen_format_str(COLS).format(truncate(profile.name,col_width(COLS,'PROFILE')),
+                                          truncate(context,col_width(COLS,'CONTEXT')),  
+                                          associated_instances_str))
 
     return True
+
+def list_profiles(remote, project, profile_name=None):
+    return list_profiles_specific(remote, project, profile_name)
 
 def copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile):
     """Copy a profile from one location to another with error handling, including the description.
@@ -2463,10 +2482,8 @@ def handle_instance_command(args, parser_dict):
         elif args.instance_command == "set_key":
             set_user_key(instance, remote, project, args.key_filename)
         elif args.instance_command == "set_ip":
-            if not args.ip or not args.gw:
-                logger.error("Error: Both IP address and gateway must be provided.")
-                return
-            set_ip(instance, remote, project, args.ip, args.gw, args.nic)
+            set_ip(instance, remote, project, 
+                   ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
         elif args.instance_command in ["create", "c"]:
             image = parse_image(args.image)
             if image is None:
@@ -2596,8 +2613,8 @@ def handle_profile_command(args, client, parser_dict):
             logger.error("You must provide a profile name or use the --all option.")
     elif args.profile_command in ["list", "l"]:
         remote, project, profile = parse_profile_scope(args.scope)
-        if remote is None or project is None:
-            return        
+        # if remote is None or project is None:
+        #     return        
         list_profiles(remote, project, profile_name=profile)
     elif args.profile_command == "copy":
         source_remote, source_project, source_profile = parse_profile_scope(args.source_profile)
