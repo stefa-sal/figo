@@ -108,6 +108,30 @@ def matches(target_string, compare_string):
     # Use full match to check if target_string matches the compare_string pattern
     return re.fullmatch(compare_string, target_string) is not None
 
+def gen_format_str(columns):
+    """Generate the format string based on the given columns."""
+    format_str = ""
+    for _, width in columns:
+        format_str += f"{{:<{width}}} "
+    return format_str.strip()  # Remove the trailing space
+
+def gen_header_list(columns):
+    """Generate the list of headers based on the given columns."""
+    headers = [header for header, _ in columns]
+    return headers
+
+def col_width(COLUMNS, column):
+    """Return the width of the column specified by its name."""
+    for col_name, width in COLUMNS:
+        if col_name == column:
+            return width
+    raise ValueError(f"Column '{column}' not found in COLUMNS")
+
+def format_ip_device_pairs(ip_device_pairs):
+    """Return a string with IP addresses followed by device names in brackets."""
+    formatted_pairs = [f"{ip.split('/')[0]} ({device})" for ip, device in ip_device_pairs]
+    return ", ".join(formatted_pairs)
+
 #############################################
 ###### figo instance command functions #####
 #############################################
@@ -190,9 +214,7 @@ def run_incus_list(remote_node="local", project_name="default"):
         logger.error(f"Unexpected error while running 'incus list -f json': {e}")
         return None
 
-
-
-def get_and_print_instances(remote_node=None, project_name=None, instance_scope=None, full=False):
+def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_scope=None, full=False):
     """Get instances from the specified remote node and project and print their details.
     
     Returns:    False if fetching the instances failed, True otherwise.
@@ -204,7 +226,7 @@ def get_and_print_instances(remote_node=None, project_name=None, instance_scope=
     # Get the instances from 'incus list -f json'
     instances = run_incus_list(remote_node=remote_node, project_name=project_name)
     if instances is None:
-        return  False # Exit if fetching the instances failed
+        return False  # Exit if fetching the instances failed
 
     # Iterate through instances and print their details in columns
     for instance in instances:
@@ -218,18 +240,48 @@ def get_and_print_instances(remote_node=None, project_name=None, instance_scope=
         project_name = instance.get("project", "default")
         context = f"{remote_node}:{project_name}" if remote_node else f"local:{project_name}"
 
+        # Fetch user.network-config if it exists
+        network_config = instance.get("config", {}).get("user.network-config", "N/A")
+
+        # Output the network config for debugging purposes
+        #print(f"Instance '{name}' network config: {network_config}")
+        #TODO (nice to have) reformat the network config to be more readable
+
+        ip_device_pairs = []  # List to hold (ip_address, device) pairs
+
+        # Parse and extract the addresses for each ethernet device
+        if network_config != "N/A":
+            try:
+                # Assuming the network config is in YAML format
+                network_config_parsed = yaml.safe_load(network_config)
+                ethernets = network_config_parsed.get("ethernets", {})
+                for device, config in ethernets.items():
+                    addresses = config.get("addresses", [])
+                    for ip_address in addresses:
+                        ip_device_pairs.append((ip_address, device))
+
+            except Exception as e:
+                print(f"Error parsing network config for instance '{name}': {e}")
+
         if full:
             # Print all profiles
             profiles_str = ", ".join(instance.get("profiles", []))
-            print("{:<14} {:<4} {:<5} {:<25} {:<30}".format(name, instance_type, state, truncate(context, 25), profiles_str))
+            print(gen_format_str(COLS).format(name, instance_type, state, 
+                                              truncate(context, col_width(COLS,'CONTEXT')),
+                                              truncate(format_ip_device_pairs(ip_device_pairs), col_width(COLS,'IP ADDRESS(ES)')),
+                                              profiles_str))
         else:
             # Print only GPU profiles with color coding based on state
             gpu_profiles = [profile for profile in instance.get("profiles", []) if profile.startswith("gpu")]
             profiles_str = ", ".join(gpu_profiles)
             colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
-            print("{:<14} {:<4} {:<5} {:<25} {:<30}".format(name, instance_type, state, truncate(context, 25), colored_profiles_str))
-        
+            print(gen_format_str(COLS).format(name, instance_type, state,
+                                              truncate(context, col_width(COLS,'CONTEXT')),
+                                              truncate(format_ip_device_pairs(ip_device_pairs), col_width(COLS,'IP ADDRESS(ES)')),
+                                              colored_profiles_str))
+
     return True
+    
 
 def list_instances(remote_node=None, project_name=None, instance_scope=None, full=False):
     """Print profiles of all instances, either from the local or a remote Incus node.
@@ -237,9 +289,11 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
     """
     # Determine the header and profile type based on the 'full' flag
     if full:
-        print("{:<14} {:<4} {:<5} {:<25} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "PROFILES"))
+        COLS = [('INSTANCE',14), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('PROFILES',45)]
     else:
-        print("{:<14} {:<4} {:<5} {:<25} {:<30}".format("INSTANCE", "TYPE", "STATE", "CONTEXT", "GPU PROFILES"))
+        COLS = [('INSTANCE',14), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('GPU PROFILES',30)]
+
+    print(gen_format_str(COLS).format(*gen_header_list(COLS)))
 
     # use a set to store the remote nodes that failed to retrieve the projects
     set_of_errored_remotes = set()
@@ -260,12 +314,12 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
                 else: # projects is not None:
                     for project in projects:
                         my_project_name = project["name"]
-                        result = get_and_print_instances(remote_node=my_remote_node, project_name=my_project_name,
+                        result = get_and_print_instances(COLS, remote_node=my_remote_node, project_name=my_project_name,
                                                          instance_scope=instance_scope, full=full)
                         if not result:
                             set_of_errored_remotes.add(my_remote_node)
             else:
-                result = get_and_print_instances(remote_node=my_remote_node, project_name=project_name,
+                result = get_and_print_instances(COLS, remote_node=my_remote_node, project_name=project_name,
                                                  instance_scope=instance_scope, full=full)
                 if not result:
                     set_of_errored_remotes.add(my_remote_node)
@@ -279,13 +333,13 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
             else:  # projects is not None:
                 for project in projects:
                     my_project_name = project["name"]
-                    result = get_and_print_instances(remote_node=remote_node, project_name=my_project_name,
+                    result = get_and_print_instances(COLS, remote_node=remote_node, project_name=my_project_name,
                                                      instance_scope=instance_scope, full=full)
                     if not result:
                         set_of_errored_remotes.add(remote_node)
         else: # remote_node is not None and project_name is not None
             # Get instances from the specified remote node and project
-            result = get_and_print_instances(remote_node=remote_node, project_name=project_name,
+            result = get_and_print_instances(COLS, remote_node=remote_node, project_name=project_name,
                                              instance_scope=instance_scope, full=full)
             if not result:
                 set_of_errored_remotes.add(remote_node)
