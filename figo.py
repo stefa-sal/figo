@@ -950,25 +950,43 @@ def list_profiles(remote, project, profile_name=None):
     
     Returns:    False if fetching the profiles failed, True otherwise.
     """
+
+    logger.info(f"Profiles on remote '{remote}' and project '{project}' matching '{profile_name}':")
+
     client = get_remote_client(remote, project_name=project)
     if not client:
+        return False
+    
+    #check if the project exists
+    try:
+        client.projects.get(project)
+    except pylxd.exceptions.NotFound:
+        logger.error(f"Project '{project}' does not exist on remote '{remote}'.")
         return False
 
     print("{:<25} {:<80}".format("PROFILE", "INSTANCES"))
 
-    if profile_name:
-        try:
-            profiles = [client.profiles.get(profile_name)]
-        except pylxd.exceptions.NotFound:
-            return False
-    else:
-        try:
-            profiles = client.profiles.all()
-        except pylxd.exceptions.LXDAPIException as e:
-            logger.error(f"Failed to retrieve profiles from '{remote}:{project}': {e}")
-            return False
+    # if profile_name:
+    #     try:
+    #         profiles = [client.profiles.get(profile_name)]
+    #     except pylxd.exceptions.NotFound:
+    #         return False
+    # else:
+    #     try:
+    #         profiles = client.profiles.all()
+    #     except pylxd.exceptions.LXDAPIException as e:
+    #         logger.error(f"Failed to retrieve profiles from '{remote}:{project}': {e}")
+    #         return False
+
+    try:
+        profiles = client.profiles.all()
+    except pylxd.exceptions.LXDAPIException as e:
+        logger.error(f"Failed to retrieve profiles from '{remote}:{project}': {e}")
+        return False
 
     for profile in profiles:
+        if profile_name and not matches(profile.name, profile_name):
+            continue
         instances = client.instances.all()
         associated_instances = [
             instance.name for instance in instances
