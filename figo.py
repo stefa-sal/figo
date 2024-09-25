@@ -60,6 +60,24 @@ DEFAULT_PREFIX_LEN = 25 # Default prefix length for IP addresses of instances
 DEFAULT_VM_NIC = "enp5s0"  # Default NIC for VM instances
 DEFAULT_CNT_NIC = "eth0"  # Default NIC for container instances
 
+REMOTE_TO_IP_INFO_MAP = {
+    "local": {
+        "gw": "10.202.8.129",
+        "prefix_len": 25,
+        "base_ip": "10.202.8.150"
+        },
+    "eln_cloud": {
+        "gw": "10.202.10.129",
+        "prefix_len": 25,
+        "base_ip": "10.202.10.150"
+        },
+    "blade3": {
+        "gw": "10.202.9.129",
+        "prefix_len": 25,
+        "base_ip": "10.202.9.150"
+        },
+}
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("_")
@@ -131,6 +149,10 @@ def format_ip_device_pairs(ip_device_pairs):
     """Return a string with IP addresses followed by device names in brackets."""
     formatted_pairs = [f"{ip.split('/')[0]} ({device})" for ip, device in ip_device_pairs]
     return ", ".join(formatted_pairs)
+
+def extract_ip_addresses(ip_device_pairs):
+    """Return a list of IP addresses without the prefix length."""
+    return [ip.split('/')[0] for ip, _ in ip_device_pairs]
 
 #############################################
 ###### figo instance command functions #####
@@ -214,6 +236,59 @@ def run_incus_list(remote_node="local", project_name="default"):
         logger.error(f"Unexpected error while running 'incus list -f json': {e}")
         return None
 
+def get_ip_device_pairs(instance):
+        # Fetch user.network-config if it exists
+        network_config = instance.get("config", {}).get("user.network-config", "N/A")
+
+        # Output the network config for debugging purposes
+        #print(f"Instance '{name}' network config: {network_config}")
+        #TODO (nice to have) reformat the network config to be more readable
+
+        ip_device_pairs = []  # List to hold (ip_address, device) pairs
+
+        # Parse and extract the addresses for each ethernet device
+        if network_config != "N/A":
+            try:
+                # Assuming the network config is in YAML format
+                network_config_parsed = yaml.safe_load(network_config)
+                ethernets = network_config_parsed.get("ethernets", {})
+                for device, config in ethernets.items():
+                    addresses = config.get("addresses", [])
+                    for ip_address in addresses:
+                        ip_device_pairs.append((ip_address, device))
+
+            except Exception as e:
+                print(f"Error parsing network config for instance '{instance.get('name', 'Unknown')}': {e}")
+
+        return ip_device_pairs
+
+def get_ip_addresses(instance):
+    """Return a list of IP addresses for the instance."""
+    ip_device_pairs = get_ip_device_pairs(instance)
+    return extract_ip_addresses(ip_device_pairs)
+
+def iterator_over_projects(remote_node):
+    """Iterate over all projects in the specified remote."""
+    projects = get_projects(remote_node=remote_node)
+    if projects is None:
+        return
+
+    for project in projects:
+        yield project
+
+def iterator_over_instances(remote, project_name, instance_scope=None):
+    """Iterate over all instances in the specified remote and project, optionally filtering by instance name."""
+    instances = run_incus_list(remote_node=remote, project_name=project_name)
+    if instances is None:
+        return
+
+    for instance in instances:
+        name = instance.get("name", "Unknown")
+        if instance_scope and not matches(name, instance_scope):
+            continue
+        yield instance
+
+
 def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_scope=None, full=False):
     """Get instances from the specified remote node and project and print their details.
     
@@ -240,28 +315,7 @@ def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_
         project_name = instance.get("project", "default")
         context = f"{remote_node}:{project_name}" if remote_node else f"local:{project_name}"
 
-        # Fetch user.network-config if it exists
-        network_config = instance.get("config", {}).get("user.network-config", "N/A")
-
-        # Output the network config for debugging purposes
-        #print(f"Instance '{name}' network config: {network_config}")
-        #TODO (nice to have) reformat the network config to be more readable
-
-        ip_device_pairs = []  # List to hold (ip_address, device) pairs
-
-        # Parse and extract the addresses for each ethernet device
-        if network_config != "N/A":
-            try:
-                # Assuming the network config is in YAML format
-                network_config_parsed = yaml.safe_load(network_config)
-                ethernets = network_config_parsed.get("ethernets", {})
-                for device, config in ethernets.items():
-                    addresses = config.get("addresses", [])
-                    for ip_address in addresses:
-                        ip_device_pairs.append((ip_address, device))
-
-            except Exception as e:
-                print(f"Error parsing network config for instance '{name}': {e}")
+        ip_device_pairs = get_ip_device_pairs(instance) # Get the IP addresses and device names
 
         if full:
             # Print all profiles
@@ -642,6 +696,72 @@ def get_all_profiles(client):
     """Get all available profiles."""
     return [profile.name for profile in client.profiles.all()]
 
+def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote):
+    """
+    Determine the IP address and gateway for an instance based on inputs and defaults.
+
+    Args:
+    - ip_address_and_prefix_len: A string containing the IP address and prefix length (e.g., "192.168.1.10/24").
+    - gw_address: The gateway address, if provided.
+    - remote: The remote from which the IP address and gateway are to be assigned.
+
+    Returns:
+    A tuple containing (ip_address_with_prefix, gw_address), or raises an error if the IP is already assigned.
+    """
+    #TODO: Implement the handling of the case when there are no available IP addresses
+
+    def retrieve_assigned_ips(remote):
+        # This function should interact with your environment to get all assigned IP addresses
+        # For now, it returns a placeholder list
+        #return ["192.168.1.10", "192.168.1.20", "192.168.1.30"]
+        assigned_ips = []
+        for project in iterator_over_projects(remote):
+            for instance in iterator_over_instances(remote, project["name"]):
+                ip_addresses = get_ip_addresses(instance)
+                assigned_ips.extend(ip_addresses)  
+        return assigned_ips
+
+    def get_gw_address(remote):
+        """Get the gateway address for the remote."""
+        return REMOTE_TO_IP_INFO_MAP[remote]["gw"]
+
+    def get_prefix_len(remote):
+        """Get the prefix length for the remote."""
+        return REMOTE_TO_IP_INFO_MAP[remote]["prefix_len"]
+
+    def assign_ip_address(remote):
+        """Assign a new IP address based on the highest assigned IP address."""
+        assigned_ips = retrieve_assigned_ips(remote)
+        if not assigned_ips:
+            return REMOTE_TO_IP_INFO_MAP[remote]["base_ip"]
+        highest_ip = max([ipaddress.ip_address(ip) for ip in assigned_ips])
+        new_ip = highest_ip + 1
+        return str(new_ip)
+
+    # Retrieve all assigned IP addresses
+    assigned_ips = retrieve_assigned_ips(remote)
+    
+    # If IP address is not provided, assign one
+    if ip_address_and_prefix_len is None:
+        ip_address = assign_ip_address(remote)
+        prefix_len = get_prefix_len(remote)
+    else:
+        ip_address, prefix_len = ip_address_and_prefix_len.split('/')
+
+        # Check if the provided IP address is already assigned
+        if ip_address in assigned_ips:
+            raise ValueError(f"Error: The IP address '{ip_address}' is already assigned.")
+
+    # Combine IP address and prefix length into one string
+    ip_address_with_prefix = f"{ip_address}/{prefix_len}"
+
+    # If gateway is not provided, get the default for the remote
+    if gw_address is None:
+        gw_address = get_gw_address(remote)
+
+    return ip_address_with_prefix, gw_address
+
+
 def create_instance(instance_name, image, remote, project, instance_type, 
                     ip_address_and_prefix_len=None, gw_address=None, nic_device_name=None,
                     instance_size=None):
@@ -663,7 +783,6 @@ def create_instance(instance_name, image, remote, project, instance_type,
     Returns:
     True if the instance was created successfully, False otherwise.
     """
-
     try:
         remote_client = get_remote_client(remote, project_name=project)  # Function to retrieve the remote client
         if not remote_client:
@@ -710,6 +829,8 @@ def create_instance(instance_name, image, remote, project, instance_type,
         else:
             device_name = nic_device_name # Use the specified NIC device name
 
+        ip_address_and_prefix_len, gw_address = get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote)  # Function to retrieve the IP address and gateway
+        logger.info(f"Assigned IP address: {ip_address_and_prefix_len}, Gateway: {gw_address}")
         # Create the instance configuration
         config = {
             'name': instance_name,
