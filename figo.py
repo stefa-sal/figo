@@ -2113,6 +2113,7 @@ def create_instance_parser(subparsers):
 def handle_instance_list(args):
     remote_node = args.remote
     project_name = args.project
+    instance_scope = None
 
     if args.scope:
         if ":" in args.scope: # remote:project.instance or remote:project. or remote:instance or remote:
