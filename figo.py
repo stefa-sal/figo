@@ -1142,16 +1142,13 @@ def dump_profile(client, profile_name):
         logger.error(f"Profile '{profile_name}' not found.")
         return
 
-def list_profiles_specific(remote, project, profile_name=None):
-    """List all profiles on a remote and project optionally with a match on profile_name
+def list_profiles_specific(remote, project, profile_name=None, COLS=None):
+    """List all profiles on a specific remote and project optionally with a match on profile_name
     
     For each profile, list the associated instances.
     
     Returns:    False if fetching the profiles failed, True otherwise.
     """
-
-    logger.info(f"Profiles on remote '{remote}' and project '{project}' matching '{profile_name}':")
-
     client = get_remote_client(remote, project_name=project)
     if not client:
         return False
@@ -1162,9 +1159,6 @@ def list_profiles_specific(remote, project, profile_name=None):
     except pylxd.exceptions.NotFound:
         logger.error(f"Project '{project}' does not exist on remote '{remote}'.")
         return False
-    
-    COLS = [('PROFILE',25), ('CONTEXT',25), ('INSTANCES',80)]
-    print_header_line(COLS)
 
     try:
         profiles = client.profiles.all()
@@ -1189,7 +1183,39 @@ def list_profiles_specific(remote, project, profile_name=None):
     return True
 
 def list_profiles(remote, project, profile_name=None):
-    return list_profiles_specific(remote, project, profile_name)
+    """List profiles overall or on specific remote and project optionally with a match on profile_name
+
+    if remote and project are not specified, list all profiles on all remotes and projects.
+    if remote is specified but project is not, list all profiles on the remote.
+    if project is specified but remote is not, list all profiles on the project on all remotes.
+    if remote and project are specified, list all profiles on the remote and project.
+
+    """
+
+    COLS = [('PROFILE',25), ('CONTEXT',25), ('INSTANCES',80)]
+    print_header_line(COLS)
+
+    if remote and project:
+        return list_profiles_specific(remote, project, profile_name, COLS)
+    elif remote: # list all profiles on the remote
+        
+        for project in iterator_over_projects(remote):
+            list_profiles_specific(remote, project["name"], profile_name, COLS)
+
+    else: # list all profiles on all remotes associated with all the project or with a specific project
+        remotes = get_incus_remotes()
+        for my_remote_node in remotes:
+            # check to skip all the remote node of type images
+            # Skipping remote node with protocol simplestreams
+            if remotes[my_remote_node]["Protocol"] == "simplestreams":
+                continue        
+            if project:
+                list_profiles_specific(my_remote_node, project, profile_name, COLS)
+            else:
+                for my_project in iterator_over_projects(my_remote_node):
+                    list_profiles_specific(my_remote_node, my_project["name"], profile_name, COLS)
+
+
 
 def copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile):
     """Copy a profile from one location to another with error handling, including the description.
@@ -2560,14 +2586,20 @@ def create_profile_parser(subparsers):
 
     return profile_parser
 
-def parse_profile_scope(profile_scope):
+def parse_profile_scope(profile_scope,command='list'):
     """Parse a profile scope string and return remote, project, and profile names.
     
     It is used for profile list and profile copy commands.
+    command: list or copy
     
     """
-    remote = "local"
-    project = "default"
+    if command == 'list':
+        remote = None
+        project = None
+    if command == 'copy':
+        remote = "local"
+        project = "default"
+    
     profile = None
 
     if profile_scope:
@@ -2612,13 +2644,15 @@ def handle_profile_command(args, client, parser_dict):
         else:
             logger.error("You must provide a profile name or use the --all option.")
     elif args.profile_command in ["list", "l"]:
-        remote, project, profile = parse_profile_scope(args.scope)
+        remote, project, profile = parse_profile_scope(args.scope, command='list')
         # if remote is None or project is None:
         #     return        
         list_profiles(remote, project, profile_name=profile)
     elif args.profile_command == "copy":
-        source_remote, source_project, source_profile = parse_profile_scope(args.source_profile)
-        target_remote, target_project, target_profile = parse_profile_scope(args.target_profile if args.target_profile else source_profile)
+        source_remote, source_project, source_profile = parse_profile_scope(args.source_profile, command='copy')
+        target_remote, target_project, target_profile = parse_profile_scope(args.target_profile 
+                                                                            if args.target_profile else source_profile,
+                                                                            command='copy')
 
         if source_profile is None or source_profile == "":
             logger.error("Error: Source profile name cannot be empty.")
