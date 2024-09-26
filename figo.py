@@ -1235,6 +1235,19 @@ def copy_profile(source_remote, source_project, source_profile, target_remote, t
         if not target_client:
             return False
 
+        # Check the project's config for 'features.profiles' in the target project
+        try:
+            target_project_config = target_client.projects.get(target_project).config
+            if target_project_config.get("features.profiles") == "false":
+                logger.error(f"Cannot copy profile '{source_profile}' to '{target_remote}:{target_project}' because the target project inherits profiles from the default project.")
+                return False
+        except pylxd.exceptions.NotFound:
+            logger.error(f"Target project '{target_project}' not found on '{target_remote}'.")
+            return False
+        except pylxd.exceptions.LXDAPIException as e:
+            logger.error(f"Failed to retrieve target project '{target_project}' on '{target_remote}': {e}")
+            return False
+
         # Verify if the source profile exists
         try:
             # Fetch the source profile (may trigger a warning due to the 'project' attribute)
@@ -1266,13 +1279,48 @@ def copy_profile(source_remote, source_project, source_profile, target_remote, t
                 description=profile.description  # Copy the description
             )
             logger.info(f"Profile '{source_remote}:{source_project}.{source_profile}' successfully copied to '{target_remote}:{target_project}.{target_profile}'.")
+            return True
         except pylxd.exceptions.LXDAPIException as e:
             logger.error(f"Failed to create target profile '{target_profile}' on '{target_remote}:{target_project}': {e}")
             return False
+
     except Exception as e:
         logger.error(f"An unexpected error occurred while copying profile: {e}")
         return False
-    return True
+
+def delete_profile(remote, project, profile_name):
+    """
+    Delete a profile from a specific remote and project.
+
+    Returns:
+    - True if the profile was successfully deleted.
+    - False if the profile could not be deleted due to an error or project configuration.
+    """
+    try:
+        client = get_remote_client(remote, project_name=project)
+
+        # Check the project's config for 'features.profiles'
+        project_config = client.projects.get(project).config
+        if project_config.get("features.profiles") == "false":
+            logger.error(f"Cannot delete profile '{profile_name}' from '{remote}:{project}' because the project inherits profiles from the default project.")
+            return False
+
+        # Proceed with profile deletion
+        profile = client.profiles.get(profile_name)
+        profile.delete()
+        logger.info(f"Profile '{profile_name}' successfully deleted from '{remote}:{project}'.")
+        return True
+
+    except pylxd.exceptions.NotFound:
+        logger.error(f"Profile '{profile_name}' not found in '{remote}:{project}'.")
+        return False
+    except pylxd.exceptions.LXDAPIException as e:
+        logger.error(f"Failed to delete profile '{profile_name}' on '{remote}:{project}': {e}")
+        return False
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while deleting profile: {e}")
+        return False
+
 
 #############################################
 ###### figo user command functions ##########
@@ -2631,6 +2679,9 @@ def create_profile_parser(subparsers):
     copy_parser.add_argument("source_profile", help="Source profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'")
     copy_parser.add_argument("target_profile", nargs="?", help="Target profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'")
 
+    delete_parser = profile_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete a profile")
+    delete_parser.add_argument("profile_scope", help="Profile scope in the format 'remote:project.profile_name', 'remote:project', 'project.profile_name', 'profile_name'")
+
     subparsers._name_parser_map["pr"] = profile_parser
     subparsers._name_parser_map["p"] = profile_parser
 
@@ -2699,14 +2750,10 @@ def handle_profile_command(args, client, parser_dict):
             logger.error("You must provide a profile name or use the --all option.")
     elif args.profile_command in ["list", "l"]:
         remote, project, profile = parse_profile_scope(args.scope, command='list')
-        # if remote is None or project is None:
-        #     return        
         list_profiles(remote, project, profile_name=profile)
     elif args.profile_command == "copy":
         source_remote, source_project, source_profile = parse_profile_scope(args.source_profile, command='copy')
-        target_remote, target_project, target_profile = parse_profile_scope(args.target_profile 
-                                                                            if args.target_profile else source_profile,
-                                                                            command='copy')
+        target_remote, target_project, target_profile = parse_profile_scope(args.target_profile if args.target_profile else source_profile, command='copy')
 
         if source_profile is None or source_profile == "":
             logger.error("Error: Source profile name cannot be empty.")
@@ -2716,6 +2763,14 @@ def handle_profile_command(args, client, parser_dict):
             target_profile = source_profile
 
         copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile)
+    elif args.profile_command in ["delete", "del", "d"]:
+        remote, project, profile = parse_profile_scope(args.profile_scope, command='copy')
+
+        if profile is None or profile == "":
+            logger.error("Error: Profile name cannot be empty.")
+            return
+
+        delete_profile(remote, project, profile)
 
 
 #############################################
