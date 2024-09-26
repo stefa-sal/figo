@@ -1186,38 +1186,74 @@ def list_profiles_specific(remote, project, profile_name=None, COLS=None):
 
     return True
 
-def list_profiles(remote, project, profile_name=None):
-    """List profiles overall or on specific remote and project optionally with a match on profile_name
+def list_profiles(remote, project, profile_name=None, inherited=False):
+    """
+    List profiles overall or on specific remote and project optionally with a match on profile_name.
 
-    if remote and project are not specified, list all profiles on all remotes and projects.
-    if remote is specified but project is not, list all profiles on the remote.
-    if project is specified but remote is not, list all profiles on the project on all remotes.
-    if remote and project are specified, list all profiles on the remote and project.
-
+    - If remote and project are not specified, list all profiles on all remotes and projects.
+    - If remote is specified but project is not, list all profiles on the remote.
+    - If project is specified but remote is not, list all profiles on the project on all remotes.
+    - If remote and project are specified, list all profiles on the remote and project.
+    - If `inherited` is False, skip profiles from projects where `features.profiles` is False.
     """
 
-    COLS = [('PROFILE',25), ('CONTEXT',25), ('INSTANCES',80)]
+    COLS = [('PROFILE', 25), ('CONTEXT', 25), ('INSTANCES', 80)]
     print_header_line(COLS)
 
     if remote and project:
+        if not inherited and not check_profiles_feature(remote, project):
+            return
         return list_profiles_specific(remote, project, profile_name, COLS)
-    elif remote: # list all profiles on the remote
-        
+
+    elif remote:  # list all profiles on the remote
         for project in iterator_over_projects(remote):
+            if not inherited and not check_profiles_feature(remote, project["name"]):
+                continue
             list_profiles_specific(remote, project["name"], profile_name, COLS)
 
-    else: # list all profiles on all remotes associated with all the project or with a specific project
+    else:  # list all profiles on all remotes associated with all the project or with a specific project
         remotes = get_incus_remotes()
         for my_remote_node in remotes:
-            # check to skip all the remote node of type images
-            # Skipping remote node with protocol simplestreams
+            # check to skip all the remote nodes of type images
             if remotes[my_remote_node]["Protocol"] == "simplestreams":
                 continue        
             if project:
+                if not inherited and not check_profiles_feature(my_remote_node, project):
+                    continue
                 list_profiles_specific(my_remote_node, project, profile_name, COLS)
             else:
                 for my_project in iterator_over_projects(my_remote_node):
+                    if not inherited and not check_profiles_feature(my_remote_node, my_project["name"]):
+                        continue
                     list_profiles_specific(my_remote_node, my_project["name"], profile_name, COLS)
+
+
+def check_profiles_feature(remote, project, remote_client=None):
+    """
+    Check if the 'features.profiles' value is True for the specified project on the remote.
+
+    Args:
+    - remote (str): The name of the remote.
+    - project (str): The name of the project.
+    - remote_client (pylxd.Client, optional): An existing pylxd client for the remote. If provided, it will be used instead of creating a new client.
+
+    Returns:
+    - bool: True if profiles are managed within the project, False if profiles are inherited from the default project.
+    """
+    try:
+        # Use the provided remote_client if available, otherwise create a new one
+        client = remote_client if remote_client else get_remote_client(remote, project_name=project)
+        project_data = client.projects.get(project)
+        return project_data.config.get('features.profiles', 'false') == 'true'
+    except pylxd.exceptions.NotFound:
+        logger.error(f"Project '{project}' not found on remote '{remote}'.")
+        return False
+    except pylxd.exceptions.LXDAPIException as e:
+        logger.error(f"Failed to retrieve project '{project}' on remote '{remote}': {e}")
+        return False
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while checking profiles feature: {e}")
+        return False
 
 
 
@@ -1236,16 +1272,8 @@ def copy_profile(source_remote, source_project, source_profile, target_remote, t
             return False
 
         # Check the project's config for 'features.profiles' in the target project
-        try:
-            target_project_config = target_client.projects.get(target_project).config
-            if target_project_config.get("features.profiles") == "false":
-                logger.error(f"Cannot copy profile '{source_profile}' to '{target_remote}:{target_project}' because the target project inherits profiles from the default project.")
-                return False
-        except pylxd.exceptions.NotFound:
-            logger.error(f"Target project '{target_project}' not found on '{target_remote}'.")
-            return False
-        except pylxd.exceptions.LXDAPIException as e:
-            logger.error(f"Failed to retrieve target project '{target_project}' on '{target_remote}': {e}")
+        if not check_profiles_feature(target_remote, target_project, remote_client=target_client):
+            logger.error(f"Cannot copy profile '{source_profile}' to '{target_remote}:{target_project}' because the target project inherits profiles from the default project.")
             return False
 
         # Verify if the source profile exists
@@ -1300,8 +1328,7 @@ def delete_profile(remote, project, profile_name):
         client = get_remote_client(remote, project_name=project)
 
         # Check the project's config for 'features.profiles'
-        project_config = client.projects.get(project).config
-        if project_config.get("features.profiles") == "false":
+        if not check_profiles_feature(remote, project, remote_client=client):
             logger.error(f"Cannot delete profile '{profile_name}' from '{remote}:{project}' because the project inherits profiles from the default project.")
             return False
 
@@ -2665,7 +2692,8 @@ def handle_gpu_command(args, client, parser_dict):
 #############################################
 
 def create_profile_parser(subparsers):
-    profile_parser = subparsers.add_parser("profile", help="Manage profiles")
+    profile_parser = subparsers.add_parser("profile", help="Manage profiles", 
+                epilog="Use 'figo profile <command> -h' for more information on a specific command.") 
     profile_subparsers = profile_parser.add_subparsers(dest="profile_command")
 
     dump_profiles_parser = profile_subparsers.add_parser("dump", help="Dump profiles to .yaml files")
@@ -2675,7 +2703,14 @@ def create_profile_parser(subparsers):
     list_parser = profile_subparsers.add_parser("list", aliases=["l"], help="List profiles and associated instances")
     list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project.profile_name', 'remote:project', 'project.profile_name', 'profile_name', or defaults to 'local:default'")
 
-    copy_parser = profile_subparsers.add_parser("copy", help="Copy a profile to a new profile name or remote/project")
+    copy_parser = profile_subparsers.add_parser("copy", 
+                        help="Copy a profile to a new profile name or remote/project",
+                        description="Copy a profile to a new profile name or remote/project.\n"
+                        "If the target profile is not provided, the source profile name will be used.",
+                        formatter_class=argparse.RawTextHelpFormatter,
+                        epilog="Examples:\n"
+                        "  figo profile copy remote:project.profile1 remote:project.profile2\n"
+                        "  figo profile copy remote:project.profile1 remote:project\n")
     copy_parser.add_argument("source_profile", help="Source profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'")
     copy_parser.add_argument("target_profile", nargs="?", help="Target profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'")
 
