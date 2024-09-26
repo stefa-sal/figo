@@ -1255,8 +1255,6 @@ def check_profiles_feature(remote, project, remote_client=None):
         logger.error(f"An unexpected error occurred while checking profiles feature: {e}")
         return False
 
-
-
 def copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile):
     """Copy a profile from one location to another with error handling, including the description.
     
