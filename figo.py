@@ -94,6 +94,21 @@ def truncate(text, length):
         return f"{text[:length-2]}*>"
     return text
 
+def print_row(COLS, list_of_values, reset_color=False):
+    """Print the values in a row."""
+    RESET = "\033[0m"
+    i = 0
+    truncated_values = []
+    for value in list_of_values:
+        #check if value terminates with reset color
+        truncated_value = truncate(value, COLS[i][1])
+        if reset_color and value.endswith(RESET)and not truncated_value.endswith(RESET):
+            truncated_value = truncated_value + RESET
+        truncated_values.append(truncated_value) 
+        i += 1
+
+    print(gen_format_str(COLS).format(*truncated_values))
+
 def is_valid_ip(ip):
     """Check if the provided string is a valid IPv4 address."""
     pattern = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
@@ -297,7 +312,6 @@ def iterator_over_instances(remote, project_name, instance_scope=None):
             continue
         yield instance
 
-
 def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_scope=None, full=False):
     """Get instances from the specified remote node and project and print their details.
     
@@ -329,19 +343,14 @@ def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_
         if full:
             # Print all profiles
             profiles_str = ", ".join(instance.get("profiles", []))
-            print(gen_format_str(COLS).format(name, instance_type, state, 
-                                              truncate(context, col_width(COLS,'CONTEXT')),
-                                              truncate(format_ip_device_pairs(ip_device_pairs), col_width(COLS,'IP ADDRESS(ES)')),
-                                              profiles_str))
+            print_row(COLS, [name, instance_type, state, context, format_ip_device_pairs(ip_device_pairs), profiles_str])
         else:
             # Print only GPU profiles with color coding based on state
             gpu_profiles = [profile for profile in instance.get("profiles", []) if profile.startswith("gpu")]
             profiles_str = ", ".join(gpu_profiles)
             colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
-            print(gen_format_str(COLS).format(name, instance_type, state,
-                                              truncate(context, col_width(COLS,'CONTEXT')),
-                                              truncate(format_ip_device_pairs(ip_device_pairs), col_width(COLS,'IP ADDRESS(ES)')),
-                                              colored_profiles_str))
+            print_row(COLS, [name, instance_type, state, context, format_ip_device_pairs(ip_device_pairs), colored_profiles_str],
+                      reset_color=True)
 
     return True
     
