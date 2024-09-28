@@ -53,6 +53,8 @@ FIGO_PREFIX="figo-"
 # NB: PROJECT_PREFIX cannot contain underscores
 PROJECT_PREFIX = FIGO_PREFIX 
 
+DEFAULT_LOGIN_FOR_INSTANCES = 'ubuntu'
+
 DEFAULT_INSTANCE_SIZE = 'instance-medium'  # Global default instance size
 
 DEFAULT_PREFIX_LEN = 25 # Default prefix length for IP addresses of instances
@@ -570,17 +572,28 @@ def stop_instance(instance_name, remote, project):
         logger.error(f"Failed to stop instance '{instance_name}' in project '{project}' on remote '{remote}': {e}")
         return False
 
-def set_user_key(instance_name, remote, project, key_filename, client):
-    """Set a public key in the /home/mpi/.ssh/authorized_keys of the specified instance.
+def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', folder='.users'):
+    """Set a public key in the specified user's authorized_keys file in the specified instance.
     
-    Returns:    True if the key was set successfully, False otherwise.
+    Args:
+    - instance_name: Name of the instance.
+    - remote: Remote server name.
+    - project: Project name.
+    - key_filename: Filename of the public key on the host.
+    - login: Login name of the user (default: 'ubuntu').
+    - folder: Folder path where the key file is located (default: '.users').
+
+    Returns: True if the key was set successfully, False otherwise.
     """
     try:
+        # Full path to the key file
+        key_filepath = f"{folder}/{key_filename}"
+
         # Read the public key from the file
-        with open(key_filename, 'r') as key_file:
+        with open(key_filepath, 'r') as key_file:
             public_key = key_file.read().strip()
 
-        # get the specified instance in project and remote  
+        # Get the specified instance in project and remote  
         remote_client = get_remote_client(remote, project_name=project)
         if not remote_client:
             return False
@@ -607,25 +620,25 @@ def set_user_key(instance_name, remote, project, key_filename, client):
                 return None
 
         # Create .ssh directory
-        exec_command(['mkdir', '-p', '/home/mpi/.ssh'])
+        exec_command(['mkdir', '-p', f'/home/{login}/.ssh'])
 
         # Create authorized_keys file
-        exec_command(['touch', '/home/mpi/.ssh/authorized_keys'])
+        exec_command(['touch', f'/home/{login}/.ssh/authorized_keys'])
 
         # Set permissions
-        exec_command(['chmod', '600', '/home/mpi/.ssh/authorized_keys'])
-        exec_command(['chown', 'mpi:mpi', '/home/mpi/.ssh/authorized_keys'])
+        exec_command(['chmod', '600', f'/home/{login}/.ssh/authorized_keys'])
+        exec_command(['chown', f'{login}:{login}', f'/home/{login}/.ssh/authorized_keys'])
 
         # Add the public key
-        exec_command(['sh', '-c', f'echo "{public_key}" >> /home/mpi/.ssh/authorized_keys'])
+        exec_command(['sh', '-c', f'echo "{public_key}" >> /home/{login}/.ssh/authorized_keys'])
 
-        logger.info(f"Public key from '{key_filename}' added to /home/mpi/.ssh/authorized_keys in instance '{instance_name}'.")
+        logger.info(f"Public key from '{key_filepath}' added to /home/{login}/.ssh/authorized_keys in instance '{instance_name}'.")
         
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to set user key for instance '{instance_name}': {e}")
         return False
     except FileNotFoundError:
-        logger.error(f"File '{key_filename}' not found.")
+        logger.error(f"File '{key_filepath}' not found.")
         return False
     except Exception as e:
         logger.error(f"An error occurred: {e}")
@@ -1226,7 +1239,6 @@ def list_profiles(remote, project, profile_name=None, inherited=False):
                     if not inherited and not check_profiles_feature(my_remote_node, my_project["name"]):
                         continue
                     list_profiles_specific(my_remote_node, my_project["name"], profile_name, COLS)
-
 
 def check_profiles_feature(remote, project, remote_client=None):
     """
@@ -2398,7 +2410,7 @@ def delete_project(remote, project):
 ###### figo instance command CLI ############
 #############################################
 
-def create_instance_parser(subparsers):
+def create_instance_parser(subparsers): 
     instance_parser = subparsers.add_parser("instance", help="Manage instances")
     instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
 
@@ -2412,6 +2424,7 @@ def create_instance_parser(subparsers):
         parser.add_argument("-n", "--nic", help="Specify the nic name for the instance, "
                              "default: eth0 for containers, enp5s0 for VMs")
 
+    # List command
     instance_list_parser = instance_subparsers.add_parser("list", aliases=["l"],
         help="List instances (use -f or --full for more details)"
     )
@@ -2419,38 +2432,51 @@ def create_instance_parser(subparsers):
     instance_list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project', 'project', or 'remote:' to limit the listing")
     add_common_arguments(instance_list_parser)
 
+    # Start command
     start_parser = instance_subparsers.add_parser("start", help="Start a specific instance")
     start_parser.add_argument("instance_name", help="Name of the instance to start. Can include remote and project scope.")
     add_common_arguments(start_parser)
 
+    # Stop command
     stop_parser = instance_subparsers.add_parser("stop", help="Stop a specific instance")
     stop_parser.add_argument("instance_name", help="Name of the instance to stop. Can include remote and project scope.")
     add_common_arguments(stop_parser)
 
+    # Set Key command
     set_key_parser = instance_subparsers.add_parser("set_key", help="Set a public key for a user in an instance")
     set_key_parser.add_argument("instance_name", help="Name of the instance. Can include remote and project scope.")
     set_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
+    # Add new options
+    set_key_parser.add_argument("-l", "--login", default=DEFAULT_LOGIN_FOR_INSTANCES, 
+                                help="Specify the user login name (default: ubuntu)")
+    set_key_parser.add_argument("-f", "--folder", default=USER_DIR, 
+                                help="Specify the folder path where the key file is located (default: ./users)")
     add_common_arguments(set_key_parser)
 
+    # Set IP command
     set_ip_parser = instance_subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance")
     set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for. Can include remote and project scope.")
     add_common_arguments(set_ip_parser)
 
+    # Create command
     create_parser = instance_subparsers.add_parser("create", aliases=["c"], help="Create a new instance")
     create_parser.add_argument("instance_name", help="Name of the new instance. Can include remote and project scope in the format 'remote:project.instance_name'")
     create_parser.add_argument("image", help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
     create_parser.add_argument("-t", "--type", choices=["vm", "container", "cnt"], default="container", help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container').")
     add_common_arguments(create_parser)
 
+    # Delete command
     delete_parser = instance_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete a specific instance")
     delete_parser.add_argument("instance_name", help="Name of the instance to delete. Can include remote and project scope.")
     delete_parser.add_argument("-f", "--force", action="store_true", help="Force delete the instance even if it is running")
     add_common_arguments(delete_parser)
 
+    # Bash command
     bash_parser = instance_subparsers.add_parser("bash", aliases=["b"], help="Execute bash in a specific instance")
     bash_parser.add_argument("instance_name", help="Name of the instance to execute bash. Can include remote and project scope.")
     add_common_arguments(bash_parser)
 
+    # Aliases for the main parser
     subparsers._name_parser_map["in"] = instance_parser
     subparsers._name_parser_map["i"] = instance_parser
 
@@ -2516,21 +2542,12 @@ def handle_instance_command(args, parser_dict):
         """Check validity of instance name."""
         # Instance name can only contain letters, numbers, hyphens, no underscores
         if not re.match(r'^[a-zA-Z0-9-]+$', instance_name):
+            logger.error(f"Error: Instance name can only contain letters, numbers, hyphens: '{instance_name}'.")
             return False
         return True
 
     def parse_instance_scope(instance_name, provided_remote, provided_project):
-        """Parse the instance name to extract remote, project, and instance.
-        
-        The instance name can be in the following formats:
-        
-        - remote:project.instance
-        - remote:instance
-        - project.instance
-        
-        Returns the remote, project, and instance names or None, None, None if there is an error.
-        """
-
+        """Parse the instance name to extract remote, project, and instance."""
         remote, project, instance = '', '', instance_name  # Default values
 
         if ':' in instance_name:
@@ -2558,7 +2575,6 @@ def handle_instance_command(args, parser_dict):
                 return None, None, None
 
         if not check_instance_name(instance):
-            logger.error(f"Error: Instance name can only contain letters, numbers, hyphens: '{instance_name}'.")
             return None, None, None
 
         # Resolve conflicts
@@ -2628,7 +2644,10 @@ def handle_instance_command(args, parser_dict):
         elif args.instance_command == "stop":
             stop_instance(instance, remote, project)
         elif args.instance_command == "set_key":
-            set_user_key(instance, remote, project, args.key_filename)
+            # Extract the parameters with defaults applied
+            login = args.login
+            folder = args.folder
+            set_user_key(instance, remote, project, args.key_filename, login=login, folder=folder)
         elif args.instance_command == "set_ip":
             set_ip(instance, remote, project, 
                    ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
@@ -2700,6 +2719,7 @@ def create_profile_parser(subparsers):
 
     list_parser = profile_subparsers.add_parser("list", aliases=["l"], help="List profiles and associated instances")
     list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project.profile_name', 'remote:project', 'project.profile_name', 'profile_name', or defaults to 'local:default'")
+    list_parser.add_argument("-i", "--inherited", action="store_true", help="Include inherited profiles in the listing")
 
     copy_parser = profile_subparsers.add_parser("copy", 
                         help="Copy a profile to a new profile name or remote/project",
@@ -2783,10 +2803,11 @@ def handle_profile_command(args, client, parser_dict):
             logger.error("You must provide a profile name or use the --all option.")
     elif args.profile_command in ["list", "l"]:
         remote, project, profile = parse_profile_scope(args.scope, command='list')
-        list_profiles(remote, project, profile_name=profile)
+        list_profiles(remote, project, profile_name=profile, inherited=args.inherited)
     elif args.profile_command == "copy":
         source_remote, source_project, source_profile = parse_profile_scope(args.source_profile, command='copy')
-        target_remote, target_project, target_profile = parse_profile_scope(args.target_profile if args.target_profile else source_profile, command='copy')
+        target_remote, target_project, target_profile = parse_profile_scope(args.target_profile 
+                                                                            if args.target_profile else source_profile, command='copy')
 
         if source_profile is None or source_profile == "":
             logger.error("Error: Source profile name cannot be empty.")
