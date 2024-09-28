@@ -109,6 +109,9 @@ def print_row(COLS, list_of_values, reset_color=False):
 
     print(gen_format_str(COLS).format(*truncated_values))
 
+def print_header_line(COLS):
+    print(gen_format_str(COLS).format(*gen_header_list(COLS)))
+
 def is_valid_ip(ip):
     """Check if the provided string is a valid IPv4 address."""
     pattern = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
@@ -163,9 +166,6 @@ def format_ip_device_pairs(ip_device_pairs):
 def extract_ip_addresses(ip_device_pairs):
     """Return a list of IP addresses without the prefix length."""
     return [ip.split('/')[0] for ip, _ in ip_device_pairs]
-
-def print_header_line(COLS):
-    print(gen_format_str(COLS).format(*gen_header_list(COLS)))
 
 def derive_project_from_user(user_name):
     return f"{PROJECT_PREFIX}{user_name}"
@@ -992,16 +992,18 @@ def show_gpu_status(client):
     available_gpus = total_gpus - len(active_gpu_profiles)
 
     gpu_profiles_str = ", ".join(active_gpu_profiles)
-    print("{:<10} {:<10} {:<10} {:<40}".format("TOTAL", "AVAILABLE", "ACTIVE", "PROFILES"))
-    print("{:<10} {:<10} {:<10} {:<40}".format(total_gpus, available_gpus, len(active_gpu_profiles), gpu_profiles_str))
+    COLS = [('TOTAL', 10), ('AVAILABLE', 10), ('ACTIVE', 10), ('PROFILES', 40)]
+    print_header_line(COLS)
+    print_row(COLS, [total_gpus, available_gpus, len(active_gpu_profiles), gpu_profiles_str])
 
 def list_gpu_profiles(client):
     """List all GPU profiles."""
     gpu_profiles = [
         profile.name for profile in client.profiles.all() if profile.name.startswith("gpu-")
     ]
-    print("{:<10} {:<30}".format("TOTAL", "PROFILES"))
-    print("{:<10} {:<30}".format(len(gpu_profiles), ", ".join(gpu_profiles)))
+    COLS = [('TOTAL', 10), ('PROFILES', 30)]
+    print_header_line(COLS)
+    print_row(COLS, [len(gpu_profiles), ", ".join(gpu_profiles)])
 
 def add_gpu_profile(instance_name, client):
     """Add a GPU profile to an instance.
@@ -1408,21 +1410,19 @@ def list_users(client, full=False):
 
     # Print headers
     if full:
-        print("{:<18} {:<12} {:<4} {:<5} {:<30} {:<20} {:<15} {:<20}".format(
-            "NAME", "FINGERPRINT", "TYPE", "ADMIN", "EMAIL", "REAL NAME", "ORGANIZATION", "PROJECTS"
-        ))
+        COLS= [('NAME', 18), ('FINGERPRINT', 12), ('TYPE', 4), ('ADMIN', 5), ('EMAIL', 30),
+               ('REAL NAME', 20), ('ORGANIZATION', 15), ('PROJECTS', 20)]
     else:
-        print("{:<20} {:<12}".format("NAME", "FINGERPRINT"))
+        COLS = [('NAME', 20), ('FINGERPRINT', 12)]
+    print_header_line(COLS)
 
     # Print sorted certificates
     for cert in certificates_info:
         if full:
-            print("{:<18} {:<12} {:<4} {:<5} {:<30} {:<20} {:<15} {:<20}".format(
-                cert["name"], cert["fingerprint"], cert["type"], 
-                cert["admin"], cert["email"], cert["real_name"], cert["org"], cert["projects"]
-            ))
+            print_row(COLS, [cert["name"], cert["fingerprint"], cert["type"], cert["admin"],
+                             cert["email"], cert["real_name"], cert["org"], cert["projects"]])
         else:
-            print(f"{cert['name']:<20} {cert['fingerprint']:<12}")
+            print_row(COLS, [cert["name"], cert["fingerprint"]])
 
 def get_next_wg_client_ip_address():
     # List to contain the IP addresses found in .conf files
@@ -2250,9 +2250,10 @@ def list_remotes(full=False):
                 print(f"  {key}: {value}")
             print("-" * 60)
     else:
-        print("{:<20} {:<40}".format("REMOTE NAME", "ADDRESS"))
+        COLS = [('REMOTE NAME', 20), ('ADDRESS', 40)]
+        print_header_line(COLS)
         for remote_name, remote_info in remotes.items():
-            print("{:<20} {:<40}".format(remote_name, remote_info['Addr']))
+            print_row(COLS, [remote_name, remote_info['Addr']])
 
 def resolve_hostname(hostname):
     """Resolve the hostname to an IP address."""
