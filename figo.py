@@ -155,13 +155,6 @@ def gen_header_list(columns):
     headers = [header for header, _ in columns]
     return headers
 
-def col_width(COLUMNS, column):
-    """Return the width of the column specified by its name."""
-    for col_name, width in COLUMNS:
-        if col_name == column:
-            return width
-    raise ValueError(f"Column '{column}' not found in COLUMNS")
-
 def format_ip_device_pairs(ip_device_pairs):
     """Return a string with IP addresses followed by device names in brackets."""
     formatted_pairs = [f"{ip.split('/')[0]} ({device})" for ip, device in ip_device_pairs]
@@ -361,9 +354,9 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
     """
     # Determine the header and profile type based on the 'full' flag
     if full:
-        COLS = [('INSTANCE',14), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('PROFILES',45)]
+        COLS = [('INSTANCE',14), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('PROFILES',75)]
     else:
-        COLS = [('INSTANCE',14), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('GPU PROFILES',30)]
+        COLS = [('INSTANCE',14), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('GPU PROFILES',75)]
 
     print_header_line(COLS)
 
@@ -1202,9 +1195,7 @@ def list_profiles_specific(remote, project, profile_name=None, COLS=None):
         ]
         context = f"{remote}:{project}" 
         associated_instances_str = ', '.join(associated_instances) if associated_instances else 'None'
-        print(gen_format_str(COLS).format(truncate(profile.name,col_width(COLS,'PROFILE')),
-                                          truncate(context,col_width(COLS,'CONTEXT')),  
-                                          associated_instances_str))
+        print_row(COLS, [profile.name, context, associated_instances_str])
 
     return True
 
@@ -2385,8 +2376,7 @@ def list_projects(remote, project):
                     if project:
                         if project not in my_project['name']:
                             continue
-                    print(gen_format_str(COLS).format(truncate(my_project['name'],col_width(COLS,'PROJECT')),
-                                                      truncate(remote_name,col_width(COLS,'REMOTE'))))
+                    print_row(COLS, [my_project['name'], remote_name])
 
             else:
                 print("  Error: Failed to retrieve projects.")
@@ -2398,8 +2388,7 @@ def list_projects(remote, project):
                 if project:
                     if project not in my_project['name']:
                         continue
-                print(gen_format_str(COLS).format(truncate(my_project['name'],col_width(COLS,'PROJECT')),
-                                                   truncate(remote,col_width(COLS,'REMOTE'))))
+                print_row(COLS, [my_project['name'], remote])
         else:
             print(f"Error: Failed to retrieve projects on remote '{remote}'")
 
