@@ -84,6 +84,9 @@ REMOTE_TO_IP_INFO_MAP = {
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("_")
 
+# Suppress ws4py INFO logging
+logging.getLogger('ws4py').setLevel(logging.WARNING)
+
 #############################################
 ###### generic helper functions         #####
 #############################################
@@ -609,32 +612,38 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
         def exec_command(command):
             """Execute a command in the instance.
             
-            Returns: The output of the command, None in case of exception.
+            Returns: True if the command was successful, False otherwise.
             """
             try:
                 exec_result = instance.execute(command)
-                output, error = exec_result
-                if error:
-                    logger.error(f"Error executing command '{' '.join(command)}': {error}")
-                return output
+                if exec_result.exit_code != 0:
+                    logger.error(f"Error executing command '{' '.join(command)}': {exec_result.stderr}")
+                    return False
+                return True
             except Exception as e:
                 logger.error(f"Exception while executing command '{' '.join(command)}': {e}")
-                return None
+                return False
 
         # Create .ssh directory
-        exec_command(['mkdir', '-p', f'/home/{login}/.ssh'])
+        if not exec_command(['mkdir', '-p', f'/home/{login}/.ssh']):
+            return False
 
         # Create authorized_keys file
-        exec_command(['touch', f'/home/{login}/.ssh/authorized_keys'])
+        if not exec_command(['touch', f'/home/{login}/.ssh/authorized_keys']):
+            return False
 
         # Set permissions
-        exec_command(['chmod', '600', f'/home/{login}/.ssh/authorized_keys'])
-        exec_command(['chown', f'{login}:{login}', f'/home/{login}/.ssh/authorized_keys'])
+        if not exec_command(['chmod', '600', f'/home/{login}/.ssh/authorized_keys']):
+            return False
+        if not exec_command(['chown', f'{login}:{login}', f'/home/{login}/.ssh/authorized_keys']):
+            return False
 
         # Add the public key
-        exec_command(['sh', '-c', f'echo "{public_key}" >> /home/{login}/.ssh/authorized_keys'])
+        if not exec_command(['sh', '-c', f'echo "{public_key}" >> /home/{login}/.ssh/authorized_keys']):
+            return False
 
         logger.info(f"Public key from '{key_filepath}' added to /home/{login}/.ssh/authorized_keys in instance '{instance_name}'.")
+        return True
         
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to set user key for instance '{instance_name}': {e}")
@@ -645,8 +654,7 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         return False
-    
-    return True
+
 
 def assign_ip_address(remote, mode="next"):
     """Assign a new IP address based on the highest assigned IP address.
