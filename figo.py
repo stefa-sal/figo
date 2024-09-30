@@ -19,6 +19,10 @@ import cryptography.x509
 import cryptography.x509.oid
 import datetime
 from urllib.parse import urlparse
+import time
+
+BASH_CONNECT_TIMEOUT = 30 # seconds
+BASH_CONNECT_ATTEMPTS = 10
 
 import warnings
 # Suppress a specific warning from the pylxd library, needed in copy_profile()
@@ -577,7 +581,7 @@ def stop_instance(instance_name, remote, project):
         logger.error(f"Failed to stop instance '{instance_name}' in project '{project}' on remote '{remote}': {e}")
         return False
 
-def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', folder='.users'):
+def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', folder='.users', force=False):
     """Set a public key in the specified user's authorized_keys file in the specified instance.
     
     Args:
@@ -587,9 +591,26 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
     - key_filename: Filename of the public key on the host.
     - login: Login name of the user (default: 'ubuntu').
     - folder: Folder path where the key file is located (default: '.users').
+    - force: If True, start the instance if it's not running and stop it after setting the key.
 
     Returns: True if the key was set successfully, False otherwise.
     """
+
+    def exec_command(instance, command):
+        """Execute a command in the instance.
+        
+        Returns: True if the command was successful, False otherwise.
+        """
+        try:
+            exec_result = instance.execute(command)
+            if exec_result.exit_code != 0:
+                logger.error(f"Error executing command '{' '.join(command)}': {exec_result.stderr}")
+                return False
+            return True
+        except Exception as e:
+            logger.error(f"Exception while executing command '{' '.join(command)}': {e}")
+            return False
+
     try:
         # Full path to the key file
         key_filepath = f"{folder}/{key_filename}"
@@ -604,45 +625,60 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
             return False
         instance = remote_client.instances.get(instance_name)
 
+        # Check if the key already exists in authorized_keys
+        try:
+            existing_keys = instance.files.get(f'/home/{login}/.ssh/authorized_keys').decode('utf-8')
+            logger.info(f"Fetched existing authorized_keys from /home/{login}/.ssh/authorized_keys in instance '{instance_name}'.")
+            
+            if public_key in existing_keys:
+                logger.info(f"Public key from '{key_filepath}' is already present in /home/{login}/.ssh/authorized_keys.")
+                return True  # Key already exists, no need to proceed further
+
+        except pylxd.exceptions.NotFound:
+            # No authorized_keys file exists, we can proceed
+            logger.info(f"No authorized_keys file found for {login}, proceeding with adding the key.")
+
+        was_started = False
+    
         # Check if the instance is running
         if instance.status.lower() != "running":
-            logger.error(f"Error: Instance '{instance_name}' is not running.")
-            return False
-
-        def exec_command(command):
-            """Execute a command in the instance.
-            
-            Returns: True if the command was successful, False otherwise.
-            """
-            try:
-                exec_result = instance.execute(command)
-                if exec_result.exit_code != 0:
-                    logger.error(f"Error executing command '{' '.join(command)}': {exec_result.stderr}")
+            if force:
+                # Start the instance if it is not running
+                was_started = start_instance(instance.name, remote, project)
+                if not was_started:
+                    logger.error(f"Error: Instance '{instance_name}' failed to start")
                     return False
-                return True
-            except Exception as e:
-                logger.error(f"Exception while executing command '{' '.join(command)}': {e}")
+            else:
+                logger.error(f"Error: Instance '{instance_name}' is not running.")
                 return False
 
         # Create .ssh directory
-        if not exec_command(['mkdir', '-p', f'/home/{login}/.ssh']):
+        if not exec_command(instance, ['mkdir', '-p', f'/home/{login}/.ssh']):
             return False
 
-        # Create authorized_keys file
-        if not exec_command(['touch', f'/home/{login}/.ssh/authorized_keys']):
+        # Create authorized_keys file if not present
+        if not exec_command(instance, ['touch', f'/home/{login}/.ssh/authorized_keys']):
             return False
 
         # Set permissions
-        if not exec_command(['chmod', '600', f'/home/{login}/.ssh/authorized_keys']):
+        if not exec_command(instance, ['chmod', '600', f'/home/{login}/.ssh/authorized_keys']):
             return False
-        if not exec_command(['chown', f'{login}:{login}', f'/home/{login}/.ssh/authorized_keys']):
+        if not exec_command(instance, ['chown', f'{login}:{login}', f'/home/{login}/.ssh/authorized_keys']):
             return False
 
-        # Add the public key
-        if not exec_command(['sh', '-c', f'echo "{public_key}" >> /home/{login}/.ssh/authorized_keys']):
+        # Add the public key to authorized_keys
+        if not exec_command(instance, ['sh', '-c', f'echo "{public_key}" >> /home/{login}/.ssh/authorized_keys']):
             return False
 
         logger.info(f"Public key from '{key_filepath}' added to /home/{login}/.ssh/authorized_keys in instance '{instance_name}'.")
+
+        if force and was_started:
+            # Stop the instance if we started it earlier
+            result = stop_instance(instance.name, remote, project)
+            if not result:
+                logger.error(f"Error: Failed to stop instance '{instance_name}'")
+                return False
+
         return True
         
     except pylxd.exceptions.LXDAPIException as e:
@@ -654,7 +690,6 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         return False
-
 
 def assign_ip_address(remote, mode="next"):
     """Assign a new IP address based on the highest assigned IP address.
@@ -956,25 +991,92 @@ def delete_instance(instance_name, remote, project, force=False):
         return False
     return True
 
-def exec_instance_bash(instance_name, remote, project):
+def exec_instance_bash(instance_name, remote, project, force=False, timeout=BASH_CONNECT_TIMEOUT, max_attempts=BASH_CONNECT_ATTEMPTS):
+    """Execute a bash shell in a specific instance (container or VM).
+    
+    For VMs, the incus-agent must be running. If the agent is not running, retry connecting.
+
+    Args:
+    - instance_name: Name of the instance.
+    - remote: Remote server name.
+    - project: Project name.
+    - force: If True, start the instance if it is not running.
+
+    Returns:
+    - False if it was not possible to execute the bash shell, True otherwise.
+    """
+    
+    interval = timeout/max_attempts  # seconds
+
     try:
         # Determine the correct full instance name format
-        if remote != 'local':
-            full_instance_name = f"{remote}:{instance_name}"
-        else:
-            full_instance_name = instance_name
+        full_instance_name = f"{remote}:{instance_name}" if remote != 'local' else instance_name
 
-        # Build the command with the --project option if the project is not default
+        was_started = False
+        # Check if the instance is running
+        remote_client = get_remote_client(remote, project_name=project)
+        if not remote_client:
+            return False
+        
+        instance = remote_client.instances.get(instance_name)
+        instance_type = instance.type  # "container" or "virtual-machine"
+
+        # If the instance is not running, start it if force=True
+        if instance.status.lower() != "running":
+            if force:
+                logger.info(f"Starting instance '{instance_name}'...")
+                was_started = start_instance(instance.name, remote, project)
+                if not was_started:
+                    logger.error(f"Error: Instance '{instance_name}' failed to start.")
+                    return False
+            else:    
+                logger.error(f"Instance '{instance_name}' is not running.")
+                return False
+
+        # If it's a VM, check if the incus-agent is running
+        if instance_type == "virtual-machine":
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    logger.info(f"Trying to connect to instance (attempt {attempt}/{max_attempts})...")
+                    # Attempt to check if the incus-agent is running by executing a basic command
+                    exec_result = instance.execute(["ls", "/"])
+                    if exec_result.exit_code == 0:
+                        # If successful, break the loop and continue
+                        logger.info(f"Successfully connected to instance '{instance_name}'.")
+                        break
+                    else:
+                        raise Exception("VM agent isn't currently running")
+                except Exception as e:
+                    if attempt < max_attempts:
+                        time.sleep(interval)  # Wait for the interval before retrying
+                    else:
+                        logger.error(f"Error: VM agent isn't currently running in '{instance_name}' after {max_attempts} attempts (timeout = {BASH_CONNECT_TIMEOUT}). {e}")
+                        if force and was_started:
+                            # Stop the instance if we started it earlier
+                            stop_instance(instance.name, remote, project)
+                        return False
+        
+        # Build the bash command with the --project option if the project is not default
         command = ["incus", "exec", full_instance_name, "--project", project, "--", "bash"]
 
         # Execute the bash command interactively using subprocess
         subprocess.run(command, check=False, text=True)
 
+        if force and was_started:
+            # Stop the instance if we started it earlier
+            result = stop_instance(instance.name, remote, project)
+            if not result:
+                logger.error(f"Error: Failed to stop instance '{instance_name}'")
+                return False
+
+        return True
+
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to execute bash in instance '{remote}:{project}.{instance_name}': {e}")
-
+        return False
     except Exception as e:
         logger.error(f"An unexpected error occurred while executing bash in instance '{remote}:{project}.{instance_name}': {e}")
+        return False
 
 #############################################
 ###### figo gpu command functions ###########
@@ -2456,8 +2558,10 @@ def create_instance_parser(subparsers):
     # Add new options
     set_key_parser.add_argument("-l", "--login", default=DEFAULT_LOGIN_FOR_INSTANCES, 
                                 help="Specify the user login name (default: ubuntu)")
-    set_key_parser.add_argument("-f", "--folder", default=USER_DIR, 
-                                help="Specify the folder path where the key file is located (default: ./users)")
+    set_key_parser.add_argument("-d", "--dir", default=USER_DIR, 
+                                help="Specify the directory path where the key file is located (default: ./users)")
+    set_key_parser.add_argument("-f", "--force", action="store_true", 
+                                help="Start the instance if not running, then stop after setting the key")
     add_common_arguments(set_key_parser)
 
     # Set IP command
@@ -2481,6 +2585,9 @@ def create_instance_parser(subparsers):
     # Bash command
     bash_parser = instance_subparsers.add_parser("bash", aliases=["b"], help="Execute bash in a specific instance")
     bash_parser.add_argument("instance_name", help="Name of the instance to execute bash. Can include remote and project scope.")
+    bash_parser.add_argument("-f", "--force", action="store_true", help="Start the instance if not running and exec bash (stop on exit if not running)")
+    bash_parser.add_argument("-t", "--timeout", type=int, default=BASH_CONNECT_TIMEOUT, help="Total timeout in seconds for retries (default: {BASH_CONNECT_TIMEOUT})")
+    bash_parser.add_argument("-a", "--attempts", type=int, default=BASH_CONNECT_ATTEMPTS, help="Number of retry attempts to connect (default: {BASH_CONNECT_ATTEMPTS})")
     add_common_arguments(bash_parser)
 
     # Aliases for the main parser
@@ -2490,6 +2597,7 @@ def create_instance_parser(subparsers):
     return instance_parser
 
 def handle_instance_list(args):
+    """Handle the 'list' command for instances."""
     remote_node = args.remote
     project_name = args.project
     instance_scope = None
@@ -2630,8 +2738,8 @@ def handle_instance_command(args, parser_dict):
     else:
         # Handle project based on user if provided
         user_project = None
-        if 'user' in args:
-            user_project = derive_project_from_user(args.user) if args.user else None
+        if 'user' in args and args.user:
+            user_project = derive_project_from_user(args.user)
 
         # If user_project is set, check for conflicts
         if user_project:
@@ -2653,8 +2761,9 @@ def handle_instance_command(args, parser_dict):
         elif args.instance_command == "set_key":
             # Extract the parameters with defaults applied
             login = args.login
-            folder = args.folder
-            set_user_key(instance, remote, project, args.key_filename, login=login, folder=folder)
+            folder = args.dir
+            force = args.force
+            set_user_key(instance, remote, project, args.key_filename, login=login, folder=folder, force=force)
         elif args.instance_command == "set_ip":
             set_ip(instance, remote, project, 
                    ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
@@ -2673,7 +2782,7 @@ def handle_instance_command(args, parser_dict):
         elif args.instance_command in ["delete", "del", "d"]:
             delete_instance(instance, remote, project, force=args.force)
         elif args.instance_command in ["bash", "b"]:
-            exec_instance_bash(instance, remote, project)
+            exec_instance_bash(instance, remote, project, force=args.force)
 
 #############################################
 ###### figo gpu command CLI #################
