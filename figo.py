@@ -21,8 +21,8 @@ import datetime
 from urllib.parse import urlparse
 import time
 
-BASH_CONNECT_TIMEOUT = 30 # seconds
-BASH_CONNECT_ATTEMPTS = 10
+BASH_CONNECT_TIMEOUT = 30 # seconds (total time to wait for a bash connection)
+BASH_CONNECT_ATTEMPTS = 10 # number of attempts to connect to bash, interval is BASH_CONNECT_TIMEOUT/BASH_CONNECT_ATTEMPTS
 
 import warnings
 # Suppress a specific warning from the pylxd library, needed in copy_profile()
@@ -1053,6 +1053,7 @@ def exec_instance_bash(instance_name, remote, project, force=False, timeout=BASH
                         logger.error(f"Error: VM agent isn't currently running in '{instance_name}' after {max_attempts} attempts (timeout = {BASH_CONNECT_TIMEOUT}). {e}")
                         if force and was_started:
                             # Stop the instance if we started it earlier
+                            logger.info(f"Stopping instance '{instance_name}'...")
                             stop_instance(instance.name, remote, project)
                         return False
         
@@ -1982,9 +1983,32 @@ def delete_project(remote_node, project_name):
     
     return True
 
-def add_user(user_name, cert_file, client, admin=False, wireguard=False, project=None, email=None, name=None, org=None):
+def generate_ssh_key_pair(user_name, private_key_file, public_key_file):
     """
-    Add a user to Incus with a certificate.
+    Generate an Ed25519 SSH key pair for the user.
+
+    Args:
+    - user_name (str): The name of the user.
+    - private_key_file (str): Path to store the private key.
+    - public_key_file (str): Path to store the public key.
+
+    Returns:
+    True if the SSH key pair is generated successfully, False otherwise.
+    """
+    try:
+        # Generate Ed25519 private key and public key using ssh-keygen
+        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", private_key_file, "-C", user_name, "-N", ""], check=True)
+
+        logger.info(f"Generated Ed25519 SSH key pair for user '{user_name}':\nPrivate key: {private_key_file}\nPublic key: {public_key_file}")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error generating Ed25519 SSH key pair for user '{user_name}': {e}")
+        return False
+
+
+def add_user(user_name, cert_file, client, admin=False, wireguard=False, project=None, email=None, name=None, org=None, keys=False):
+    """
+    Add a user to Incus with a certificate and optionally generate an additional SSH key pair.
 
     Args:
     - user_name (str): The username associated with the certificate.
@@ -1997,6 +2021,7 @@ def add_user(user_name, cert_file, client, admin=False, wireguard=False, project
     - email (str, optional): Email address of the user.
     - name (str, optional): Name of the user.
     - org (str, optional): Organization of the user.
+    - keys (bool, optional): If True, generate an additional Ed25519 SSH key pair for the user.
 
     Returns:
     True if the user is added successfully, False otherwise.
@@ -2025,7 +2050,7 @@ def add_user(user_name, cert_file, client, admin=False, wireguard=False, project
                 set_of_errored_remotes.add(remote_node)
                 continue
 
-            else: # projects is not None:
+            else:  # projects is not None:
                 if project_name in [myproject['name'] for myproject in projects]:
                     logger.error(f"Error: Project '{project_name}' already exists on remote '{remote_node}'.")
                     return False
@@ -2036,7 +2061,7 @@ def add_user(user_name, cert_file, client, admin=False, wireguard=False, project
             logger.error(f"Error: Failed to retrieve projects from the local server.")
             return False
         
-        if projects is not None:
+        if projects is not None:  # Check again after retrieving projects
             if project not in [myproject['name'] for myproject in projects]:
                 logger.error(f"Error: Project '{project}' not found on the local server.")
                 return False
@@ -2071,9 +2096,19 @@ def add_user(user_name, cert_file, client, admin=False, wireguard=False, project
             return False
         logger.info(f"Generated certificate and key pair for user: {user_name}")
 
+    # Optionally generate additional SSH key pair if `keys` flag is set
+    if keys:
+        # Generate Ed25519 key pair for SSH login
+        ssh_key_file = os.path.join(directory, f"{user_name}_ssh_ed25519.key")
+        ssh_pub_key_file = os.path.join(directory, f"{user_name}_ssh_ed25519.pub")
+        if not generate_ssh_key_pair(user_name, ssh_key_file, ssh_pub_key_file):
+            logger.error(f"Failed to generate SSH key pair for user: {user_name}")
+            return False
+        logger.info(f"Generated SSH Ed25519 key pair for user '{user_name}': {ssh_key_file} (private), {ssh_pub_key_file} (public)")
+
     # Create a project for the user in the main server (local)
     project_created = False
-    if not admin and project==None:
+    if not admin and project == None:
         project_created = create_project(client, project_name)
 
     if not project_created:
@@ -2083,10 +2118,10 @@ def add_user(user_name, cert_file, client, admin=False, wireguard=False, project
     # Add the user certificate to Incus
     certificate_added = add_certificate_to_incus(client, user_name, crt_file, project_name, admin=admin, email=email, name=name, org=org)
 
-    if not admin and project==None and not certificate_added:
+    if not admin and project == None and not certificate_added:
         delete_project(client, 'local', project_name)
         return False
-    
+
     if wireguard:
         generate_wireguard_config(user_name)
 
@@ -2782,7 +2817,7 @@ def handle_instance_command(args, parser_dict):
         elif args.instance_command in ["delete", "del", "d"]:
             delete_instance(instance, remote, project, force=args.force)
         elif args.instance_command in ["bash", "b"]:
-            exec_instance_bash(instance, remote, project, force=args.force)
+            exec_instance_bash(instance, remote, project, force=args.force, timeout=args.timeout, max_attempts=args.attempts)
 
 #############################################
 ###### figo gpu command CLI #################
@@ -2973,13 +3008,14 @@ def create_user_parser(subparsers):
     user_add_parser = user_subparsers.add_parser("add", aliases=["a"], help="Add a new user to the system")
     user_add_parser.add_argument("username", action=NoUnderscoreCheck, help="Username of the new user")
     user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional, "
-                                 "if not provided a new key pair will be generated)")  
+                                "if not provided a new key pair will be generated)")  
     user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
     user_add_parser.add_argument("-w", "--wireguard", action="store_true", help="Generate WireGuard config for the user in .conf file") 
     user_add_parser.add_argument("-p", "--project", help="Project name to associate the user with an existing project")
     user_add_parser.add_argument("-e", "--email", action=NoCommaCheck, help="User's email address")
     user_add_parser.add_argument("-n", "--name", action=NoCommaCheck, help="User's full name")
     user_add_parser.add_argument("-o", "--org", action=NoCommaCheck, help="User's organization")
+    user_add_parser.add_argument("-k", "--keys", nargs="*", help="Path(s) to public SSH key(s) to add for the user (optional)")
 
     # Grant subcommand
     user_grant_parser = user_subparsers.add_parser("grant", help="Grant a user access to a specific project")
@@ -3011,7 +3047,9 @@ def handle_user_command(args, client, parser_dict):
     elif args.user_command in ["list", "l"]:
         list_users(client, full=args.full)
     elif args.user_command == "add":
-        add_user(args.username, args.cert, client, admin=args.admin, wireguard=args.wireguard, project=args.project, email=args.email, name=args.name, org=args.org)
+        # Pass the 'keys' flag to the add_user function
+        add_user(args.username, args.cert, client, admin=args.admin, wireguard=args.wireguard, 
+                 project=args.project, email=args.email, name=args.name, org=args.org, keys=args.keys)
     elif args.user_command == "grant":
         grant_user_access(args.username, args.projectname, client)
     elif args.user_command == "edit":
