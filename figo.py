@@ -102,22 +102,29 @@ def truncate(text, length):
     return text
 
 def print_row(COLS, list_of_values, reset_color=False):
-    """Print the values in a row."""
+    """Print the values in a row, right-trimming only the final output."""
     RESET = "\033[0m"
-    i = 0
     truncated_values = []
-    for value in list_of_values:
-        #check if value terminates with reset color
+    
+    # Iterate over the values, truncating as necessary
+    for i, value in enumerate(list_of_values):
         truncated_value = truncate(value, COLS[i][1])
-        if reset_color and value.endswith(RESET)and not truncated_value.endswith(RESET):
+        
+        # Check for reset color at the end of the value
+        if reset_color and value.endswith(RESET) and not truncated_value.endswith(RESET):
             truncated_value = truncated_value + RESET
-        truncated_values.append(truncated_value) 
-        i += 1
+        
+        truncated_values.append(truncated_value)
 
-    print(gen_format_str(COLS).format(*truncated_values))
+    # Generate the formatted string and apply rstrip to trim the final output
+    formatted_row = gen_format_str(COLS).format(*truncated_values).rstrip()
+    
+    print(formatted_row)
 
 def print_header_line(COLS):
-    print(gen_format_str(COLS).format(*gen_header_list(COLS)))
+    formatted_row = gen_format_str(COLS).format(*gen_header_list(COLS)).rstrip()
+    print(formatted_row)
+
 
 def is_valid_ip(ip):
     """Check if the provided string is a valid IPv4 address."""
@@ -201,13 +208,13 @@ def get_incus_remotes():
     except json.JSONDecodeError:
         raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
 
-def get_projects(remote_node="local"): 
+def get_projects(remote_name="local"): 
     """Fetches and returns the list of projects as a JSON object.
     
     Returns:    A list of projects as JSON objects if successful. Otherwise, returns None.
     """
     try:
-        result = subprocess.run(['incus', 'project', 'list', f"{remote_node}:", '--format', 'json'], capture_output=True, text=True)
+        result = subprocess.run(['incus', 'project', 'list', f"{remote_name}:", '--format', 'json'], capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
         #logger.error(f"Error: {e.stderr.strip()}")
         return None
@@ -293,7 +300,7 @@ def get_ip_addresses(instance):
 
 def iterator_over_projects(remote_node):
     """Iterate over all projects in the specified remote."""
-    projects = get_projects(remote_node=remote_node)
+    projects = get_projects(remote_name=remote_node)
     if projects is None:
         return
 
@@ -380,7 +387,7 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
 
             if project_name is None:
                 # iterate over all projects
-                projects = get_projects(remote_node=my_remote_node)
+                projects = get_projects(remote_name=my_remote_node)
                 if projects is None:
                     set_of_errored_remotes.add(my_remote_node)
                 else: # projects is not None:
@@ -399,7 +406,7 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
         # Get instances from the specified remote node
         if project_name is None:
             # iterate over all projects
-            projects = get_projects(remote_node=remote_node)
+            projects = get_projects(remote_name=remote_node)
             if projects is None:
                 set_of_errored_remotes.add(remote_node)
             else:  # projects is not None:
@@ -846,7 +853,7 @@ def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote):
     return ip_address_with_prefix, gw_address
 
 
-def create_instance(instance_name, image, remote, project, instance_type, 
+def create_instance(instance_name, image, remote_name, project, instance_type, 
                     ip_address_and_prefix_len=None, gw_address=None, nic_device_name=None,
                     instance_size=None):
     """Create a new instance from an image on the specified remote and project, with specified type and size.
@@ -868,7 +875,7 @@ def create_instance(instance_name, image, remote, project, instance_type,
     True if the instance was created successfully, False otherwise.
     """
     try:
-        remote_client = get_remote_client(remote, project_name=project)  # Function to retrieve the remote client
+        remote_client = get_remote_client(remote_name, project_name=project)  # Function to retrieve the remote client
         if not remote_client:
             return False
 
@@ -879,18 +886,18 @@ def create_instance(instance_name, image, remote, project, instance_type,
         # Check if the project exists
         try:
             remote_client.projects.get(project)
-            logger.info(f"Project '{project}' exists on remote '{remote}'.")
+            logger.info(f"Project '{project}' exists on remote '{remote_name}'.")
         except pylxd.exceptions.NotFound:
-            logger.info(f"Project '{project}' does not exist on remote '{remote}'. Creating project.")
-            if not create_project(remote_client, project):
-                logger.error(f"Failed to create project '{project}' on remote '{remote}'.")
+            logger.info(f"Project '{project}' does not exist on remote '{remote_name}'. Creating project.")
+            if not create_project(remote_name, project):
+                logger.error(f"Failed to create project '{project}' on remote '{remote_name}'.")
                 return False
 
         # Check if the instance already exists
         try:
             existing_instance = remote_client.instances.get(instance_name)
             if existing_instance:
-                logger.error(f"Instance '{instance_name}' already exists in project '{project}' on remote '{remote}'.")
+                logger.error(f"Instance '{instance_name}' already exists in project '{project}' on remote '{remote_name}'.")
                 return False
         except pylxd.exceptions.LXDAPIException:
             # Instance does not exist, so proceed with creation
@@ -899,7 +906,7 @@ def create_instance(instance_name, image, remote, project, instance_type,
         # Split the image name to get the server address
         image_server, alias = image.split(':')
 
-        logger.info(f"Creating instance '{instance_name}' of type '{instance_type}' on project '{project}' and remote '{remote}'.")
+        logger.info(f"Creating instance '{instance_name}' of type '{instance_type}' on project '{project}' and remote '{remote_name}'.")
         logger.info(f"Using image '{alias}' from server '{image_server}'.")
 
         # Get the server address from the image name
@@ -913,7 +920,7 @@ def create_instance(instance_name, image, remote, project, instance_type,
         else:
             device_name = nic_device_name # Use the specified NIC device name
 
-        ip_address_and_prefix_len, gw_address = get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote)  # Function to retrieve the IP address and gateway
+        ip_address_and_prefix_len, gw_address = get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote_name)  # Function to retrieve the IP address and gateway
         logger.info(f"Assigned IP address: {ip_address_and_prefix_len}, Gateway: {gw_address}")
         # Create the instance configuration
         config = {
@@ -1566,6 +1573,17 @@ def get_next_wg_client_ip_address():
     return str(next_ip)
 
 def generate_wireguard_config(username, ip_address=None):
+    """
+    Generate WireGuard configuration for a user, saving both the private key in the config file
+    and the public key in a separate .wgpub file.
+
+    Args:
+    - username (str): Username for which to generate the WireGuard configuration.
+    - ip_address (str, optional): IP address to assign to the user. If not provided, a new one is generated.
+
+    Returns:
+    None
+    """
     # If no IP address is provided, generate a new one
     if not ip_address:
         ip_address = get_next_wg_client_ip_address()
@@ -1580,20 +1598,29 @@ PrivateKey = {private_key}
 Address = {ip_address}/24
 
 [Peer]
-PublicKey = {PublicKey}
+PublicKey = {public_key}
 AllowedIPs = {AllowedIPs}
 Endpoint = {Endpoint}
 """
-    
+
     directory = os.path.expanduser(USER_DIR)
 
-    # Writes the content to the username.conf file in the directory folder
+    # Ensure the directory exists
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+    # Write the WireGuard configuration to the .conf file
     config_filename = os.path.join(directory, f"{username}.conf")
-    
     with open(config_filename, 'w') as config_file:
         config_file.write(config_content)
-    
+
+    # Write the public key to a separate .wgpub file
+    public_key_filename = os.path.join(directory, f"{username}.wgpub")
+    with open(public_key_filename, 'w') as pubkey_file:
+        pubkey_file.write(public_key+'\n')
+
     logger.info(f"Generated WireGuard configuration: {config_filename}, IP address: {ip_address}")
+    logger.info(f"Saved public key: {public_key_filename}")
 
 def add_friendly_name(pfx_file, friendly_name, password=None):
     """Add a friendlyName attribute to the existing PFX file, overwriting the original.
@@ -1750,10 +1777,10 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
         logger.error(f"An error occurred while generating the key pair: {e}")
         return False
 
-def create_project(client, project_name):
+def create_project(remote_name, project_name):
     """Create a project with the specified name and disable separate profiles.
 
-    client: the incus client object, it can be local or remote.
+    client_name: the name of the node (remote or local) on which the project will be created.
 
     Returns:
     - True if the project was created successfully, False otherwise.
@@ -1769,9 +1796,10 @@ def create_project(client, project_name):
                                               # profiles from the default project will be inherited
             }
         }
+        client_object = get_remote_client(remote_name, project_name=project_name)
 
         # Creating the project using the correct format
-        client.api.projects.post(json=project_data)
+        client_object.api.projects.post(json=project_data)
         logger.info(f"Project '{project_name}' created successfully with features.profiles set to false.")
         return True
 
@@ -1951,12 +1979,13 @@ def delete_project(remote_node, project_name):
     Delete a project on a specific remote node (can also be local:)
 
     Parameters:
-    - remote_client: pylxd.Client instance connected to the remote node (can also be local:)
     - remote_node: Name of the remote node where the project is located
     - project_name: Name of the project to delete
 
     Returns: True if the project was deleted successfully, False otherwise.
     """
+    logger.info(f"Deleting project '{project_name}' on remote '{remote_node}'")
+    
     remote_client = get_remote_client(remote_node, project_name=project_name)
     if not remote_client:
         return False
@@ -2006,7 +2035,51 @@ def generate_ssh_key_pair(user_name, private_key_file, public_key_file):
         return False
 
 
-def add_user(user_name, cert_file, client, admin=False, wireguard=False, project=None, email=None, name=None, org=None, keys=False):
+def generate_ssh_key_pair(username, private_key_file, public_key_file):
+    """
+    Generate an Ed25519 SSH key pair for the user.
+
+    Args:
+    - username (str): Username for whom the keys are being generated.
+    - private_key_file (str): Full path to the private key file.
+    - public_key_file (str): Full path to the public key file.
+
+    Returns:
+    True if the key pair was generated successfully, False otherwise.
+    """
+    try:
+        # Generate the private key using ssh-keygen
+        subprocess.run(
+            ["ssh-keygen", "-t", "ed25519", "-f", private_key_file, "-N", ""],
+            check=True,
+        )
+
+        # Extract the public key
+        subprocess.run(
+            ["ssh-keygen", "-y", "-f", private_key_file],
+            stdout=open(public_key_file, "w"),
+            check=True,
+        )
+        logger.info(f"Generated SSH Ed25519 key pair for user '{username}'")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to generate SSH key pair for user '{username}': {e}")
+        return False
+
+
+def add_user(
+    user_name,
+    cert_file,
+    client,
+    remote_name=None,
+    admin=False,
+    wireguard=False,
+    project=None,
+    email=None,
+    name=None,
+    org=None,
+    keys=False,
+):
     """
     Add a user to Incus with a certificate and optionally generate an additional SSH key pair.
 
@@ -2014,6 +2087,7 @@ def add_user(user_name, cert_file, client, admin=False, wireguard=False, project
     - user_name (str): The username associated with the certificate.
     - cert_file (str): The certificate file (in .crt format) or None if generating a new key pair.
     - client (object): Client instance for interacting with Incus.
+    - remote_name (str, optional): Name of the remote node where the user is added.
     - admin (bool, optional): Specifies if the user has admin privileges.
     - wireguard (bool, optional): Specifies if WireGuard config for the user has to be generated.
     - project (str, optional): Name of the project to restrict the certificate to.
@@ -2041,33 +2115,36 @@ def add_user(user_name, cert_file, client, admin=False, wireguard=False, project
         # Retrieve the list of remote servers and check project existence on each
         remotes = get_incus_remotes()
         for remote_node in remotes:
-            # Skipping remote node with protocol simplestreams
             if remotes[remote_node]["Protocol"] == "simplestreams":
                 continue
 
-            projects = get_projects(remote_node=remote_node)
+            projects = get_projects(remote_name=remote_node)
             if projects is None:
                 set_of_errored_remotes.add(remote_node)
                 continue
 
             else:  # projects is not None:
-                if project_name in [myproject['name'] for myproject in projects]:
-                    logger.error(f"Error: Project '{project_name}' already exists on remote '{remote_node}'.")
+                if project_name in [myproject["name"] for myproject in projects]:
+                    logger.error(
+                        f"Error: Project '{project_name}' already exists on remote '{remote_node}'."
+                    )
                     return False
     else:
         # Check if the provided project exists on the local server
-        projects = get_projects(remote_node="local")
+        projects = get_projects(remote_name="local")
         if projects is None:
             logger.error(f"Error: Failed to retrieve projects from the local server.")
             return False
-        
+
         if projects is not None:  # Check again after retrieving projects
-            if project not in [myproject['name'] for myproject in projects]:
+            if project not in [myproject["name"] for myproject in projects]:
                 logger.error(f"Error: Project '{project}' not found on the local server.")
                 return False
-    
+
     if set_of_errored_remotes:
-        logger.warning(f"Failed to retrieve projects from the following remote nodes: {', '.join(set_of_errored_remotes)}")
+        logger.warning(
+            f"Failed to retrieve projects from the following remote nodes: {', '.join(set_of_errored_remotes)}"
+        )
 
     directory = os.path.expanduser(USER_DIR)
     # Ensure the directory exists
@@ -2077,9 +2154,6 @@ def add_user(user_name, cert_file, client, admin=False, wireguard=False, project
     # Determine whether to use the provided certificate or generate a new key pair
     if cert_file:
         # If a certificate file is provided, use it
-        # the certificate file is in the folder USER_DIR
-        # the certificate file should be named as user_name.crt
-        # get the certificate file path
         crt_file = os.path.join(directory, cert_file)
         if not os.path.exists(crt_file):
             logger.error(f"Error: Certificate file '{crt_file}' not found.")
@@ -2092,34 +2166,41 @@ def add_user(user_name, cert_file, client, admin=False, wireguard=False, project
         pfx_file = os.path.join(directory, f"{user_name}.pfx")
         key_file = os.path.join(directory, f"{user_name}.key")
         if not generate_key_pair(user_name, crt_file, key_file, pfx_file):
-            logger.error(f"Failed to generate key pair and certificate for user: {user_name}") 
+            logger.error(f"Failed to generate key pair and certificate for user: {user_name}")
             return False
         logger.info(f"Generated certificate and key pair for user: {user_name}")
 
     # Optionally generate additional SSH key pair if `keys` flag is set
     if keys:
         # Generate Ed25519 key pair for SSH login
-        ssh_key_file = os.path.join(directory, f"{user_name}_ssh_ed25519.key")
-        ssh_pub_key_file = os.path.join(directory, f"{user_name}_ssh_ed25519.pub")
+        ssh_key_file = os.path.join(directory, f"{user_name}.key_ssh_ed25519")
+        ssh_pub_key_file = os.path.join(directory, f"{user_name}.pub_ssh_ed25519")
         if not generate_ssh_key_pair(user_name, ssh_key_file, ssh_pub_key_file):
             logger.error(f"Failed to generate SSH key pair for user: {user_name}")
             return False
-        logger.info(f"Generated SSH Ed25519 key pair for user '{user_name}': {ssh_key_file} (private), {ssh_pub_key_file} (public)")
+        logger.info(
+            f"Generated SSH Ed25519 key pair for user '{user_name}': {ssh_key_file} (private), {ssh_pub_key_file} (public)"
+        )
 
     # Create a project for the user in the main server (local)
     project_created = False
     if not admin and project == None:
-        project_created = create_project(client, project_name)
+        if remote_name == None:
+            logger.error(f"Error: Client name not provided.")
+            return False
+        project_created = create_project(remote_name, project_name)
 
     if not project_created:
         logger.error(f"Error: Failed to create project '{project_name}', no certificate added.")
         return False
 
     # Add the user certificate to Incus
-    certificate_added = add_certificate_to_incus(client, user_name, crt_file, project_name, admin=admin, email=email, name=name, org=org)
+    certificate_added = add_certificate_to_incus(
+        client, user_name, crt_file, project_name, admin=admin, email=email, name=name, org=org
+    )
 
     if not admin and project == None and not certificate_added:
-        delete_project(client, 'local', project_name)
+        delete_project("local", project_name)
         return False
 
     if wireguard:
@@ -2330,7 +2411,7 @@ def delete_user(user_name, client, purge=False, removefiles=False):
             continue
 
         # Check if the project exists on the remote node
-        projects = get_projects(remote_node=remote_node)
+        projects = get_projects(remote_name=remote_node)
         if projects is None:
             set_of_errored_remotes.add(remote_node)
             continue
@@ -2503,48 +2584,42 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
 ###### figo project command functions #######
 #############################################
 
-def list_projects(remote, project):
+def list_projects(remote_name, project):
     """List projects on the specified remote and project scope."""
 
     COLS = [('PROJECT',20), ('REMOTE',25)]
     print_header_line(COLS)
 
-    if remote is None:
+    if remote_name is None:
         # List all projects on all remotes
         remotes = get_incus_remotes()
-        for remote_name in remotes:
+        for my_remote_name in remotes:
             # Skip remote nodes with protocol simplestreams
-            if remotes[remote_name]["Protocol"] == "simplestreams":
+            if remotes[my_remote_name]["Protocol"] == "simplestreams":
                 continue
-            projects = get_projects(remote_name)
+            projects = get_projects(my_remote_name)
             if projects is not None:
                 for my_project in projects:
                     if project:
                         if project not in my_project['name']:
                             continue
-                    print_row(COLS, [my_project['name'], remote_name])
+                    print_row(COLS, [my_project['name'], my_remote_name])
 
             else:
                 print("  Error: Failed to retrieve projects.")
     else:
         # List projects on the specified remote
-        projects = get_projects(remote)
+        projects = get_projects(remote_name)
         if projects is not None:
             for my_project in projects:
                 if project:
                     if project not in my_project['name']:
                         continue
-                print_row(COLS, [my_project['name'], remote])
+                print_row(COLS, [my_project['name'], remote_name])
         else:
-            print(f"Error: Failed to retrieve projects on remote '{remote}'")
+            print(f"Error: Failed to retrieve projects on remote '{remote_name}'")
 
-def create_project(remote, project):
-    """Create a new project on the specified remote."""
-    print(f"Creating project '{project}' on remote '{remote}'")
-
-def delete_project(remote, project):
-    """Delete the specified project on the remote."""
-    print(f"Deleting project '{project}' on remote '{remote}'")
+    
 
 #############################################
 ######### Command Line Interface (CLI) ######
@@ -3015,7 +3090,7 @@ def create_user_parser(subparsers):
     user_add_parser.add_argument("-e", "--email", action=NoCommaCheck, help="User's email address")
     user_add_parser.add_argument("-n", "--name", action=NoCommaCheck, help="User's full name")
     user_add_parser.add_argument("-o", "--org", action=NoCommaCheck, help="User's organization")
-    user_add_parser.add_argument("-k", "--keys", nargs="*", help="Path(s) to public SSH key(s) to add for the user (optional)")
+    user_add_parser.add_argument("-k", "--keys", action="store_true", help="Generate a key pair for SSH access to instances")
 
     # Grant subcommand
     user_grant_parser = user_subparsers.add_parser("grant", help="Grant a user access to a specific project")
@@ -3041,14 +3116,14 @@ def create_user_parser(subparsers):
 
     return user_parser
 
-def handle_user_command(args, client, parser_dict):
+def handle_user_command(args, client, parser_dict, client_name=None):
     if not args.user_command:
         parser_dict['user_parser'].print_help()
     elif args.user_command in ["list", "l"]:
         list_users(client, full=args.full)
     elif args.user_command == "add":
         # Pass the 'keys' flag to the add_user function
-        add_user(args.username, args.cert, client, admin=args.admin, wireguard=args.wireguard, 
+        add_user(args.username, args.cert, client, remote_name=client_name, admin=args.admin, wireguard=args.wireguard, 
                  project=args.project, email=args.email, name=args.name, org=args.org, keys=args.keys)
     elif args.user_command == "grant":
         grant_user_access(args.username, args.projectname, client)
@@ -3199,33 +3274,33 @@ def handle_project_command(args, parser_dict):
         parser_dict['project_parser'].print_help()
 
     elif args.project_command in ["list", "l"]:
-        remote, project = parse_project_scope(args.scope, command='list')
+        remote_name, project = parse_project_scope(args.scope, command='list')
         # Override remote and project based on additional arguments
         try :
-            remote, project = adjust_project_scope(args, remote, project)
+            remote_name, project = adjust_project_scope(args, remote_name, project)
         except ValueError:
             return
 
-        list_projects(remote, project)
+        list_projects(remote_name, project)
 
     elif args.project_command in ["create", "c"]:
-        remote, project = parse_project_scope(args.scope, command='create')
+        remote_name, project = parse_project_scope(args.scope, command='create')
 
         try :
-            remote, project = adjust_project_scope(args, remote, project)
+            remote_name, project = adjust_project_scope(args, remote_name, project)
         except ValueError:
             return
 
-        create_project(remote, project)
+        create_project(remote_name, project)
 
     elif args.project_command in ["delete", "del", "d"]:
-        remote, project = parse_project_scope(args.project_name, command='delete')
+        remote_name, project = parse_project_scope(args.project_name, command='delete')
         try :
-            remote, project = adjust_project_scope(args, remote, project)
+            remote_name, project = adjust_project_scope(args, remote_name, project)
         except ValueError:
             return
         
-        delete_project(remote, project)
+        delete_project(remote_name, project)
 
 #############################################
 ###### figo main functions
@@ -3268,7 +3343,7 @@ def handle_command(args, parser, parser_dict):
         handle_profile_command(args, client, parser_dict)
     elif args.command in ["user", "us", "u"]:
         client = pylxd.Client()
-        handle_user_command(args, client, parser_dict)
+        handle_user_command(args, client, parser_dict, client_name="local")
     elif args.command in ["remote", "re", "r"]:
         handle_remote_command(args, parser_dict)
     elif args.command in ["project"]:
