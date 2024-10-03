@@ -20,7 +20,18 @@ import cryptography.x509.oid
 import datetime
 from urllib.parse import urlparse
 import time
+import paramiko
 
+# Configuration for the WireGuard VPN server
+# The following configuration is used to set up a WireGuard VPN server on a MikroTik router.
+SSH_WG_USER_NAME = "admin"  # Default SSH username
+SSH_WG_HOST = "160.80.105.2"  # Default MikroTik IP or host
+#SSH_WG_HOST = "mikrotik.netgroup.uniroma2.it"  # Default MikroTik IP or host
+SSH_WG_PORT = 22  # Default SSH port
+WG_INTERFACE = "wireguard2"  # Default WireGuard interface
+WG_VPN_KEEPALIVE = "20s"  # Default persistent keepalive interval
+
+# Configuration of timeouts and attempts for the bash connection at VM startup.
 BASH_CONNECT_TIMEOUT = 30 # seconds (total time to wait for a bash connection)
 BASH_CONNECT_ATTEMPTS = 10 # number of attempts to connect to bash, interval is BASH_CONNECT_TIMEOUT/BASH_CONNECT_ATTEMPTS
 
@@ -1582,18 +1593,20 @@ def generate_wireguard_config(username, ip_address=None):
     - ip_address (str, optional): IP address to assign to the user. If not provided, a new one is generated.
 
     Returns:
-    None
+    - Tuple containing the public key and IP address assigned to the user if successful, or (None, None) otherwise.
+
     """
-    # If no IP address is provided, generate a new one
-    if not ip_address:
-        ip_address = get_next_wg_client_ip_address()
+    try:
+        # If no IP address is provided, generate a new one
+        if not ip_address:
+            ip_address = get_next_wg_client_ip_address()
 
-    # Generate the private and public keys using wg
-    private_key = subprocess.check_output(f"wg genkey | tee {username}.key", shell=True).decode('utf-8').strip()
-    public_key = subprocess.check_output(f"wg pubkey < {username}.key", shell=True).decode('utf-8').strip()
+        # Generate the private and public keys using wg
+        private_key = subprocess.check_output(f"wg genkey | tee {username}.key", shell=True).decode('utf-8').strip()
+        public_key = subprocess.check_output(f"wg pubkey < {username}.key", shell=True).decode('utf-8').strip()
 
-    # WireGuard configuration template
-    config_content = f"""[Interface]
+        # WireGuard configuration template
+        config_content = f"""[Interface]
 PrivateKey = {private_key}
 Address = {ip_address}/24
 
@@ -1603,24 +1616,32 @@ AllowedIPs = {AllowedIPs}
 Endpoint = {Endpoint}
 """
 
-    directory = os.path.expanduser(USER_DIR)
+        directory = os.path.expanduser(USER_DIR)
 
-    # Ensure the directory exists
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+        # Ensure the directory exists
+        if not os.path.exists(directory):
+            os.makedirs(directory)
 
-    # Write the WireGuard configuration to the .conf file
-    config_filename = os.path.join(directory, f"{username}.conf")
-    with open(config_filename, 'w') as config_file:
-        config_file.write(config_content)
+        # Write the WireGuard configuration to the .conf file
+        config_filename = os.path.join(directory, f"{username}.conf")
+        with open(config_filename, 'w') as config_file:
+            config_file.write(config_content)
 
-    # Write the public key to a separate .wgpub file
-    public_key_filename = os.path.join(directory, f"{username}.wgpub")
-    with open(public_key_filename, 'w') as pubkey_file:
-        pubkey_file.write(public_key+'\n')
+        # Write the public key to a separate .wgpub file
+        public_key_filename = os.path.join(directory, f"{username}.wgpub")
+        with open(public_key_filename, 'w') as pubkey_file:
+            pubkey_file.write(public_key+'\n')
 
-    logger.info(f"Generated WireGuard configuration: {config_filename}, IP address: {ip_address}")
-    logger.info(f"Saved public key: {public_key_filename}")
+        logger.info(f"Generated WireGuard configuration: {config_filename}, IP address: {ip_address}")
+        logger.info(f"Saved public key: {public_key_filename}")
+
+        return public_key, ip_address
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to generate WireGuard configuration: {e}")
+        return None, None
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while generating WireGuard configuration: {e}")
+        return None, None
 
 def add_friendly_name(pfx_file, friendly_name, password=None):
     """Add a friendlyName attribute to the existing PFX file, overwriting the original.
@@ -2066,6 +2087,71 @@ def generate_ssh_key_pair(username, private_key_file, public_key_file):
         logger.error(f"Failed to generate SSH key pair for user '{username}': {e}")
         return False
 
+def add_wireguard_vpn_user_on_mikrotik(public_key, ip_address, vpnuser, username=SSH_WG_USER_NAME, 
+                                 host=SSH_WG_HOST, port=SSH_WG_PORT, interface=WG_INTERFACE, 
+                                 keepalive=WG_VPN_KEEPALIVE):
+    """
+    Configures a MikroTik switch with a new WireGuard VPN user.
+
+    Args:
+    - public_key (str): The WireGuard public key of the new VPN user.
+    - ip_address (str): The allowed IP address (without prefix) for the VPN user
+    - vpnuser (str): The VPN username, added as a comment for identification.
+    - username (str, optional): The SSH username to connect to the MikroTik switch. Default is 'admin'.
+    - host (str, optional): The IP address or hostname of the MikroTik switch. Default is '192.168.88.1'.
+    - port (int, optional): The SSH port for the MikroTik switch. Default is 22.
+    - interface (str, optional): The WireGuard interface on the MikroTik switch. Default is 'wireguard2'.
+    - keepalive (str, optional): The persistent keepalive interval. Default is '20s'.
+
+    Returns:
+    - bool: True if the configuration is successful, False otherwise.
+    """
+
+    try:
+        # Set up the SSH client and connect to the MikroTik switch
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Automatically add the host key
+
+        logger.info(f"Connecting to MikroTik switch at {host}...")
+        ssh_client.connect(hostname=host, username=username, port=port)
+
+        # Build the WireGuard configuration command
+        wireguard_command = (
+            f'/interface wireguard peers add interface={interface} '
+            f'public-key="{public_key}" allowed-address={ip_address}/32 '
+            f'persistent-keepalive={keepalive} comment="{vpnuser}"'
+        )
+
+        logger.info(f"Executing command on MikroTik: {wireguard_command}")
+
+        # Execute the command
+        stdin, stdout, stderr = ssh_client.exec_command(wireguard_command)
+
+        # Read output and error from the command execution
+        output = stdout.read().decode().strip()
+        error = stderr.read().decode().strip()
+
+        # Check for errors
+        if error:
+            logger.error(f"Error while configuring WireGuard on MikroTik: {error}")
+            return False
+
+        # Log successful configuration
+        logger.info(f"WireGuard VPN user '{vpnuser}' added successfully: {output}")
+        return True
+
+    except paramiko.SSHException as e:
+        logger.error(f"SSH connection error: {e}")
+        return False
+
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+        return False
+
+    finally:
+        # Close the SSH connection
+        ssh_client.close()
+
 
 def add_user(
     user_name,
@@ -2074,6 +2160,7 @@ def add_user(
     remote_name=None,
     admin=False,
     wireguard=False,
+    set_vpn=False,
     project=None,
     email=None,
     name=None,
@@ -2090,6 +2177,8 @@ def add_user(
     - remote_name (str, optional): Name of the remote node where the user is added.
     - admin (bool, optional): Specifies if the user has admin privileges.
     - wireguard (bool, optional): Specifies if WireGuard config for the user has to be generated.
+    - set_vpn (bool, optional): Specifies if the user has to be added to the wireguard access node 
+      (e.g. the MikroTik switch).
     - project (str, optional): Name of the project to restrict the certificate to.
       if not provided, a project will be created with the name 'figo-<user_name>'.
     - email (str, optional): Email address of the user.
@@ -2154,6 +2243,9 @@ def add_user(
     # Determine whether to use the provided certificate or generate a new key pair
     if cert_file:
         # If a certificate file is provided, use it
+        # the certificate file is in the folder USER_DIR
+        # the certificate file should be named as user_name.crt
+        # get the certificate file path
         crt_file = os.path.join(directory, cert_file)
         if not os.path.exists(crt_file):
             logger.error(f"Error: Certificate file '{crt_file}' not found.")
@@ -2204,8 +2296,22 @@ def add_user(
         return False
 
     if wireguard:
-        generate_wireguard_config(user_name)
-
+        wg_public_key, wg_ip_address = generate_wireguard_config(user_name)
+        if not wg_public_key:
+            logger.error("Failed to generate WireGuard configuration.")
+            return False
+    
+    if set_vpn:
+        if not wireguard:
+            logger.error("Error: Cannot set VPN without generating WireGuard configuration.")
+            return False
+        
+        if not add_wireguard_vpn_user_on_mikrotik(
+            wg_public_key, wg_ip_address, user_name
+        ):
+            logger.error(f"Failed to add user to WireGuard VPN on MikroTik.")
+            return False
+    
     return True
 
 def grant_user_access(username, projectname, client):
@@ -3086,6 +3192,7 @@ def create_user_parser(subparsers):
                                 "if not provided a new key pair will be generated)")  
     user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
     user_add_parser.add_argument("-w", "--wireguard", action="store_true", help="Generate WireGuard config for the user in .conf file") 
+    user_add_parser.add_argument("-s", "--set_vpn", action="store_true", help="Set the user's VPN profile into the WireGuard access node") 
     user_add_parser.add_argument("-p", "--project", help="Project name to associate the user with an existing project")
     user_add_parser.add_argument("-e", "--email", action=NoCommaCheck, help="User's email address")
     user_add_parser.add_argument("-n", "--name", action=NoCommaCheck, help="User's full name")
@@ -3124,7 +3231,8 @@ def handle_user_command(args, client, parser_dict, client_name=None):
     elif args.user_command == "add":
         # Pass the 'keys' flag to the add_user function
         add_user(args.username, args.cert, client, remote_name=client_name, admin=args.admin, wireguard=args.wireguard, 
-                 project=args.project, email=args.email, name=args.name, org=args.org, keys=args.keys)
+                set_vpn=args.set_vpn, project=args.project, email=args.email, name=args.name,
+                org=args.org, keys=args.keys)
     elif args.user_command == "grant":
         grant_user_access(args.username, args.projectname, client)
     elif args.user_command == "edit":
