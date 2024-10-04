@@ -21,6 +21,7 @@ import datetime
 from urllib.parse import urlparse
 import time
 import paramiko
+import glob
 
 # Configuration for the WireGuard VPN server
 # The following configuration is used to set up a WireGuard VPN server on a MikroTik router.
@@ -2137,7 +2138,11 @@ def add_wireguard_vpn_user_on_mikrotik(public_key, ip_address, vpnuser, username
             return False
 
         # Log successful configuration
-        logger.info(f"WireGuard VPN user '{vpnuser}' added successfully: {output}")
+        if output == "":
+            logger.info(f"WireGuard VPN user '{vpnuser}' added successfully.")
+        else:
+            logger.info(f"WireGuard VPN user '{vpnuser}' added successfully, command output: {output}")
+        
         return True
 
     except paramiko.SSHException as e:
@@ -2499,12 +2504,13 @@ def delete_user(user_name, client, purge=False, removefiles=False):
     # Remove the user's files if the flag is set
     if removefiles:
         directory = os.path.expanduser(USER_DIR)
-        user_files = [f"{user_name}.crt", f"{user_name}.pfx", f"{user_name}.pub"]
-        for file in user_files:
-            file_path = os.path.join(directory, file)
+        # Use glob to match all files that start with user_name followed by any extension
+        user_files = glob.glob(os.path.join(directory, f"{user_name}.*"))
+        
+        for file_path in user_files:
             if os.path.exists(file_path):
                 os.remove(file_path)
-                logger.info(f"File '{file}' has been removed.")
+                logger.info(f"File '{os.path.basename(file_path)}' has been removed.")
 
     # Retrieve the list of remote servers
     remotes = get_incus_remotes()
