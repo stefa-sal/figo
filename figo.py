@@ -1637,7 +1637,6 @@ def generate_wireguard_config(username, ip_address=None):
 
     Returns:
     - Tuple containing the public key and IP address assigned to the user if successful, or (None, None) otherwise.
-
     """
     try:
         # If no IP address is provided, generate a new one
@@ -1645,8 +1644,9 @@ def generate_wireguard_config(username, ip_address=None):
             ip_address = get_next_wg_client_ip_address()
 
         # Generate the private and public keys using wg
-        private_key = subprocess.check_output(f"wg genkey | tee {username}.key", shell=True).decode('utf-8').strip()
-        public_key = subprocess.check_output(f"wg pubkey < {username}.key", shell=True).decode('utf-8').strip()
+        key_file = f"{username}.tempkey"
+        private_key = subprocess.check_output(f"wg genkey | tee {key_file}", shell=True).decode('utf-8').strip()
+        public_key = subprocess.check_output(f"wg pubkey < {key_file}", shell=True).decode('utf-8').strip()
 
         # WireGuard configuration template
         config_content = f"""[Interface]
@@ -1673,12 +1673,20 @@ Endpoint = {Endpoint}
         # Write the public key to a separate .wgpub file
         public_key_filename = os.path.join(directory, f"{username}.wgpub")
         with open(public_key_filename, 'w') as pubkey_file:
-            pubkey_file.write(public_key+'\n')
+            pubkey_file.write(public_key + '\n')
+
+        # Delete the temporary key file after use
+        try:
+            os.remove(key_file)
+            logger.info(f"Deleted temporary key file: {key_file}")
+        except OSError as e:
+            logger.error(f"Failed to delete temporary key file {key_file}: {e}")
 
         logger.info(f"Generated WireGuard configuration: {config_filename}, IP address: {ip_address}")
         logger.info(f"Saved public key: {public_key_filename}")
 
         return public_key, ip_address
+
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to generate WireGuard configuration: {e}")
         return None, None
@@ -1820,7 +1828,7 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
             logger.error("OpenSSL is not installed or not found in the system's PATH.")
             return False
 
-        # Delete the key file
+        # Delete the key file because it is no longer needed (the PFX file contains the key)
         try:
             subprocess.run(["rm", key_file], check=True, text=True, capture_output=True)
         except subprocess.CalledProcessError as e:
@@ -3448,8 +3456,8 @@ def create_user_parser(subparsers):
     # Delete subcommand
     user_delete_parser = user_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete an existing user from the system")
     user_delete_parser.add_argument("username", help="Username of the user to delete")
-    user_delete_parser.add_argument("-p", "--purge", action="store_true", help="Delete associated projects and user files (if -r) even if the user does not exist")
-    user_delete_parser.add_argument("-r", "--removefiles", action="store_true", help="Remove the associated files of the user from the users folder")
+    user_delete_parser.add_argument("-p", "--purge", action="store_true", help="Delete associated projects and user files (even if the user does not exist)")
+    user_delete_parser.add_argument("-k", "--keepfiles", action="store_true", help="Keep the associated files of the user in the users folder")
 
     # Link parsers back to the main command
     subparsers._name_parser_map["us"] = user_parser
@@ -3472,7 +3480,9 @@ def handle_user_command(args, client, parser_dict, client_name=None):
     elif args.user_command == "edit":
         edit_user(args.username, client, email=args.email, name=args.name, org=args.org)
     elif args.user_command in ["delete", "del", "d"]:
-        delete_user(args.username, client, purge=args.purge, removefiles=args.removefiles)
+        # Reverse logic: delete files by default unless --keepfiles is used
+        removefiles = not args.keepfiles
+        delete_user(args.username, client, purge=args.purge, removefiles=removefiles)
 
 #############################################
 ###### figo remote command CLI ##############
