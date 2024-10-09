@@ -887,24 +887,21 @@ def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote):
 
     return ip_address_with_prefix, gw_address
 
-
 def create_instance(instance_name, image, remote_name, project, instance_type, 
                     ip_address_and_prefix_len=None, gw_address=None, nic_device_name=None,
                     instance_size=None):
-    """Create a new instance from an image on the specified remote and project, with specified type and size.
-
-    The instance will import the "default" profile and a second profile based on the provided instance size.
+    """Create a new instance from a local or remote image with specified configurations.
 
     Args:
     - instance_name: Name of the instance.
-    - image: Image source in the format 'remote:image' or 'image' which defaults to 'images:image'.
-    - remote: Remote server name.
+    - image: Image source. If it starts with 'local:', it uses a local image; otherwise, it defaults to 'remote:image'.
+    - remote_name: Remote server name.
     - project: Project name.
     - instance_type: Type of the instance ('vm' or 'container').
     - ip_address: Static IP address for the instance.
     - gw_address: Gateway address for the instance.
-    - nic_device_name: Optional NIC device name for the instance (defaults to global DEFAULT_VM_NIC or DEFAULT_CNT_NIC).
-    - instance_size: Optional size profile for the instance (defaults to global DEFAULT_INSTANCE_SIZE).
+    - nic_device_name: Optional NIC device name for the instance.
+    - instance_size: Optional size profile for the instance.
 
     Returns:
     True if the instance was created successfully, False otherwise.
@@ -935,39 +932,59 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
                 logger.error(f"Instance '{instance_name}' already exists in project '{project}' on remote '{remote_name}'.")
                 return False
         except pylxd.exceptions.LXDAPIException:
-            # Instance does not exist, so proceed with creation
-            pass
+            pass  # Instance does not exist, proceed with creation
 
-        # Split the image name to get the server address
-        image_server, alias = image.split(':')
+        # Handle image selection based on whether it is local or from a remote
+        if image.startswith('local:'):
+            # Local image (format: local:image)
+            alias = image.split(':')[1]
+            logger.info(f"Creating instance '{instance_name}' from local image '{alias}'.")
 
-        logger.info(f"Creating instance '{instance_name}' of type '{instance_type}' on project '{project}' and remote '{remote_name}'.")
-        logger.info(f"Using image '{alias}' from server '{image_server}'.")
+            # Retrieve the local image by alias
+            try:
+                image = remote_client.images.get_by_alias(alias)
+                logger.info(f"Found local image with alias '{alias}', using fingerprint '{image.fingerprint}'.")
+            except pylxd.exceptions.LXDAPIException:
+                logger.error(f"Local image '{alias}' not found.")
+                return False
 
-        # Get the server address from the image name
-        image_server_address, protocol = get_remote_address(image_server, get_protocol=True)  # Function to retrieve the image server address
-        if protocol != "simplestreams":
-            logger.error(f"Error: Image server '{image_server}' does not use the 'simplestreams' protocol.")
-            return False
+            # Use the fingerprint instead of the alias
+            config_source = {
+                'type': 'image',
+                'fingerprint': image.fingerprint  # Use the fingerprint of the local image
+            }
 
-        if not nic_device_name:
-            device_name = DEFAULT_VM_NIC if instance_type == "vm" else DEFAULT_CNT_NIC
         else:
-            device_name = nic_device_name # Use the specified NIC device name
+            # Remote image (format: remote:image)
+            image_server, alias = image.split(':')
+            logger.info(f"Creating instance '{instance_name}' from remote image '{alias}' on server '{image_server}'.")
 
-        ip_address_and_prefix_len, gw_address = get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote_name)  # Function to retrieve the IP address and gateway
-        logger.info(f"Assigned IP address: {ip_address_and_prefix_len}, Gateway: {gw_address}")
-        # Create the instance configuration
-        config = {
-            'name': instance_name,
-            'source': {
+            # Get the image server address
+            image_server_address, protocol = get_remote_address(image_server, get_protocol=True)
+            if protocol != "simplestreams":
+                logger.error(f"Error: Image server '{image_server}' does not use the 'simplestreams' protocol.")
+                return False
+
+            config_source = {
                 'type': 'image',
                 "mode": "pull",
                 "server": image_server_address,
                 "protocol": "simplestreams",
                 'alias': alias
-            },
-            'profiles': ['default', instance_size],  # Add the default and specified instance size profiles
+            }
+
+        if not nic_device_name:
+            device_name = DEFAULT_VM_NIC if instance_type == "vm" else DEFAULT_CNT_NIC
+        else:
+            device_name = nic_device_name  # Use the specified NIC device name
+
+        ip_address_and_prefix_len, gw_address = get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote_name)
+
+        # Create the instance configuration
+        config = {
+            'name': instance_name,
+            'source': config_source,
+            'profiles': ['default', instance_size],  # Add default and instance size profiles
             'config': {
                 'user.network-config': f"""
                 version: 2
@@ -1438,7 +1455,8 @@ def copy_profile(source_remote, source_project, source_profile, target_remote, t
 
         # Check the project's config for 'features.profiles' in the target project
         if not check_profiles_feature(target_remote, target_project, remote_client=target_client):
-            logger.error(f"Cannot copy profile '{source_profile}' to '{target_remote}:{target_project}' because the target project inherits profiles from the default project.")
+            logger.error(f"Cannot copy profile '{source_profile}' to '{target_remote}:{target_project}'"
+                         " because the target project inherits profiles from the default project.")
             return False
 
         # Verify if the source profile exists
@@ -1494,7 +1512,8 @@ def delete_profile(remote, project, profile_name):
 
         # Check the project's config for 'features.profiles'
         if not check_profiles_feature(remote, project, remote_client=client):
-            logger.error(f"Cannot delete profile '{profile_name}' from '{remote}:{project}' because the project inherits profiles from the default project.")
+            logger.error(f"Cannot delete profile '{profile_name}' from '{remote}:{project}'"
+                         " because the project inherits profiles from the default project.")
             return False
 
         # Proceed with profile deletion
@@ -1837,15 +1856,18 @@ def create_project(remote_name, project_name):
             "name": project_name,  # The project's name (string)
             "description": f"Project for user {project_name}",  # Optional description
             "config": {
-                "features.profiles": "false"  # Disable separate profiles for this project; 
-                                              # profiles from the default project will be inherited
+                "features.profiles": "false",  # Disable separate profiles for this project; 
+                                               # profiles from the default project will be inherited
+                "features.images": "false"     # Disable separate images for this project
+                                               # images from the default project will be inherited
             }
         }
         client_object = get_remote_client(remote_name, project_name=project_name)
 
         # Creating the project using the correct format
         client_object.api.projects.post(json=project_data)
-        logger.info(f"Project '{project_name}' created successfully with features.profiles set to false.")
+        logger.info(f"Project '{project_name}'"
+                    " created successfully with features.profiles and .images set to false.")
         return True
 
     except pylxd.exceptions.LXDAPIException as e:
