@@ -25,12 +25,27 @@ import glob
 
 # Configuration for the WireGuard VPN server
 # The following configuration is used to set up a WireGuard VPN server on a MikroTik router.
-SSH_WG_USER_NAME = "admin"  # Default SSH username
-SSH_WG_HOST = "160.80.105.2"  # Default MikroTik IP or host
+SSH_MIKROTIK_USER_NAME = "admin"  # Default SSH username
+SSH_MIKROTIK_HOST = "160.80.105.2"  # Default MikroTik IP or host
 #SSH_WG_HOST = "mikrotik.netgroup.uniroma2.it"  # Default MikroTik IP or host
-SSH_WG_PORT = 22  # Default SSH port
+SSH_MIKROTIK_PORT = 22  # Default SSH port
 WG_INTERFACE = "wireguard2"  # Default WireGuard interface
 WG_VPN_KEEPALIVE = "20s"  # Default persistent keepalive interval
+
+SSH_LINUX_USER_NAME = "ubuntu"  # Default SSH username
+SSH_LINUX_HOST = ""  # Default Linux IP or host
+SSH_LINUX_PORT = 22  # Default SSH port
+
+# Define a global dictionary for target lookups
+ACCESS_ROUTER_TARGETS = {
+    "mikrotik": (SSH_MIKROTIK_HOST, SSH_MIKROTIK_USER_NAME, SSH_MIKROTIK_PORT),
+    "figo-2gpu": ("160.80.223.203", "ubuntu", 22),
+    # Add more targets as needed
+}
+
+VPN_DEVICE_TYPES = ["mikrotik","linux"]  # Extendable list of VPN device types
+DEFAULT_SSH_USER_FOR_VPN_AR = None  # Default SSH username for VPN access routers, default to None if user not provided
+DEFAULT_SSH_PORT_FOR_VPN_AR = None  # Default SSH port for VPN access routers, default to None if port not provided
 
 # Configuration of timeouts and attempts for the bash connection at VM startup.
 BASH_CONNECT_TIMEOUT = 30 # seconds (total time to wait for a bash connection)
@@ -151,6 +166,14 @@ def is_valid_ip(ip):
             except ValueError:
                 return False
     return False
+
+def is_valid_cidr(cidr_str):
+    """Helper function to validate if a string is a valid CIDR (IP address with prefix)."""
+    try:
+        ipaddress.ip_network(cidr_str, strict=False)
+        return True
+    except ValueError:
+        return False
 
 def is_valid_ip_prefix_len(ip_prefix):
     try:
@@ -2088,11 +2111,12 @@ def generate_ssh_key_pair(username, private_key_file, public_key_file):
         logger.error(f"Failed to generate SSH key pair for user '{username}': {e}")
         return False
 
-def add_wireguard_vpn_user_on_mikrotik(public_key, ip_address, vpnuser, username=SSH_WG_USER_NAME, 
-                                 host=SSH_WG_HOST, port=SSH_WG_PORT, interface=WG_INTERFACE, 
+def add_wireguard_vpn_user_on_mikrotik(public_key, ip_address, vpnuser, username=SSH_MIKROTIK_USER_NAME, 
+                                 host=SSH_MIKROTIK_HOST, port=SSH_MIKROTIK_PORT, interface=WG_INTERFACE, 
                                  keepalive=WG_VPN_KEEPALIVE):
     """
     Configures a MikroTik switch with a new WireGuard VPN user.
+    It is optinally executed in the add_user function, if the command line argument -s, --set_vpn is provided.
 
     Args:
     - public_key (str): The WireGuard public key of the new VPN user.
@@ -2156,7 +2180,6 @@ def add_wireguard_vpn_user_on_mikrotik(public_key, ip_address, vpnuser, username
     finally:
         # Close the SSH connection
         ssh_client.close()
-
 
 def add_user(
     user_name,
@@ -2731,7 +2754,190 @@ def list_projects(remote_name, project):
         else:
             print(f"Error: Failed to retrieve projects on remote '{remote_name}'")
 
-    
+#############################################
+###### figo vpn command functions ###########
+############################################# 
+
+def get_host_from_target(target):
+    """
+    Retrieve host, user, and port for a given target from the global TARGETS dictionary.
+
+    Args:
+    - target (str): The target identifier to resolve the SSH connection details.
+
+    Returns:
+    - tuple: (host, user, port) for the resolved target.
+    - Raises ValueError if the target is not found.
+    """
+    if target in ACCESS_ROUTER_TARGETS:
+        return ACCESS_ROUTER_TARGETS[target]
+    else:
+        logger.error(f"Error: Target '{target}' not found in the global dictionary.")
+        raise ValueError("Invalid target")
+
+def add_route_on_mikrotik(dst_address, gateway, username=SSH_MIKROTIK_USER_NAME, 
+                          host=SSH_MIKROTIK_HOST, port=SSH_MIKROTIK_PORT):
+    """
+    Adds a route on a vpn access node (by default the MikroTik switch) to a specific destination address.
+
+    Args:
+    - dst_address (str): The destination address in CIDR format (e.g., '10.202.128.0/24').
+    - gateway (str): The gateway address for the route (e.g., '10.202.9.2').
+    - dev (str): The interface (e.g., 'vlan403') to use for the route.
+    - username (str, optional): The SSH username to connect to the MikroTik switch. Default is 'admin'.
+    - host (str, optional): The IP address or hostname of the MikroTik switch. Default is '192.168.88.1'.
+    - port (int, optional): The SSH port for the MikroTik switch. Default is 22.
+
+    Returns:
+    - bool: True if the route is added successfully, False otherwise.
+    """
+
+    try:
+        # Set up the SSH client and connect to the MikroTik switch
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Automatically add the host key
+
+        logger.info(f"Connecting to MikroTik switch at {host}...")
+        ssh_client.connect(hostname=host, username=username, port=port)
+
+        # Build the route add command
+        route_command = (
+            f'/ip route add dst-address={dst_address} gateway={gateway}'
+        )
+
+        logger.info(f"Executing command on MikroTik: {route_command}")
+
+        # Execute the command
+        stdin, stdout, stderr = ssh_client.exec_command(route_command)
+
+        # Read output and error from the command execution
+        output = stdout.read().decode().strip()
+        error = stderr.read().decode().strip()
+
+        # Check for errors
+        if error:
+            logger.error(f"Error while adding route on MikroTik: {error}")
+            return False
+
+        # Log successful route addition
+        if output == "":
+            logger.info(f"Route to '{dst_address}' via '{gateway}' added successfully.")
+        else:
+            logger.info(f"Route likely not added, command output: {output}")
+        
+        return True
+
+    except paramiko.SSHException as e:
+        logger.error(f"SSH connection error: {e}")
+        return False
+
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+        return False
+
+    finally:
+        # Close the SSH connection
+        ssh_client.close()
+
+def add_route_on_linux(dst_address, gateway, dev, username=SSH_LINUX_USER_NAME, 
+                       host=SSH_LINUX_HOST, port=SSH_LINUX_PORT):
+    """
+    Adds a route on a Linux VPN access node using the ip route command.
+
+    Args:
+    - dst_address (str): The destination address in CIDR format (e.g., '10.202.128.0/24').
+    - gateway (str): The gateway address for the route (e.g., '10.202.9.2').
+    - dev (str): The interface (e.g., 'vlan403') to use for the route.
+    - username (str, optional): The SSH username to connect to the Linux router. Default is 'ubuntu'.
+    - host (str, optional): The IP address or hostname of the Linux router. Default is 'localhost'.
+    - port (int, optional): The SSH port for the Linux router. Default is 22.
+
+    Returns:
+    - bool: True if the route is added successfully, False otherwise.
+    """
+    try:
+        if host == '':
+            logger.error("Error: Hostname or IP address not provided.")
+            return False
+        
+        # Set up the SSH client and connect to the Linux router
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Automatically add the host key
+
+        logger.info(f"Connecting to Linux router at {host}...")
+        ssh_client.connect(hostname=host, username=username, port=port)
+
+        # Build the ip route add command
+        route_command = (
+            f'sudo ip route add {dst_address} via {gateway} dev {dev}'
+        )
+
+        logger.info(f"Executing command on Linux: {route_command}")
+
+        # Execute the command
+        stdin, stdout, stderr = ssh_client.exec_command(route_command)
+
+        # Read output and error from the command execution
+        output = stdout.read().decode().strip()
+        error = stderr.read().decode().strip()
+
+        # Check for errors
+        if error:
+            logger.error(f"Error while adding route on Linux: {error}")
+            return False
+
+        # Log successful route addition
+        if output == "":
+            logger.info(f"Route to '{dst_address}' via '{gateway}' on '{dev}' added successfully.")
+        else:
+            logger.info(f"Route likely not added, command output: {output}")
+
+        return True
+
+    except paramiko.SSHException as e:
+        logger.error(f"SSH connection error: {e}")
+        return False
+
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+        return False
+
+    finally:
+        # Close the SSH connection
+        ssh_client.close()
+
+
+def add_route_on_vpn_access(dst_address, gateway, dev, device_type='mikrotik', username=None, 
+                          host=None, port=None):
+    """
+    Adds a route on a vpn access node (by default the MikroTik switch) to a specific destination address.
+
+    Args:
+    - dst_address (str): The destination address in CIDR format (e.g., '10.202.128.0/24').
+    - gateway (str): The gateway address for the route (e.g., '10.202.9.2').
+    - dev (str): The interface (e.g., 'vlan403') to use for the route.
+    - username (str, optional): The SSH username to connect to the MikroTik switch. Default is 'admin'.
+    - host (str, optional): The IP address or hostname of the MikroTik switch. Default is '192.168.88.1'.
+    - port (int, optional): The SSH port for the MikroTik switch. Default is 22.
+
+    Returns:
+    - bool: True if the route is added successfully, False otherwise.
+    """
+
+    if device_type == 'mikrotik':
+        return add_route_on_mikrotik(dst_address, gateway,  
+                                     username if username else SSH_MIKROTIK_USER_NAME,
+                                     host if host else SSH_MIKROTIK_HOST,
+                                     port if port else SSH_MIKROTIK_PORT)
+    elif device_type == 'linux':
+        return add_route_on_linux(dst_address, gateway, dev,
+                                  username if username else SSH_LINUX_USER_NAME,
+                                  host if host else SSH_LINUX_HOST,
+                                  port if port else SSH_LINUX_PORT)
+    else:
+        logger.error(f"Unsupported device type: {device_type}")
+        return False
+
 
 #############################################
 ######### Command Line Interface (CLI) ######
@@ -3417,6 +3623,90 @@ def handle_project_command(args, parser_dict):
         delete_project(remote_name, project)
 
 #############################################
+###### figo vpn command CLI #################
+#############################################
+
+def create_vpn_parser(subparsers):
+    vpn_parser = subparsers.add_parser("vpn", help="Manage VPN configuration")
+    vpn_subparsers = vpn_parser.add_subparsers(dest="vpn_command")
+
+    # Add route subcommand
+    vpn_add_parser = vpn_subparsers.add_parser("add", help="Add VPN configuration")
+    vpn_add_subparsers = vpn_add_parser.add_subparsers(dest="vpn_add_command")
+
+    # Route subcommand
+    route_parser = vpn_add_subparsers.add_parser("route", help="Add a route to VPN")
+
+    # Positional argument for destination
+    route_parser.add_argument("dst_address", help="Destination address in CIDR format (e.g., 10.202.128.0/24)")
+
+    # Explicit token 'via' followed by the gateway IP
+    route_parser.add_argument("via_token", help="Must be the keyword 'via'", choices=["via"])
+    route_parser.add_argument("gateway", help="Gateway address (e.g., 10.202.9.2) without prefix")
+
+    # Optional argument for device interface (for Linux routers, but not required on MikroTik)
+    route_parser.add_argument("-d", "--dev", help="Device interface (e.g., vlan403). Required for Linux routers.")
+
+    # Explicit token 'type' followed by the VPN type, generalized using global VPN_DEVICE_TYPES
+    route_parser.add_argument("type_token", help="Must be the keyword 'type'", choices=["type"])
+    route_parser.add_argument("type", choices=VPN_DEVICE_TYPES, help="Type of the VPN device (e.g., mikrotik, linux)")
+
+    # Explicit tokens for target or host
+    group = route_parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("target_token", nargs='?', help="Must be the keyword 'target' followed by the target", choices=["target"])
+    group.add_argument("host_token", nargs='?', help="Must be the keyword 'host' followed by the host", choices=["host"])
+
+    # Positional argument for either target or host
+    route_parser.add_argument("target_or_host", help="Target for VPN or Host to connect to")
+
+    # Optional user and port if host is provided
+    route_parser.add_argument("--user", help=f"SSH username (default: {DEFAULT_SSH_USER_FOR_VPN_AR})")
+    route_parser.add_argument("--port", type=int, help=f"SSH port (default: {DEFAULT_SSH_PORT_FOR_VPN_AR})")
+
+    return vpn_parser
+
+def handle_vpn_command(args, parser_dict):
+    if not args.vpn_command:
+        parser_dict['vpn_parser'].print_help()
+    elif args.vpn_command == "add":
+        if args.vpn_add_command == "route":
+            # Validate the `dst_address` parameter (route) for being a valid CIDR address
+            if not is_valid_cidr(args.dst_address):
+                logger.error(f"Error: '{args.dst_address}' is not a valid CIDR address.")
+                return
+
+            # Validate the `gateway` parameter (via) for being a valid IP address without prefix
+            if not is_valid_ip(args.gateway):
+                logger.error(f"Error: '{args.gateway}' is not a valid IP address or contains a prefix.")
+                return
+
+            # Check if the user provided 'target' or 'host'
+            if args.target_token == "target":
+                # It's a target, resolve from target mapping
+                host, user, port = get_host_from_target(args.target_or_host)
+            elif args.host_token == "host":
+                # It's a host, resolve user and port
+                host = args.target_or_host
+                user = args.user if args.user is not None else DEFAULT_SSH_USER_FOR_VPN_AR
+                port = args.port if args.port is not None else DEFAULT_SSH_PORT_FOR_VPN_AR
+            else:
+                logger.error("Error: Either 'target' or 'host' must be provided.")
+                return
+
+            # Add the route using the resolved host, user, port, and device type
+            add_route_on_vpn_access(
+                dst_address=args.dst_address,  # This is validated as a CIDR address
+                gateway=args.gateway,          # This is validated as a plain IP address
+                dev=args.dev,                  # The device can be None if not provided (MikroTik doesn't need it)
+                device_type=args.type,         # Pass the type argument to the generic function
+                username=user,
+                host=host,
+                port=port
+            )
+        else:
+            logger.error("Unknown vpn add command.")
+
+#############################################
 ###### figo main functions
 #############################################
 
@@ -3436,6 +3726,7 @@ def create_parser():
     parser_dict['user_parser'] = create_user_parser(subparsers)
     parser_dict['remote_parser'] = create_remote_parser(subparsers)
     parser_dict['project_parser'] = create_project_parser(subparsers)
+    parser_dict['vpn_parser'] = create_vpn_parser(subparsers)
 
     return parser, parser_dict
 
@@ -3462,6 +3753,8 @@ def handle_command(args, parser, parser_dict):
         handle_remote_command(args, parser_dict)
     elif args.command in ["project"]:
         handle_project_command(args, parser_dict)
+    elif args.command in ["vpn"]:
+        handle_vpn_command(args, parser_dict)
 
 def main():
     parser, parser_dict = create_parser()
