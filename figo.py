@@ -403,9 +403,9 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
     """
     # Determine the header and profile type based on the 'full' flag
     if full:
-        COLS = [('INSTANCE',14), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('PROFILES',75)]
+        COLS = [('INSTANCE',16), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('PROFILES',75)]
     else:
-        COLS = [('INSTANCE',14), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('GPU PROFILES',75)]
+        COLS = [('INSTANCE',16), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('GPU PROFILES',75)]
 
     print_header_line(COLS)
 
