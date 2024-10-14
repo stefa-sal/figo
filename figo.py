@@ -624,14 +624,14 @@ def stop_instance(instance_name, remote, project):
         return False
 
 def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', folder='.users', force=False):
-    """Set a public key in the specified user's authorized_keys file in the specified instance.
+    """Set a public key in the specified instance in the authorized_keys file of the specified user.
     
     Args:
     - instance_name: Name of the instance.
     - remote: Remote server name.
     - project: Project name.
     - key_filename: Filename of the public key on the host.
-    - login: Login name of the user (default: 'ubuntu').
+    - login: Login name of the user (default: 'ubuntu') for which we set the key.
     - folder: Folder path where the key file is located (default: '.users').
     - force: If True, start the instance if it's not running and stop it after setting the key.
 
@@ -2087,55 +2087,30 @@ def delete_project(remote_node, project_name):
     
     return True
 
-def generate_ssh_key_pair(user_name, private_key_file, public_key_file):
-    """
-    Generate an Ed25519 SSH key pair for the user.
-
-    Args:
-    - user_name (str): The name of the user.
-    - private_key_file (str): Path to store the private key.
-    - public_key_file (str): Path to store the public key.
-
-    Returns:
-    True if the SSH key pair is generated successfully, False otherwise.
-    """
-    try:
-        # Generate Ed25519 private key and public key using ssh-keygen
-        subprocess.run(["ssh-keygen", "-t", "ed25519", "-f", private_key_file, "-C", user_name, "-N", ""], check=True)
-
-        logger.info(f"Generated Ed25519 SSH key pair for user '{user_name}':\nPrivate key: {private_key_file}\nPublic key: {public_key_file}")
-        return True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error generating Ed25519 SSH key pair for user '{user_name}': {e}")
-        return False
-
-
-def generate_ssh_key_pair(username, private_key_file, public_key_file):
+def generate_ssh_key_pair(username, private_key_file):
     """
     Generate an Ed25519 SSH key pair for the user.
 
     Args:
     - username (str): Username for whom the keys are being generated.
     - private_key_file (str): Full path to the private key file.
-    - public_key_file (str): Full path to the public key file.
+    
+    The public key is saved to a file with the same name as the private key file,
+    but with the .pub extension.
 
     Returns:
     True if the key pair was generated successfully, False otherwise.
     """
     try:
+        
         # Generate the private key using ssh-keygen
         subprocess.run(
             ["ssh-keygen", "-t", "ed25519", "-f", private_key_file, "-N", ""],
             check=True,
         )
-
-        # Extract the public key
-        subprocess.run(
-            ["ssh-keygen", "-y", "-f", private_key_file],
-            stdout=open(public_key_file, "w"),
-            check=True,
-        )
-        logger.info(f"Generated SSH Ed25519 key pair for user '{username}'")
+        
+        logger.info(f"Generated SSH Ed25519 key pair for user '{username}'"
+                    f" with private key: {private_key_file} and public key: {private_key_file}.pub")
         return True
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to generate SSH key pair for user '{username}': {e}")
@@ -2324,13 +2299,9 @@ def add_user(
     if keys:
         # Generate Ed25519 key pair for SSH login
         ssh_key_file = os.path.join(directory, f"{user_name}.key_ssh_ed25519")
-        ssh_pub_key_file = os.path.join(directory, f"{user_name}.pub_ssh_ed25519")
-        if not generate_ssh_key_pair(user_name, ssh_key_file, ssh_pub_key_file):
+        if not generate_ssh_key_pair(user_name, ssh_key_file):
             logger.error(f"Failed to generate SSH key pair for user: {user_name}")
             return False
-        logger.info(
-            f"Generated SSH Ed25519 key pair for user '{user_name}': {ssh_key_file} (private), {ssh_pub_key_file} (public)"
-        )
 
     # Create a project for the user in the main server (local)
     project_created = False
@@ -2978,44 +2949,49 @@ def add_route_on_vpn_access(dst_address, gateway, dev, device_type='mikrotik', u
 #############################################
 
 def create_instance_parser(subparsers): 
-    instance_parser = subparsers.add_parser("instance", help="Manage instances")
+    instance_parser = subparsers.add_parser("instance", help="Manage instances",
+                             formatter_class=argparse.RawTextHelpFormatter)
     instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
 
     # Add common options for remote, project, user, IP, gateway, and NIC
     def add_common_arguments(parser):
         parser.add_argument("-r", "--remote", help="Specify the remote server name")
         parser.add_argument("-p", "--project", help="Specify the project name")
-        parser.add_argument("-u", "--user", help="Specify the user who will own the instance")
+        parser.add_argument("-u", "--user", help="Used to infer the project (for list, start, stop, set_key, set_ip, bash)")
         parser.add_argument("-i", "--ip", help="Specify a static IP address for the instance")
         parser.add_argument("-g", "--gw", help="Specify the gateway address for the instance")
-        parser.add_argument("-n", "--nic", help="Specify the nic name for the instance, "
+        parser.add_argument("-n", "--nic", help="Specify the nic name for the instance, used in create and set_ip subcommands \n"
                              "default: eth0 for containers, enp5s0 for VMs")
 
     # List command
     instance_list_parser = instance_subparsers.add_parser("list", aliases=["l"],
-        help="List instances (use -f or --full for more details)"
+        help="List instances (use -f or --full for more details)",
+        formatter_class=argparse.RawTextHelpFormatter
     )
     instance_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of instance profiles")
     instance_list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project', 'project', or 'remote:' to limit the listing")
     add_common_arguments(instance_list_parser)
 
     # Start command
-    start_parser = instance_subparsers.add_parser("start", help="Start a specific instance")
+    start_parser = instance_subparsers.add_parser("start", help="Start a specific instance",
+                             formatter_class=argparse.RawTextHelpFormatter)
     start_parser.add_argument("instance_name", help="Name of the instance to start. Can include remote and project scope.")
     add_common_arguments(start_parser)
 
     # Stop command
-    stop_parser = instance_subparsers.add_parser("stop", help="Stop a specific instance")
+    stop_parser = instance_subparsers.add_parser("stop", help="Stop a specific instance",
+                             formatter_class=argparse.RawTextHelpFormatter)
     stop_parser.add_argument("instance_name", help="Name of the instance to stop. Can include remote and project scope.")
     add_common_arguments(stop_parser)
 
     # Set Key command
-    set_key_parser = instance_subparsers.add_parser("set_key", help="Set a public key for a user in an instance")
+    set_key_parser = instance_subparsers.add_parser("set_key", help="Set a public key for a user in an instance",
+                             formatter_class=argparse.RawTextHelpFormatter)
     set_key_parser.add_argument("instance_name", help="Name of the instance. Can include remote and project scope.")
     set_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
     # Add new options
     set_key_parser.add_argument("-l", "--login", default=DEFAULT_LOGIN_FOR_INSTANCES, 
-                                help="Specify the user login name (default: ubuntu)")
+                                help="Specify the user login name (default: ubuntu) for which we are setting the key")
     set_key_parser.add_argument("-d", "--dir", default=USER_DIR, 
                                 help="Specify the directory path where the key file is located (default: ./users)")
     set_key_parser.add_argument("-f", "--force", action="store_true", 
@@ -3023,19 +2999,25 @@ def create_instance_parser(subparsers):
     add_common_arguments(set_key_parser)
 
     # Set IP command
-    set_ip_parser = instance_subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance")
-    set_ip_parser.add_argument("instance_name", help="Name of the instance to set the IP address for. Can include remote and project scope.")
+    set_ip_parser = instance_subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance",
+                             formatter_class=argparse.RawTextHelpFormatter)
+    set_ip_parser.add_argument("instance_name",
+                               help="Name of the instance to set the IP address for. Can include remote and project scope.")
     add_common_arguments(set_ip_parser)
 
     # Create command
-    create_parser = instance_subparsers.add_parser("create", aliases=["c"], help="Create a new instance")
-    create_parser.add_argument("instance_name", help="Name of the new instance. Can include remote and project scope in the format 'remote:project.instance_name'")
+    create_parser = instance_subparsers.add_parser("create", aliases=["c"], help="Create a new instance",
+                               formatter_class=argparse.RawTextHelpFormatter)
+    create_parser.add_argument("instance_name", help="Name of the new instance.\n"
+                               "Can include remote and project scope in the format 'remote:project.instance_name'")
     create_parser.add_argument("image", help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
-    create_parser.add_argument("-t", "--type", choices=["vm", "container", "cnt"], default="container", help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container').")
+    create_parser.add_argument("-t", "--type", choices=["vm", "container", "cnt"], default="container", 
+                               help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container').")
     add_common_arguments(create_parser)
 
     # Delete command
-    delete_parser = instance_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete a specific instance")
+    delete_parser = instance_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete a specific instance",
+                             formatter_class=argparse.RawTextHelpFormatter)
     delete_parser.add_argument("instance_name", help="Name of the instance to delete. Can include remote and project scope.")
     delete_parser.add_argument("-f", "--force", action="store_true", help="Force delete the instance even if it is running")
     add_common_arguments(delete_parser)
@@ -3499,7 +3481,7 @@ def create_remote_parser(subparsers):
     remote_enroll_parser.add_argument("remote_server", help="Name to assign to the remote server")
     remote_enroll_parser.add_argument("ip_address", help="IP address or domain name of the remote server")
     remote_enroll_parser.add_argument("port", nargs="?", default="8443", help="Port of the remote server (default: 8443)")
-    remote_enroll_parser.add_argument("user", nargs="?", default="ubuntu", help="Username for SSH (default: ubuntu)")
+    remote_enroll_parser.add_argument("user", nargs="?", default="ubuntu", help="Username for SSH into the remote (default: ubuntu)")
     remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.crt", help="Client certificate file to transfer (default: ~/.config/incus/client.cr)")
     remote_enroll_parser.add_argument("--loc_name", default="main", help="Suffix of certificate name saved on the remote server (default: main)")
 
@@ -3692,8 +3674,8 @@ def create_vpn_parser(subparsers):
     route_parser.add_argument("target_or_host", help="Target for VPN or Host to connect to")
 
     # Optional user and port if host is provided
-    route_parser.add_argument("--user", help=f"SSH username (default: {DEFAULT_SSH_USER_FOR_VPN_AR})")
-    route_parser.add_argument("--port", type=int, help=f"SSH port (default: {DEFAULT_SSH_PORT_FOR_VPN_AR})")
+    route_parser.add_argument("-u", "--user", help=f"SSH username for login into the node (default: {DEFAULT_SSH_USER_FOR_VPN_AR})")
+    route_parser.add_argument("-p", "--port", type=int, help=f"SSH port (default: {DEFAULT_SSH_PORT_FOR_VPN_AR})")
 
     return vpn_parser
 
