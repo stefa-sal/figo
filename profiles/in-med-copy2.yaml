@@ -1,0 +1,6 @@
+config:
+  limits.cpu: '8'
+  limits.memory: 32GB
+description: Simple instance with 8 VCPUs, 32 GB RAM
+devices: {}
+name: in-med-copy2

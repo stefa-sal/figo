@@ -1,0 +1,9 @@
+config: {}
+description: eth interface bridged on br-200-3 (10.200.3.0/24)
+devices:
+  enp5s0:
+    name: enp5s0
+    nictype: bridged
+    parent: br-200-3
+    type: nic
+name: net-bridged-br-200-3

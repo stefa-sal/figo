@@ -1,5 +1,5 @@
 config: {}
-description: Default LXD profile
+description: Default Incus profile
 devices:
   eth0:
     name: eth0
