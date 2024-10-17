@@ -743,13 +743,14 @@ def assign_ip_address(remote, mode="next"):
     base_ip = ipaddress.ip_address(REMOTE_TO_IP_INFO_MAP[remote]["base_ip"])
     if not assigned_ips:
         new_ip = base_ip
-    if mode == "next":
-        highest_ip = max([ipaddress.ip_address(ip) for ip in assigned_ips])
-        new_ip = highest_ip + 1
-    elif mode == "hole":
-        new_ip = base_ip
-        while str(new_ip) in assigned_ips:
-            new_ip += 1 # Increment the IP address until an available one is found
+    else:
+        if mode == "next":
+            highest_ip = max([ipaddress.ip_address(ip) for ip in assigned_ips])
+            new_ip = highest_ip + 1
+        elif mode == "hole":
+            new_ip = base_ip
+            while str(new_ip) in assigned_ips:
+                new_ip += 1 # Increment the IP address until an available one is found
     return str(new_ip)
 
 def retrieve_assigned_ips(remote):
@@ -2988,7 +2989,7 @@ def create_instance_parser(subparsers):
     set_key_parser = instance_subparsers.add_parser("set_key", help="Set a public key for a user in an instance",
                              formatter_class=argparse.RawTextHelpFormatter)
     set_key_parser.add_argument("instance_name", help="Name of the instance. Can include remote and project scope.")
-    set_key_parser.add_argument("key_filename", help="Filename of the public key on the host")
+    set_key_parser.add_argument("key_filename", help="Filename of the public key on the host (by default in the ./users folder)")
     # Add new options
     set_key_parser.add_argument("-l", "--login", default=DEFAULT_LOGIN_FOR_INSTANCES, 
                                 help="Specify the user login name (default: ubuntu) for which we are setting the key")
