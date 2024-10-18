@@ -624,31 +624,64 @@ def stop_instance(instance_name, remote, project):
         return False
 
 def stop_all_instances(remote_node, project_name):
-    """Stop all instances in the specified remote node and project."""
+    """Stop all instances in the specified remote node and project.
+    
+    This function is recursive.
+    If remote_node is None, look for instances in all remotes.
+    If project_name is None, look for instances in all projects.
+    If both remote_node and project_name are None, look for instances in all remotes and projects.
+    If both remote_node and project_name are specified, stop all instances on the specified remote
+    in the specified project and end the recursion.
 
-    #for the moment, just print the remote node and project name
-    print(f"Stopping all instances in remote '{remote_node}' and project '{project_name}'")
+    Returns:    None
+    """
 
-    #just print the instance names that will be stopped
-    instances = run_incus_list(remote_node=remote_node, project_name=project_name)
-    if instances is None:
-        return
-    for instance in instances:
-        name = instance.get("name", "Unknown")
-        print(f"Stopping instance '{name}'")
-    return
+    #if remote_node is None all the remotes are considered
+    if remote_node is None:
+        #iterate over all remote nodes
+        remotes = get_incus_remotes()
+        for my_remote_node in remotes:
+            # check to skip all the remote node of type images
+            # Skipping remote node with protocol simplestreams
+            if remotes[my_remote_node]["Protocol"] == "simplestreams":
+                continue
 
-    # Get all instances in the specified remote node and project
-    instances = run_incus_list(remote_node=remote_node, project_name=project_name)
-    if instances is None:
-        return
+            if project_name is None:
+                # iterate over all projects
+                projects = get_projects(remote_name=my_remote_node)
+                if projects is None:
+                    continue
+                else: # projects is not None:
+                    for project in projects:
+                        my_project_name = project["name"]
+                        stop_all_instances(my_remote_node, my_project_name) # recursive call
+            else:
+                stop_all_instances(my_remote_node, project_name) # recursive call
+    else: # remote_node is not None
+        #check if the project is None
+        if project_name is None:
+            # iterate over all projects
+            projects = get_projects(remote_name=remote_node)
+            if projects is None:
+                return
+            else: # projects is not None:
+                for project in projects:
+                    my_project_name = project["name"]
+                    stop_all_instances(remote_node, my_project_name) # recursive call
+        else: # remote_node is not None and project_name is not None
 
-    for instance in instances:
-        name = instance.get("name", "Unknown")
-        state = instance.get("status", "err")[:3].lower()  # Shorten the status
+            # Get all instances in the specified remote node and project
+            instances = run_incus_list(remote_node=remote_node, project_name=project_name)
+            if instances is None:
+                return
 
-        if state == "run":
-            stop_instance(name, remote_node, project_name)  # Stop the running instance
+            for instance in instances:
+                name = instance.get("name", "Unknown")
+                state = instance.get("status", "err")[:3].lower()  # Shorten the status
+
+                if state == "run":
+                    logger.info(f"Stopping instance '{name}' in project '{project_name}' on remote '{remote_node}'.")
+                    stop_instance(name, remote_node, project_name)  # Stop the running instance
 
 
 def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', folder='.users', force=False):
@@ -3161,7 +3194,7 @@ def handle_instance_command(args, parser_dict):
 
     def parse_instance_scope(instance_name, provided_remote, provided_project):
         """Parse the instance name to extract remote, project, and instance."""
-        remote, project, instance = '', '', instance_name  # Default values
+        remote, project, instance = None, None, instance_name  # Default to None
 
         if ':' in instance_name:
             parts = instance_name.split(':')
@@ -3179,7 +3212,7 @@ def handle_instance_command(args, parser_dict):
         else:
             instance = instance_name
 
-        # Handle special cases with trailing ':' or '.'
+        # Handle special cases with trailing ':' or '.' for the --all option
         if args.all:
             # If '--all' is used, treat trailing '.' or ':' as project or remote scopes.
             if instance_name.endswith(':'):
@@ -3188,7 +3221,7 @@ def handle_instance_command(args, parser_dict):
                 instance = None
             elif instance_name.endswith('.'):
                 project = instance_name[:-1]
-                remote = provided_remote or 'local'
+                remote = provided_remote or None
                 instance = None
 
         # Validate instance name if it's provided and '--all' isn't used
@@ -3205,8 +3238,8 @@ def handle_instance_command(args, parser_dict):
             return None, None, None
 
         # Use provided flags if available and no conflicts
-        remote = provided_remote if provided_remote else remote or 'local'
-        project = provided_project if provided_project else project or 'default'
+        remote = provided_remote if provided_remote else remote
+        project = provided_project if provided_project else project
 
         return remote, project, instance
 
@@ -3214,25 +3247,31 @@ def handle_instance_command(args, parser_dict):
         if args.all:
             # Parse instance scope if provided with '--all'
             remote, project, instance = parse_instance_scope(args.instance_name or '', args.remote, args.project)
-            if remote is None or project is None:
-                return  # Error already printed
 
+            # Ensure '--all' is not used with a specific instance
             if instance:
                 logger.error("Error: '--all' cannot be used with a specific instance name.")
                 return
 
-            logger.info(f"Stopping all instances in remote '{remote}' and project '{project}'...")
+            # Handle None values for remote and project appropriately
+            remote_str = remote if remote else "all remotes"
+            project_str = project if project else "all projects"
+
+            logger.info(f"Stopping all instances in {remote_str} and {project_str}...")
             stop_all_instances(remote, project)
         else:
             # Stop a specific instance
             remote, project, instance = parse_instance_scope(args.instance_name, args.remote, args.project)
+            
+            # Check if instance is valid; `remote` and `project` should not be `None` in this context
             if remote is None or project is None or instance is None:
-                return  # Error already printed
+                logger.error("Error: A valid remote and project are required when stopping a specific instance.")
+                return
 
+            # Proceed to stop the specified instance
             stop_instance(instance, remote, project)
     else:
         logger.error("Unknown instance command.")
-
 
 #############################################
 ###### figo gpu command CLI #################
