@@ -623,6 +623,34 @@ def stop_instance(instance_name, remote, project):
         logger.error(f"Failed to stop instance '{instance_name}' in project '{project}' on remote '{remote}': {e}")
         return False
 
+def stop_all_instances(remote_node, project_name):
+    """Stop all instances in the specified remote node and project."""
+
+    #for the moment, just print the remote node and project name
+    print(f"Stopping all instances in remote '{remote_node}' and project '{project_name}'")
+
+    #just print the instance names that will be stopped
+    instances = run_incus_list(remote_node=remote_node, project_name=project_name)
+    if instances is None:
+        return
+    for instance in instances:
+        name = instance.get("name", "Unknown")
+        print(f"Stopping instance '{name}'")
+    return
+
+    # Get all instances in the specified remote node and project
+    instances = run_incus_list(remote_node=remote_node, project_name=project_name)
+    if instances is None:
+        return
+
+    for instance in instances:
+        name = instance.get("name", "Unknown")
+        state = instance.get("status", "err")[:3].lower()  # Shorten the status
+
+        if state == "run":
+            stop_instance(name, remote_node, project_name)  # Stop the running instance
+
+
 def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', folder='.users', force=False):
     """Set a public key in the specified instance in the authorized_keys file of the specified user.
     
@@ -2949,40 +2977,70 @@ def add_route_on_vpn_access(dst_address, gateway, dev, device_type='mikrotik', u
 ###### figo instance command CLI ############
 #############################################
 
-def create_instance_parser(subparsers): 
-    instance_parser = subparsers.add_parser("instance", help="Manage instances",
-                             formatter_class=argparse.RawTextHelpFormatter)
+def create_instance_parser(subparsers):
+    instance_parser = subparsers.add_parser(
+        "instance", help="Manage instances", formatter_class=argparse.RawTextHelpFormatter
+    )
     instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
 
     # Add common options for remote, project, user, IP, gateway, and NIC
     def add_common_arguments(parser):
         parser.add_argument("-r", "--remote", help="Specify the remote server name")
         parser.add_argument("-p", "--project", help="Specify the project name")
-        parser.add_argument("-u", "--user", help="Used to infer the project (for list, start, stop, set_key, set_ip, bash)")
+        parser.add_argument(
+            "-u", "--user",
+            help="Used to infer the project (for list, start, stop, set_key, set_ip, bash)"
+        )
         parser.add_argument("-i", "--ip", help="Specify a static IP address for the instance")
-        parser.add_argument("-g", "--gw", help="Specify the gateway address for the instance")
-        parser.add_argument("-n", "--nic", help="Specify the nic name for the instance, used in create and set_ip subcommands \n"
-                             "default: eth0 for containers, enp5s0 for VMs")
+        parser.add_argument(
+            "-g", "--gw", help="Specify the gateway address for the instance"
+        )
+        parser.add_argument(
+            "-n", "--nic",
+            help="Specify the nic name for the instance, used in create and set_ip subcommands \n"
+            "default: eth0 for containers, enp5s0 for VMs"
+        )
 
     # List command
-    instance_list_parser = instance_subparsers.add_parser("list", aliases=["l"],
-        help="List instances (use -f or --full for more details)",
+    instance_list_parser = instance_subparsers.add_parser(
+        "list", aliases=["l"], help="List instances (use -f or --full for more details)",
         formatter_class=argparse.RawTextHelpFormatter
     )
-    instance_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of instance profiles")
-    instance_list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project', 'project', or 'remote:' to limit the listing")
+    instance_list_parser.add_argument(
+        "-f", "--full", action="store_true", help="Show full details of instance profiles"
+    )
+    instance_list_parser.add_argument(
+        "scope", nargs="?", help="Scope in the format 'remote:project', 'project', or 'remote:' to limit the listing"
+    )
     add_common_arguments(instance_list_parser)
 
     # Start command
-    start_parser = instance_subparsers.add_parser("start", help="Start a specific instance",
-                             formatter_class=argparse.RawTextHelpFormatter)
-    start_parser.add_argument("instance_name", help="Name of the instance to start. Can include remote and project scope.")
+    start_parser = instance_subparsers.add_parser(
+        "start", help="Start a specific instance", formatter_class=argparse.RawTextHelpFormatter
+    )
+    start_parser.add_argument(
+        "instance_name",
+        help="Name of the instance to start. Can include remote and project scope."
+    )
     add_common_arguments(start_parser)
 
     # Stop command
-    stop_parser = instance_subparsers.add_parser("stop", help="Stop a specific instance",
-                             formatter_class=argparse.RawTextHelpFormatter)
-    stop_parser.add_argument("instance_name", help="Name of the instance to stop. Can include remote and project scope.")
+    stop_parser = instance_subparsers.add_parser(
+        "stop", help="Stop a specific instance or all instances in a scope",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    stop_parser.add_argument(
+        "instance_name", nargs="?", default=None,
+        help="Name of the instance to stop. Can include remote and project scope.\n"
+             "If '--all' is provided, a specific instance cannot be given.\n"
+    )
+    stop_parser.add_argument(
+        "-a", "--all", action="store_true",
+        help=(
+            "Stop all instances in the specified scope.\n"
+            "If remote or project is not specified, all remotes or all projects are considered."
+        )
+    )
     add_common_arguments(stop_parser)
 
     # Set Key command
@@ -3096,11 +3154,10 @@ def handle_instance_command(args, parser_dict):
 
     def check_instance_name(instance_name):
         """Check validity of instance name."""
-        # Instance name can only contain letters, numbers, hyphens, no underscores
-        if not re.match(r'^[a-zA-Z0-9-]+$', instance_name):
-            logger.error(f"Error: Instance name can only contain letters, numbers, hyphens: '{instance_name}'.")
+        if instance_name is None:
             return False
-        return True
+        # Instance name can only contain letters, numbers, hyphens, no underscores
+        return bool(re.match(r'^[a-zA-Z0-9-]+$', instance_name))
 
     def parse_instance_scope(instance_name, provided_remote, provided_project):
         """Parse the instance name to extract remote, project, and instance."""
@@ -3109,121 +3166,73 @@ def handle_instance_command(args, parser_dict):
         if ':' in instance_name:
             parts = instance_name.split(':')
             if len(parts) == 2:
+                remote = parts[0]
                 if '.' in parts[1]:
-                    remote, project_instance = parts
-                    parts_pro_inst = project_instance.split('.')
-                    if len(parts_pro_inst) == 2:
-                        project, instance = parts_pro_inst
-                    else:
-                        logger.error(f"Syntax error in instance name '{instance_name}'.")
-                        return None, None, None
+                    project, instance = parts[1].split('.', 1)
                 else:
-                    remote, instance = parts
+                    instance = parts[1]
             else:
                 logger.error(f"Syntax error in instance name '{instance_name}'.")
                 return None, None, None
         elif '.' in instance_name:
-            parts_pro_inst = instance_name.split('.')
-            if len(parts_pro_inst) == 2:
-                project, instance = parts_pro_inst
-            else:
-                logger.error(f"Syntax error in instance name '{instance_name}'.")
-                return None, None, None
+            project, instance = instance_name.split('.', 1)
+        else:
+            instance = instance_name
 
-        if not check_instance_name(instance):
+        # Handle special cases with trailing ':' or '.'
+        if args.all:
+            # If '--all' is used, treat trailing '.' or ':' as project or remote scopes.
+            if instance_name.endswith(':'):
+                remote = instance_name[:-1]
+                project = None
+                instance = None
+            elif instance_name.endswith('.'):
+                project = instance_name[:-1]
+                remote = provided_remote or 'local'
+                instance = None
+
+        # Validate instance name if it's provided and '--all' isn't used
+        if not args.all and not check_instance_name(instance):
+            logger.error(f"Error: Instance name can only contain letters, numbers, hyphens: '{instance}'.")
             return None, None, None
 
-        # Resolve conflicts
-        if provided_remote and remote != '' and provided_remote != remote:
+        # Resolve conflicts between provided flags and parsed values
+        if provided_remote and remote and provided_remote != remote:
             logger.error(f"Error: Conflict between scope remote '{remote}' and provided remote '{provided_remote}'.")
             return None, None, None
-        if provided_project and project != '' and provided_project != project:
+        if provided_project and project and provided_project != project:
             logger.error(f"Error: Conflict between scope project '{project}' and provided project '{provided_project}'.")
             return None, None, None
 
-        # Use provided flags if there's no conflict and they are provided
-        remote = provided_remote if provided_remote else remote
-        project = provided_project if provided_project else project
-
-        if remote == '':
-            remote = 'local'
-
-        if project == '':
-            project = 'default'
+        # Use provided flags if available and no conflicts
+        remote = provided_remote if provided_remote else remote or 'local'
+        project = provided_project if provided_project else project or 'default'
 
         return remote, project, instance
 
-    def parse_image(image_name):
-        if ':' in image_name:
-            parts = image_name.split(':')
-            if len(parts) == 2:
-                return image_name
-            else:
-                logger.error(f"Syntax error in image name '{image_name}'.")
-                return None
-        else:
-            return f"images:{image_name}"
+    if args.instance_command == "stop":
+        if args.all:
+            # Parse instance scope if provided with '--all'
+            remote, project, instance = parse_instance_scope(args.instance_name or '', args.remote, args.project)
+            if remote is None or project is None:
+                return  # Error already printed
 
-    # Validate the IP address and prefix length
-    if args.ip and not is_valid_ip_prefix_len(args.ip):
-        logger.error(f"Error: Invalid IP address or prefix length '{args.ip}'.")
-        return
-
-    # Validate the gateway address if provided
-    if args.gw and not is_valid_ip(args.gw):
-        logger.error(f"Error: Invalid gateway address '{args.gw}'.")
-        return
-
-    if args.instance_command in ["list", "l"]:
-        handle_instance_list(args)
-    else:
-        # Handle project based on user if provided
-        user_project = None
-        if 'user' in args and args.user:
-            user_project = derive_project_from_user(args.user)
-
-        # If user_project is set, check for conflicts
-        if user_project:
-            if args.project and user_project != args.project:
-                logger.error(f"Error: Conflict between derived project '{user_project}' from user '{args.user}'"
-                             f" and provided project '{args.project}'.")
+            if instance:
+                logger.error("Error: '--all' cannot be used with a specific instance name.")
                 return
-            else:
-                args.project = user_project  # Use the derived project
 
-        remote, project, instance = parse_instance_scope(args.instance_name, args.remote, args.project)
-        if remote is None or project is None:
-            return  # Error already printed by parse_instance_scope
+            logger.info(f"Stopping all instances in remote '{remote}' and project '{project}'...")
+            stop_all_instances(remote, project)
+        else:
+            # Stop a specific instance
+            remote, project, instance = parse_instance_scope(args.instance_name, args.remote, args.project)
+            if remote is None or project is None or instance is None:
+                return  # Error already printed
 
-        if args.instance_command == "start":
-            start_instance(instance, remote, project)
-        elif args.instance_command == "stop":
             stop_instance(instance, remote, project)
-        elif args.instance_command == "set_key":
-            # Extract the parameters with defaults applied
-            login = args.login
-            folder = args.dir
-            force = args.force
-            set_user_key(instance, remote, project, args.key_filename, login=login, folder=folder, force=force)
-        elif args.instance_command == "set_ip":
-            set_ip(instance, remote, project, 
-                   ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
-        elif args.instance_command in ["create", "c"]:
-            image = parse_image(args.image)
-            if image is None:
-                return  # Error already printed by parse_image
+    else:
+        logger.error("Unknown instance command.")
 
-            # Determine instance type
-            instance_type = args.type
-            if instance_type == "cnt":
-                instance_type = "container"  # Convert 'cnt' to 'container'
-
-            create_instance(instance, image, remote, project, instance_type,
-                            ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
-        elif args.instance_command in ["delete", "del", "d"]:
-            delete_instance(instance, remote, project, force=args.force)
-        elif args.instance_command in ["bash", "b"]:
-            exec_instance_bash(instance, remote, project, force=args.force, timeout=args.timeout, max_attempts=args.attempts)
 
 #############################################
 ###### figo gpu command CLI #################
