@@ -1235,7 +1235,7 @@ def list_gpu_profiles(client):
     ]
     COLS = [('TOTAL', 10), ('PROFILES', 30)]
     print_header_line(COLS)
-    print_row(COLS, [len(gpu_profiles), ", ".join(gpu_profiles)])
+    print_row(COLS, [str(len(gpu_profiles)), ", ".join(gpu_profiles)])
 
 def add_gpu_profile(instance_name, client):
     """Add a GPU profile to an instance.
