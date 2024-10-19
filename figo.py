@@ -3225,6 +3225,7 @@ def handle_instance_command(args, parser_dict):
 
         if not check_instance_name(instance):
             return None, None, None
+
         # Resolve conflicts
         if provided_remote and remote != '' and provided_remote != remote:
             logger.error(f"Error: Conflict between scope remote '{remote}' and provided remote '{provided_remote}'.")
@@ -3343,7 +3344,7 @@ def handle_instance_command(args, parser_dict):
         elif args.instance_command == "stop":
             if args.all:
                 # Parse instance scope if provided with '--all'
-                remote, project, instance = parse_instance_scope(args.instance_name or '', args.remote, args.project)
+                remote, project, instance = parse_instance_scope_for_all(args.instance_name or '', args.remote, args.project)
 
                 # Ensure '--all' is not used with a specific instance
                 if instance:
@@ -3393,7 +3394,7 @@ def handle_instance_command(args, parser_dict):
         elif args.instance_command in ["bash", "b"]:
             exec_instance_bash(instance, remote, project, force=args.force, timeout=args.timeout, max_attempts=args.attempts)
         else:
-            logger.error("Unknown instance command.")
+            logger.error(f"Unknown instance subcommand: {args.instance_command}")
 
 #############################################
 ###### figo gpu command CLI #################
