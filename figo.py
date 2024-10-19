@@ -3243,6 +3243,27 @@ def handle_instance_command(args, parser_dict):
 
         return remote, project, instance
 
+    def parse_image(image_name):
+        if ':' in image_name:
+            parts = image_name.split(':')
+            if len(parts) == 2:
+                return image_name
+            else:
+                logger.error(f"Syntax error in image name '{image_name}'.")
+                return None
+        else:
+            return f"images:{image_name}"
+
+    # Validate the IP address and prefix length
+    if args.ip and not is_valid_ip_prefix_len(args.ip):
+        logger.error(f"Error: Invalid IP address or prefix length '{args.ip}'.")
+        return
+
+    # Validate the gateway address if provided
+    if args.gw and not is_valid_ip(args.gw):
+        logger.error(f"Error: Invalid gateway address '{args.gw}'.")
+        return
+
     if args.instance_command in ["list", "l"]:
         handle_instance_list(args)
     else:
@@ -3260,62 +3281,62 @@ def handle_instance_command(args, parser_dict):
             else:
                 args.project = user_project  # Use the derived project
             
-    if args.instance_command == "start":
-        start_instance(instance, remote, project)
-    elif args.instance_command == "stop":
-        if args.all:
-            # Parse instance scope if provided with '--all'
-            remote, project, instance = parse_instance_scope(args.instance_name or '', args.remote, args.project)
+        if args.instance_command == "start":
+            start_instance(instance, remote, project)
+        elif args.instance_command == "stop":
+            if args.all:
+                # Parse instance scope if provided with '--all'
+                remote, project, instance = parse_instance_scope(args.instance_name or '', args.remote, args.project)
 
-            # Ensure '--all' is not used with a specific instance
-            if instance:
-                logger.error("Error: '--all' cannot be used with a specific instance name.")
-                return
+                # Ensure '--all' is not used with a specific instance
+                if instance:
+                    logger.error("Error: '--all' cannot be used with a specific instance name.")
+                    return
 
-            # Handle None values for remote and project appropriately
-            remote_str = remote if remote else "all remotes"
-            project_str = project if project else "all projects"
+                # Handle None values for remote and project appropriately
+                remote_str = remote if remote else "all remotes"
+                project_str = project if project else "all projects"
 
-            logger.info(f"Stopping all instances in {remote_str} and {project_str}...")
-            stop_all_instances(remote, project)
+                logger.info(f"Stopping all instances in {remote_str} and {project_str}...")
+                stop_all_instances(remote, project)
+            else:
+                # Stop a specific instance
+                remote, project, instance = parse_instance_scope(args.instance_name, args.remote, args.project)
+                
+                # Check if instance is valid; `remote` and `project` should not be `None` in this context
+                if remote is None or project is None or instance is None:
+                    logger.error("Error: A valid remote and project are required when stopping a specific instance.")
+                    return
+
+                # Proceed to stop the specified instance
+                stop_instance(instance, remote, project)
+        elif args.instance_command == "set_key":
+            # Extract the parameters with defaults applied
+            login = args.login
+            folder = args.dir
+            force = args.force
+            set_user_key(instance, remote, project, args.key_filename, login=login, folder=folder, force=force)
+        elif args.instance_command == "set_ip":
+            set_ip(instance, remote, project, 
+                ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
+        elif args.instance_command in ["create", "c"]:
+            image = parse_image(args.image)
+            if image is None:
+                return  # Error already printed by parse_image
+
+            # Determine instance type
+            instance_type = args.type
+            if instance_type == "cnt":
+                instance_type = "container"  # Convert 'cnt' to 'container'
+
+            create_instance(instance, image, remote, project, instance_type,
+                            ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
+        elif args.instance_command in ["delete", "del", "d"]:
+            delete_instance(instance, remote, project, force=args.force)
+        elif args.instance_command in ["bash", "b"]:
+            exec_instance_bash(instance, remote, project, force=args.force, timeout=args.timeout, max_attempts=args.attempts)
         else:
-            # Stop a specific instance
-            remote, project, instance = parse_instance_scope(args.instance_name, args.remote, args.project)
-            
-            # Check if instance is valid; `remote` and `project` should not be `None` in this context
-            if remote is None or project is None or instance is None:
-                logger.error("Error: A valid remote and project are required when stopping a specific instance.")
-                return
-
-            # Proceed to stop the specified instance
-            stop_instance(instance, remote, project)
-    elif args.instance_command == "set_key":
-        # Extract the parameters with defaults applied
-        login = args.login
-        folder = args.dir
-        force = args.force
-        set_user_key(instance, remote, project, args.key_filename, login=login, folder=folder, force=force)
-    elif args.instance_command == "set_ip":
-        set_ip(instance, remote, project, 
-            ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
-    elif args.instance_command in ["create", "c"]:
-        image = parse_image(args.image)
-        if image is None:
-            return  # Error already printed by parse_image
-
-        # Determine instance type
-        instance_type = args.type
-        if instance_type == "cnt":
-            instance_type = "container"  # Convert 'cnt' to 'container'
-
-        create_instance(instance, image, remote, project, instance_type,
-                        ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
-    elif args.instance_command in ["delete", "del", "d"]:
-        delete_instance(instance, remote, project, force=args.force)
-    elif args.instance_command in ["bash", "b"]:
-        exec_instance_bash(instance, remote, project, force=args.force, timeout=args.timeout, max_attempts=args.attempts)
-    else:
-        logger.error("Unknown instance command.")
+            logger.error("Unknown instance command.")
 
 #############################################
 ###### figo gpu command CLI #################
