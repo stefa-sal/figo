@@ -3190,8 +3190,11 @@ def handle_instance_command(args, parser_dict):
         if instance_name is None:
             return False
         # Instance name can only contain letters, numbers, hyphens, no underscores
-        return bool(re.match(r'^[a-zA-Z0-9-]+$', instance_name))
-
+        if not re.match(r'^[a-zA-Z0-9-]+$', instance_name):
+            logger.error(f"Error: Instance name can only contain letters, numbers, hyphens: '{instance_name}'.")
+            return False
+        return True
+    
     def parse_instance_scope(instance_name, provided_remote, provided_project):
         """Parse the instance name to extract remote, project, and instance."""
         remote, project, instance = None, None, instance_name  # Default to None
@@ -3237,7 +3240,7 @@ def handle_instance_command(args, parser_dict):
             logger.error(f"Error: Conflict between scope project '{project}' and provided project '{provided_project}'.")
             return None, None, None
 
-        # Use provided flags if available and no conflicts
+        # Use provided flags if there's no conflict and they are provided
         remote = provided_remote if provided_remote else remote
         project = provided_project if provided_project else project
 
@@ -3318,7 +3321,7 @@ def handle_instance_command(args, parser_dict):
             set_user_key(instance, remote, project, args.key_filename, login=login, folder=folder, force=force)
         elif args.instance_command == "set_ip":
             set_ip(instance, remote, project, 
-                ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
+                   ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
         elif args.instance_command in ["create", "c"]:
             image = parse_image(args.image)
             if image is None:
