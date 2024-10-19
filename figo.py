@@ -3043,7 +3043,7 @@ def create_instance_parser(subparsers):
         "-f", "--full", action="store_true", help="Show full details of instance profiles"
     )
     instance_list_parser.add_argument(
-        "scope", nargs="?", help="Scope in the format 'remote:project', 'project', or 'remote:' to limit the listing"
+        "scope", nargs="?", help="Scope in the format 'remote:project.', 'project.', or 'remote:' to limit the listing"
     )
     add_common_arguments(instance_list_parser)
 
@@ -3681,7 +3681,7 @@ def create_project_parser(subparsers):
 
     # List projects
     project_list_parser = project_subparsers.add_parser("list", aliases=["l"], help="List available projects")
-    project_list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project', 'remote:', or 'project'")
+    project_list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project.', 'remote:', or 'project.'")
     project_list_parser.add_argument("--remote", help="Specify the remote server name")
     project_list_parser.add_argument("--user", help="Specify the user to filter projects")
 
