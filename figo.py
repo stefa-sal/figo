@@ -3194,8 +3194,58 @@ def handle_instance_command(args, parser_dict):
             logger.error(f"Error: Instance name can only contain letters, numbers, hyphens: '{instance_name}'.")
             return False
         return True
-    
+
     def parse_instance_scope(instance_name, provided_remote, provided_project):
+        """Parse the instance name to extract remote, project, and instance."""
+        remote, project, instance = '', '', instance_name  # Default values
+
+        if ':' in instance_name:
+            parts = instance_name.split(':')
+            if len(parts) == 2:
+                if '.' in parts[1]:
+                    remote, project_instance = parts
+                    parts_pro_inst = project_instance.split('.')
+                    if len(parts_pro_inst) == 2:
+                        project, instance = parts_pro_inst
+                    else:
+                        logger.error(f"Syntax error in instance name '{instance_name}'.")
+                        return None, None, None
+                else:
+                    remote, instance = parts
+            else:
+                logger.error(f"Syntax error in instance name '{instance_name}'.")
+                return None, None, None
+        elif '.' in instance_name:
+            parts_pro_inst = instance_name.split('.')
+            if len(parts_pro_inst) == 2:
+                project, instance = parts_pro_inst
+            else:
+                logger.error(f"Syntax error in instance name '{instance_name}'.")
+                return None, None, None
+
+        if not check_instance_name(instance):
+            return None, None, None
+        # Resolve conflicts
+        if provided_remote and remote != '' and provided_remote != remote:
+            logger.error(f"Error: Conflict between scope remote '{remote}' and provided remote '{provided_remote}'.")
+            return None, None, None
+        if provided_project and project != '' and provided_project != project:
+            logger.error(f"Error: Conflict between scope project '{project}' and provided project '{provided_project}'.")
+            return None, None, None
+
+        # Use provided flags if there's no conflict and they are provided
+        remote = provided_remote if provided_remote else remote
+        project = provided_project if provided_project else project
+
+        if remote == '':
+            remote = 'local'
+
+        if project == '':
+            project = 'default'
+
+        return remote, project, instance
+
+    def parse_instance_scope_for_all(instance_name, provided_remote, provided_project):
         """Parse the instance name to extract remote, project, and instance."""
         remote, project, instance = None, None, instance_name  # Default to None
 
@@ -3283,7 +3333,11 @@ def handle_instance_command(args, parser_dict):
                 return
             else:
                 args.project = user_project  # Use the derived project
-            
+
+        remote, project, instance = parse_instance_scope(args.instance_name, args.remote, args.project)
+        if remote is None or project is None:
+            return  # Error already printed by parse_instance_scope
+
         if args.instance_command == "start":
             start_instance(instance, remote, project)
         elif args.instance_command == "stop":
