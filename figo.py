@@ -3243,7 +3243,26 @@ def handle_instance_command(args, parser_dict):
 
         return remote, project, instance
 
-    if args.instance_command == "stop":
+    if args.instance_command in ["list", "l"]:
+        handle_instance_list(args)
+    else:
+        # Handle project based on user if provided
+        user_project = None
+        if 'user' in args and args.user:
+            user_project = derive_project_from_user(args.user)
+
+        # If user_project is set, check for conflicts
+        if user_project:
+            if args.project and user_project != args.project:
+                logger.error(f"Error: Conflict between derived project '{user_project}' from user '{args.user}'"
+                             f" and provided project '{args.project}'.")
+                return
+            else:
+                args.project = user_project  # Use the derived project
+            
+    if args.instance_command == "start":
+        start_instance(instance, remote, project)
+    elif args.instance_command == "stop":
         if args.all:
             # Parse instance scope if provided with '--all'
             remote, project, instance = parse_instance_scope(args.instance_name or '', args.remote, args.project)
@@ -3270,6 +3289,31 @@ def handle_instance_command(args, parser_dict):
 
             # Proceed to stop the specified instance
             stop_instance(instance, remote, project)
+    elif args.instance_command == "set_key":
+        # Extract the parameters with defaults applied
+        login = args.login
+        folder = args.dir
+        force = args.force
+        set_user_key(instance, remote, project, args.key_filename, login=login, folder=folder, force=force)
+    elif args.instance_command == "set_ip":
+        set_ip(instance, remote, project, 
+            ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
+    elif args.instance_command in ["create", "c"]:
+        image = parse_image(args.image)
+        if image is None:
+            return  # Error already printed by parse_image
+
+        # Determine instance type
+        instance_type = args.type
+        if instance_type == "cnt":
+            instance_type = "container"  # Convert 'cnt' to 'container'
+
+        create_instance(instance, image, remote, project, instance_type,
+                        ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
+    elif args.instance_command in ["delete", "del", "d"]:
+        delete_instance(instance, remote, project, force=args.force)
+    elif args.instance_command in ["bash", "b"]:
+        exec_instance_bash(instance, remote, project, force=args.force, timeout=args.timeout, max_attempts=args.attempts)
     else:
         logger.error("Unknown instance command.")
 
