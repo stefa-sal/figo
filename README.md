@@ -21,7 +21,7 @@ figo
 ### Commands
 
 **Description:**  
-This module provides a command-line interface (CLI) to manage a federated testbed with CPUs and GPUs. The `figo` program offers various commands and subcommands for managing instances, GPUs, profiles, users, and remotes in a federated environment.
+This module provides a command-line interface (CLI) to manage a federated testbed with CPUs and GPUs. The `figo` program offers various commands and subcommands for managing instances, GPUs, profiles, users, remotes, projects, and VPNs in a federated environment.
 
 **Usage:**
 
@@ -36,6 +36,8 @@ figo [command] [subcommand] [options]
 - `figo profile`
 - `figo user`
 - `figo remote`
+- `figo project`
+- `figo vpn`
 
 Each command has its own set of subcommands and options.
 
@@ -192,20 +194,90 @@ Each command has its own set of subcommands and options.
     figo remote enroll remote_server ip_address [port] [user] [cert_filename] [--loc_name loc_name]
     ```
 
-    ### Options:
-    - `remote_server`: The name you want to assign to the remote server.
-    - `ip_address`: The IP address or domain name of the remote server.
-    - `port`: The port number of the remote server (default: 8443).
-    - `user`: The SSH username (default: ubuntu).
-    - `cert_filename`: The path to the client certificate file (default: `~/.config/incus/client.cr`).
-    - `--loc_name`: The local storage name (default: `main`).
+    - **Options:**
+      - `remote_server`: The name you want to assign to the remote server.
+      - `ip_address`: The IP address or domain name of the remote server.
+      - `port`: The port number of the remote server (default: 8443).
+      - `user`: The SSH username (default: ubuntu).
+      - `cert_filename`: The path to the client certificate file (default: `~/.config/incus/client.cr`).
+      - `--loc_name`: The local storage name (default: `main`).
 
-    This command allows an administrator to enroll a remote Incus server, setting up a connection that enables the management of resources from a centralized main node in the FIGO system.
+#### figo project
 
+- **Description:** Manage projects within the federated testbed.
+- **Subcommands:**
+  - **list**
+    - **Description:** List available projects, optionally specifying a remote or user.
+    - **Syntax:**
+
+      ```bash
+      figo project list [scope] [--remote remote_name] [--user user_name]
+      ```
+
+    - **Options:**  
+      - `scope`: Scope in the format `remote:project`, `remote:`, or `project.` to limit the listing.
+      - `--remote`: Specify the remote server name.
+      - `--user`: Specify a user to filter the projects by ownership.
+
+  - **create**
+    - **Description:** Create a new project, specifying scope, project name, and user ownership.
+    - **Syntax:**
+
+      ```bash
+      figo project create scope [--project project_name] [--user user_name]
+      ```
+
+    - **Options:**  
+      - `scope`: Scope in the format `remote:project` or `remote:`.
+      - `--project`: Project name, if not provided directly in the scope.
+      - `--user`: Specify the user who will own the project.
+
+  - **delete**
+    - **Description:** Delete an existing project.
+    - **Syntax:**
+
+      ```bash
+      figo project delete project_name
+      ```
+
+    - **Options:**  
+      - `project_name`: Name of the project to delete, in the format `remote:project` or `project`.
+
+#### figo vpn
+
+- **Description:** Manage VPN configuration for secure communication and routing.
+- **Subcommands:**
+  - **add route**
+    - **Description:** Add a new route to an existing VPN configuration.
+    - **Syntax:**
+
+      ```bash
+      figo vpn add route dst_address via gateway type vpn_type [target|host] target_or_host [-d dev] [-u user] [-p port]
+      ```
+
+    - **Options:**  
+      - `dst_address`: Destination address in CIDR format (e.g., `10.202.128.0/24`).
+      - `via`: The keyword `via` followed by the gateway IP.
+      - `gateway`: Gateway address (e.g., `10.202.9.2`) without a prefix.
+      - `type`: The keyword `type` followed by the VPN device type, such as `mikrotik` or `linux`.
+      - `target`: The keyword `target` followed by the target identifier (if applicable).
+      - `host`: The keyword `host` followed by the host address.
+      - `target_or_host`: The actual target or host for the VPN configuration.
+      - `-d, --dev`: Device interface (e.g., `vlan403`). Required for Linux routers.
+      - `-u, --user`: SSH username for logging into the node (default: configured SSH user).
+      - `-p, --port`: SSH port for connecting to the VPN host (default: configured SSH port).
+
+    - **Example:** Add a VPN route to a Linux router:
+
+      ```bash
+      figo vpn add route 10.202.128.0/24 via 10.202.9.2 type linux target target-name -d vlan403
+      ```
 
 ## Autocompletion
 
-The CLI supports autocompletion using the `argcomplete` library, which must be installed and configured to enable this feature.
+The CLI supports autocompletion using the `argcomplete` library,
+
+using `argcomplete` library, which must be installed and configured to enable this feature.
 
 ## Examples
 
@@ -262,26 +334,3 @@ The CLI supports autocompletion using the `argcomplete` library, which must be i
     ```bash
     figo user delete user-name -rp
     ```
-
-## Contributing
-
-We welcome contributions to FIGO. To contribute, please follow these steps:
-
-1. **Fork the Repository:** Create your own fork of the repository on GitHub.
-2. **Create a Branch:** Create a new branch for your feature or bug fix.
-3. **Make Changes:** Make your changes in your branch.
-4. **Submit a Pull Request:** Submit a pull request with a description of your changes.
-
-Please ensure that your code adheres to the project's coding style and includes appropriate tests.
-
-## License
-
-FIGO is licensed under the Apache 2.0 License. See the `LICENSE` file for details.
-
-## Acknowledgements
-
-- **Incus:** FIGO uses Incus for container and VM management.
-- **pylxd:** Python client library for LXD/Incus.
-- **Subprocess Module:** Used for running shell commands.
-
-Thanks to the open-source community for providing the tools and libraries that make this project possible.
