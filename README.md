@@ -70,66 +70,134 @@ Each command has its own set of subcommands and options.
       figo instance start instance_name
       ```
 
+    - **Options:**  
+      - `instance_name`: The name of the instance to start. Can include remote and project scope.
+
   - **stop**
-    - **Description:** Stop a specific instance.
+    - **Description:** Stop a specific instance or all instances in a scope.
     - **Syntax:**
 
       ```bash
-      figo instance stop instance_name
+      figo instance stop instance_name [-a | --all]
       ```
+
+    - **Options:**  
+      - `instance_name`: The name of the instance to stop. Can include remote and project scope.
+      - `-a, --all`: Stop all instances within the specified scope.
 
   - **set_key**
     - **Description:** Set a public key for a user in an instance.
     - **Syntax:**
 
       ```bash
-      figo instance set_key instance_name key_filename
+      figo instance set_key instance_name key_filename [-l login] [-d dir] [-f]
       ```
+
+    - **Options:**  
+      - `instance_name`: The name of the instance. Can include remote and project scope.
+      - `key_filename`: The filename of the public key on the host.
+      - `-l, --login`: Specify the login name (default: ubuntu).
+      - `-d, --dir`: Specify the directory path where the key file is located (default: ./users).
+      - `-f, --force`: Start the instance if not running, then stop it after setting the key.
 
   - **set_ip**
     - **Description:** Set a static IP address and gateway for a stopped instance.
     - **Syntax:**
 
       ```bash
-      figo instance set_ip instance_name ip_address gw_address
+      figo instance set_ip instance_name ip_address gw_address [-n nic]
       ```
+
+    - **Options:**  
+      - `instance_name`: The name of the instance to set the IP address for. Can include remote and project scope.
+      - `ip_address`: The static IP address with prefix length (e.g., 192.168.1.10/24).
+      - `gw_address`: The gateway address.
+      - `-n, --nic`: The NIC name (default: eth0 for containers, enp5s0 for VMs).
+
+  - **create**
+    - **Description:** Create a new instance.
+    - **Syntax:**
+
+      ```bash
+      figo instance create instance_name image [-t type] [-p project] [-r remote]
+      ```
+
+    - **Options:**  
+      - `instance_name`: The name of the new instance.
+      - `image`: Image source to create the instance from (e.g., `images:ubuntu/20.04`).
+      - `-t, --type`: Specify the instance type (`vm` or `container`).
+      - `-p, --project`: The project under which the instance will be created.
+      - `-r, --remote`: Specify the remote Incus server.
+
+  - **delete**
+    - **Description:** Delete a specific instance.
+    - **Syntax:**
+
+      ```bash
+      figo instance delete instance_name [-f]
+      ```
+
+    - **Options:**  
+      - `instance_name`: The name of the instance to delete.
+      - `-f, --force`: Force delete the instance even if it is running.
+
+  - **bash**
+    - **Description:** Execute bash in a specific instance.
+    - **Syntax:**
+
+      ```bash
+      figo instance bash instance_name [-f] [-t timeout] [-a attempts]
+      ```
+
+    - **Options:**  
+      - `instance_name`: The name of the instance to execute bash.
+      - `-f, --force`: Start the instance if not running and execute bash.
+      - `-t, --timeout`: Total timeout in seconds for retries.
+      - `-a, --attempts`: Number of retry attempts to connect.
 
 #### figo gpu
 
 - **Aliases:** `gp`, `g`
 - **Description:** Manage GPUs.
 - **Subcommands:**
-  - **status**  
-    **Description:** Show GPU status.  
-    **Syntax:**
+  - **status**
+    - **Description:** Show the current status of GPUs, including their availability and usage.
+    - **Syntax:**
 
-    ```bash
-    figo gpu status
-    ```
+      ```bash
+      figo gpu status
+      ```
 
-  - **list**  
-    **Description:** List GPU profiles.  
-    **Syntax:**
+  - **list**
+    - **Description:** List GPU profiles configured in the system.
+    - **Syntax:**
 
-    ```bash
-    figo gpu list
-    ```
+      ```bash
+      figo gpu list
+      ```
 
-  - **add**  
-    **Description:** Add a GPU profile to a specific instance.  
-    **Syntax:**
+  - **add**
+    - **Description:** Add a GPU profile to a specific instance.
+    - **Syntax:**
 
-    ```bash
-    figo gpu add instance_name
-    ```
+      ```bash
+      figo gpu add instance_name
+      ```
 
-  - **remove**  
-    **Description:** Remove GPU profiles from a specific instance.  
-    **Syntax:**
+    - **Options:**
+      - `instance_name`: The name of the instance to which the GPU profile will be added.
 
-    ```bash
-    figo gpu remove instance_name [--all]
-    ```
+  - **remove**
+    - **Description:** Remove GPU profiles from a specific instance. Optionally, remove all profiles.
+    - **Syntax:**
+
+      ```bash
+      figo gpu remove instance_name [--all]
+      ```
+
+    - **Options:**
+      - `instance_name`: The name of the instance from which the GPU profile will be removed.
+      - `--all`: Remove all GPU profiles from the specified instance.
 
 #### figo profile
 
@@ -137,20 +205,57 @@ Each command has its own set of subcommands and options.
 - **Description:** Manage profiles.
 - **Subcommands:**
   - **dump**  
-    **Description:** Dump profiles to `.yaml` files.  
-    **Syntax:**
+    - **Description:** Dump profiles to `.yaml` files.  
+    - **Syntax:**
 
-    ```bash
-    figo profile dump [-a | --all] [profile_name]
-    ```
+      ```bash
+      figo profile dump [-a | --all] [profile_name]
+      ```
 
-  - **list**  
-    **Description:** List profiles and associated instances.  
-    **Syntax:**
+    - **Options:**  
+      - `-a, --all`: Dump all profiles to `.yaml` files.
+      - `profile_name`: Name of the profile to dump.
 
-    ```bash
-    figo profile list
-    ```
+  - **list**
+    - **Description:** List profiles and associated instances.  
+    - **Syntax:**
+
+      ```bash
+      figo profile list [scope] [-i | --inherited]
+      ```
+
+    - **Options:**  
+      - `scope`: Define the scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or just `profile_name`.
+      - `-i, --inherited`: Include inherited profiles in the listing.
+
+  - **copy**
+    - **Description:** Copy a profile to a new profile name or to a different remote/project.  
+    - **Syntax:**
+
+      ```bash
+      figo profile copy source_profile [target_profile]
+      ```
+
+    - **Options:**  
+      - `source_profile`: Source profile in the format `remote:project.profile_name` or other similar formats.
+      - `target_profile`: Target profile name or destination, following the same format.
+
+    - **Examples:**
+      ```bash
+      figo profile copy remote:project.profile1 remote:project.profile2
+      figo profile copy remote:project.profile1 remote:project
+      ```
+
+  - **delete**
+    - **Description:** Delete a profile.  
+    - **Syntax:**
+
+      ```bash
+      figo profile delete profile_scope
+      ```
+
+    - **Options:**  
+      - `profile_scope`: Profile scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or `profile_name`.
 
 #### figo user
 
@@ -158,20 +263,74 @@ Each command has its own set of subcommands and options.
 - **Description:** Manage users.
 - **Subcommands:**
   - **list**  
-    **Description:** List installed certificates, with an option to show detailed information.  
-    **Syntax:**
+    - **Description:** List installed certificates, with an option to show detailed information.  
+    - **Syntax:**
 
-    ```bash
-    figo user list [-f | --full]
-    ```
+      ```bash
+      figo user list [-f | --full]
+      ```
+
+    - **Options:**  
+      - `-f, --full`: Show full details of installed certificates.
 
   - **add**  
-    **Description:** Add a new user to the system.  
-    **Syntax:**
+    - **Description:** Add a new user to the system.  
+    - **Syntax:**
 
-    ```bash
-    figo user add username [--cert cert_filename]
-    ```
+      ```bash
+      figo user add username [-c | --cert cert_filename] [-a | --admin] [-w | --wireguard] [-s | --set_vpn] [-p | --project project_name] [-e | --email email] [-n | --name full_name] [-o | --org organization] [-k | --keys]
+      ```
+
+    - **Options:**  
+      - `username`: Username of the new user.
+      - `-c, --cert`: Path to the user's certificate file. If not provided, a new key pair will be generated.
+      - `-a, --admin`: Add user with admin privileges.
+      - `-w, --wireguard`: Generate WireGuard configuration for the user in a `.conf` file.
+      - `-s, --set_vpn`: Set the user's VPN profile into the WireGuard access node.
+      - `-p, --project`: Associate the user with an existing project.
+      - `-e, --email`: User's email address.
+      - `-n, --name`: User's full name.
+      - `-o, --org`: User's organization.
+      - `-k, --keys`: Generate a key pair for SSH access to instances.
+
+  - **grant**  
+    - **Description:** Grant a user access to a specific project.  
+    - **Syntax:**
+
+      ```bash
+      figo user grant username projectname
+      ```
+
+    - **Options:**  
+      - `username`: Username to grant access.
+      - `projectname`: Project name to grant access to.
+
+  - **edit**  
+    - **Description:** Edit an existing user's details.  
+    - **Syntax:**
+
+      ```bash
+      figo user edit username [-e | --email new_email] [-n | --name new_full_name] [-o | --org new_organization]
+      ```
+
+    - **Options:**  
+      - `username`: Username to edit.
+      - `-e, --email`: New email for the user.
+      - `-n, --name`: New full name for the user.
+      - `-o, --org`: New organization for the user.
+
+  - **delete**  
+    - **Description:** Delete an existing user from the system.  
+    - **Syntax:**
+
+      ```bash
+      figo user delete username [-p | --purge] [-k | --keepfiles]
+      ```
+
+    - **Options:**  
+      - `username`: Username of the user to delete.
+      - `-p, --purge`: Delete associated projects and user files, even if the user does not exist.
+      - `-k, --keepfiles`: Keep the associated files of the user in the users folder.
 
 #### figo remote
 
@@ -179,28 +338,34 @@ Each command has its own set of subcommands and options.
 - **Description:** Manage remotes.
 - **Subcommands:**
   - **list**  
-    **Description:** List available remotes, with an option to show detailed information.  
-    **Syntax:**
+    - **Description:** List available remotes, with an option to show detailed information.  
+    - **Syntax:**
 
-    ```bash
-    figo remote list [-f | --full]
-    ```
+      ```bash
+      figo remote list [-f | --full]
+      ```
+
+    - **Options:**  
+      - `-f, --full`: Show full details of available remotes.
 
   - **enroll**  
-    **Description:** Enroll a remote Incus server.  
-    **Syntax:**
+    - **Description:** Enroll a remote Incus server.  
+    - **Syntax:**
 
-    ```bash
-    figo remote enroll remote_server ip_address [port] [user] [cert_filename] [--loc_name loc_name]
-    ```
+      ```bash
+      figo remote enroll remote_server ip_address [port] [user] [cert_filename] [--loc_name loc_name]
+      ```
 
-    - **Options:**
-      - `remote_server`: The name you want to assign to the remote server.
-      - `ip_address`: The IP address or domain name of the remote server.
-      - `port`: The port number of the remote server (default: 8443).
-      - `user`: The SSH username (default: ubuntu).
-      - `cert_filename`: The path to the client certificate file (default: `~/.config/incus/client.cr`).
-      - `--loc_name`: The local storage name (default: `main`).
+    - **Options:**  
+      - `remote_server`: Name to assign to the remote server.
+      - `ip_address`: IP address or domain name of the remote server.
+      - `port`: Port of the remote server (default: 8443).
+      - `user`: Username for SSH into the remote server (default: `ubuntu`).
+      - `cert_filename`: Path to the client certificate file (default: `~/.config/incus/client.crt`).
+      - `--loc_name`: Suffix of the certificate name saved on the remote server (default: `main`).
+
+    - **Description:**  
+      This command allows an administrator to enroll a remote Incus server, setting up a connection that enables the management of resources from a centralized main node in the FIGO system.
 
 #### figo project
 
@@ -242,6 +407,8 @@ Each command has its own set of subcommands and options.
 
     - **Options:**  
       - `project_name`: Name of the project to delete, in the format `remote:project` or `project`.
+
+Here is the updated documentation for the **figo vpn** command:
 
 #### figo vpn
 
