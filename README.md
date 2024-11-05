@@ -386,13 +386,14 @@ Each command has its own set of subcommands and options.
     - **Syntax:**
 
       ```bash
-      figo project list [scope] [--remote remote_name] [--user user_name]
+      figo project list [scope] [--remote remote_name] [--user user_name] [-e | --extend]
       ```
 
     - **Options:**  
       - `scope`: Scope in the format `remote:project`, `remote:`, or `project.` to limit the listing.
       - `--remote`: Specify the remote server name.
       - `--user`: Specify a user to filter the projects by ownership.
+      - `-e, --extend`: Extends column width to fit the content.
 
   - **create**
     - **Description:** Create a new project, specifying scope, project name, and user ownership.
