@@ -128,12 +128,8 @@ def truncate(text, length):
         return f"{text[:length-2]}*>"
     return text
 
-global_counter = 0
 def add_row_to_output(COLS, list_of_values, reset_color=False):
-    global global_counter
     output_rows.append((COLS, list_of_values, reset_color))
-    print (f"counter: {global_counter} list_of_values: {list_of_values}")
-    global_counter += 1
 
 def print_row2(COLS, list_of_values, reset_color=False):
     """Print the values in a row, right-trimming only the final output."""
@@ -1263,6 +1259,7 @@ def show_gpu_status(client):
     COLS = [('TOTAL', 10), ('AVAILABLE', 10), ('ACTIVE', 10), ('PROFILES', 40)]
     add_header_line_to_output(COLS)
     add_row_to_output(COLS, [str(total_gpus), str(available_gpus), str(len(active_gpu_profiles)), gpu_profiles_str])
+    flush_output()
 
 def list_gpu_profiles(client):
     """List all GPU profiles."""
@@ -1272,6 +1269,7 @@ def list_gpu_profiles(client):
     COLS = [('TOTAL', 10), ('PROFILES', 30)]
     add_header_line_to_output(COLS)
     add_row_to_output(COLS, [str(len(gpu_profiles)), ", ".join(gpu_profiles)])
+    flush_output()
 
 def add_gpu_profile(instance_name, client):
     """Add a GPU profile to an instance.
@@ -1509,6 +1507,8 @@ def list_profiles(remote, project, profile_name=None, inherited=False):
                     if not inherited and not check_profiles_feature(my_remote_node, my_project["name"]):
                         continue
                     list_profiles_specific(my_remote_node, my_project["name"], profile_name, COLS)
+    
+    flush_output()
 
 def check_profiles_feature(remote, project, remote_client=None):
     """
@@ -1693,6 +1693,8 @@ def list_users(client, full=False):
                              cert["email"], cert["real_name"], cert["org"], cert["projects"]])
         else:
             add_row_to_output(COLS, [cert["name"], cert["fingerprint"]])
+
+    flush_output()
 
 def get_next_wg_client_ip_address():
     # List to contain the IP addresses found in .conf files
@@ -2715,6 +2717,8 @@ def list_remotes(full=False):
         for remote_name, remote_info in remotes.items():
             add_row_to_output(COLS, [remote_name, remote_info['Addr']])
 
+    flush_output()
+
 def resolve_hostname(hostname):
     """Resolve the hostname to an IP address."""
     try:
@@ -2852,6 +2856,8 @@ def list_projects(remote_name, project):
                 add_row_to_output(COLS, [my_project['name'], remote_name])
         else:
             print(f"Error: Failed to retrieve projects on remote '{remote_name}'")
+
+    flush_output()
 
 #############################################
 ###### figo vpn command functions ###########
