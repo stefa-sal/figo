@@ -1262,7 +1262,7 @@ def exec_instance_bash(instance_name, remote, project, force=False, timeout=BASH
 ###### figo gpu command functions ###########
 #############################################
 
-def show_gpu_status(client):
+def show_gpu_status(client, extend=False):
     """Show the status of GPUs.
     
     It uses lspci to count NVIDIA GPUs
@@ -1290,7 +1290,7 @@ def show_gpu_status(client):
     COLS = [('TOTAL', 10), ('AVAILABLE', 10), ('ACTIVE', 10), ('PROFILES', 40)]
     add_header_line_to_output(COLS)
     add_row_to_output(COLS, [str(total_gpus), str(available_gpus), str(len(active_gpu_profiles)), gpu_profiles_str])
-    flush_output()
+    flush_output(extend=extend)
 
 def list_gpu_profiles(client, extend=False):
     """List all GPU profiles."""
@@ -1498,7 +1498,7 @@ def list_profiles_specific(remote, project, profile_name=None, COLS=None):
 
     return True
 
-def list_profiles(remote, project, profile_name=None, inherited=False):
+def list_profiles(remote, project, profile_name=None, inherited=False, extend=False):
     """
     List profiles overall or on specific remote and project optionally with a match on profile_name.
 
@@ -1507,6 +1507,7 @@ def list_profiles(remote, project, profile_name=None, inherited=False):
     - If project is specified but remote is not, list all profiles on the project on all remotes.
     - If remote and project are specified, list all profiles on the remote and project.
     - If `inherited` is False, skip profiles from projects where `features.profiles` is False.
+    - extend: If True, adapts the output column width to the content.
     """
 
     COLS = [('PROFILE', 25), ('CONTEXT', 25), ('INSTANCES', 80)]
@@ -1539,7 +1540,7 @@ def list_profiles(remote, project, profile_name=None, inherited=False):
                         continue
                     list_profiles_specific(my_remote_node, my_project["name"], profile_name, COLS)
     
-    flush_output()
+    flush_output(extend=extend)
 
 def check_profiles_feature(remote, project, remote_client=None):
     """
@@ -3486,26 +3487,26 @@ def create_gpu_parser(subparsers):
     gpu_parser = subparsers.add_parser("gpu", help="Manage GPUs")
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
 
-    # Status command
-    gpu_subparsers.add_parser("status", help="Show GPU status")
-    
-    # List command with extended column width option
-    gpu_list_parser = gpu_subparsers.add_parser("list", aliases=["l"], help="List GPU profiles")
-    gpu_list_parser.add_argument(
-        "-e", "--extend", action="store_true",
-        help="Extend column width to fit the content"
+    # GPU Status with extended column option
+    status_gpu_parser = gpu_subparsers.add_parser("status", help="Show GPU status")
+    status_gpu_parser.add_argument(
+        "-e", "--extend", action="store_true", help="Extend column width to fit the content"
     )
-    
-    # Add GPU command
+
+    # List GPU profiles
+    list_gpu_parser = gpu_subparsers.add_parser("list", aliases=["l"], help="List GPU profiles")
+    list_gpu_parser.add_argument(
+        "-e", "--extend", action="store_true", help="Extend column width to fit the content"
+    )
+
+    # Add and Remove GPU commands
     add_gpu_parser = gpu_subparsers.add_parser("add", help="Add a GPU profile to a specific instance")
     add_gpu_parser.add_argument("instance_name", help="Name of the instance to add a GPU profile to")
-    
-    # Remove GPU command
     remove_gpu_parser = gpu_subparsers.add_parser("remove", help="Remove GPU profiles from a specific instance")
     remove_gpu_parser.add_argument("instance_name", help="Name of the instance to remove a GPU profile from")
     remove_gpu_parser.add_argument("--all", action="store_true", help="Remove all GPU profiles from the instance")
 
-    # Aliases for GPU parser
+    # Aliases for main parser
     subparsers._name_parser_map["gp"] = gpu_parser
     subparsers._name_parser_map["g"] = gpu_parser
 
@@ -3515,7 +3516,8 @@ def handle_gpu_command(args, client, parser_dict):
     if not args.gpu_command:
         parser_dict['gpu_parser'].print_help()
     elif args.gpu_command == "status":
-        show_gpu_status(client)
+        # Pass the extend argument to adjust column width
+        show_gpu_status(client, extend=args.extend)
     elif args.gpu_command in ["list", "l"]:
         # Pass the extend argument to adjust column width
         list_gpu_profiles(client, extend=args.extend)
@@ -3527,6 +3529,7 @@ def handle_gpu_command(args, client, parser_dict):
         else:
             remove_gpu_profile(args.instance_name, client)
 
+
 #############################################
 ###### figo profile command CLI #############
 #############################################
@@ -3536,14 +3539,18 @@ def create_profile_parser(subparsers):
                 epilog="Use 'figo profile <command> -h' for more information on a specific command.") 
     profile_subparsers = profile_parser.add_subparsers(dest="profile_command")
 
+    # Profile dump command
     dump_profiles_parser = profile_subparsers.add_parser("dump", help="Dump profiles to .yaml files")
     dump_profiles_parser.add_argument("-a", "--all", action="store_true", help="Dump all profiles to .yaml files")
     dump_profiles_parser.add_argument("profile_name", nargs="?", help="Name of the profile to dump")
 
+    # List command with extend option
     list_parser = profile_subparsers.add_parser("list", aliases=["l"], help="List profiles and associated instances")
     list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project.profile_name', 'remote:project', 'project.profile_name', 'profile_name', or defaults to 'local:default'")
     list_parser.add_argument("-i", "--inherited", action="store_true", help="Include inherited profiles in the listing")
+    list_parser.add_argument("-e", "--extend", action="store_true", help="Extend column width to fit the content")
 
+    # Copy command
     copy_parser = profile_subparsers.add_parser("copy", 
                         help="Copy a profile to a new profile name or remote/project",
                         description="Copy a profile to a new profile name or remote/project.\n"
@@ -3555,15 +3562,17 @@ def create_profile_parser(subparsers):
     copy_parser.add_argument("source_profile", help="Source profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'")
     copy_parser.add_argument("target_profile", nargs="?", help="Target profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'")
 
+    # Delete command
     delete_parser = profile_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete a profile")
     delete_parser.add_argument("profile_scope", help="Profile scope in the format 'remote:project.profile_name', 'remote:project', 'project.profile_name', 'profile_name'")
 
+    # Aliases for main parser
     subparsers._name_parser_map["pr"] = profile_parser
     subparsers._name_parser_map["p"] = profile_parser
 
     return profile_parser
 
-def parse_profile_scope(profile_scope,command='list'):
+def parse_profile_scope(profile_scope, command='list'):
     """Parse a profile scope string and return remote, project, and profile names.
     
     It is used for profile list and profile copy commands.
@@ -3603,7 +3612,6 @@ def parse_profile_scope(profile_scope,command='list'):
         else: # profile
             profile = profile_scope
 
-
     if command == 'list':
         pass
     if command == 'copy':
@@ -3626,7 +3634,7 @@ def handle_profile_command(args, client, parser_dict):
             logger.error("You must provide a profile name or use the --all option.")
     elif args.profile_command in ["list", "l"]:
         remote, project, profile = parse_profile_scope(args.scope, command='list')
-        list_profiles(remote, project, profile_name=profile, inherited=args.inherited)
+        list_profiles(remote, project, profile_name=profile, inherited=args.inherited, extend=args.extend)
     elif args.profile_command == "copy":
         source_remote, source_project, source_profile = parse_profile_scope(args.source_profile, command='copy')
         target_remote, target_project, target_profile = parse_profile_scope(args.target_profile 

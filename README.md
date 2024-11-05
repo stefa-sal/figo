@@ -49,11 +49,11 @@ Each command has its own set of subcommands and options.
 - **Description:** Manage instances.
 - **Subcommands:**
   - **list**
-    - **Description:** List instances, with an option to show detailed profiles.
+    - **Description:** List instances, with options to show detailed profiles and adjust column width for better readability.
     - **Syntax:**
 
       ```bash
-      figo instance list [scope] [-f | --full] [-p project] [-r remote]
+      figo instance list [scope] [-f | --full] [-p project] [-r remote] [-e | --extend]
       ```
 
     - **Options:**  
@@ -61,6 +61,7 @@ Each command has its own set of subcommands and options.
       - `scope`: Define the scope in the format `remote:project` to limit the listing.
       - `-p, --project`: Specify the project name to list instances from.
       - `-r, --remote`: Specify the remote Incus server name.
+      - `-e, --extend`: Extend column width to fit content.
 
   - **start**
     - **Description:** Start a specific instance.
@@ -161,20 +162,26 @@ Each command has its own set of subcommands and options.
 - **Description:** Manage GPUs.
 - **Subcommands:**
   - **status**
-    - **Description:** Show the current status of GPUs, including their availability and usage.
+    - **Description:** Show the current status of GPUs, with an option to extend column width.
     - **Syntax:**
 
       ```bash
-      figo gpu status
+      figo gpu status [-e | --extend]
       ```
+
+    - **Options:**
+      - `-e, --extend`: Extend column width to fit the content.
 
   - **list**
-    - **Description:** List GPU profiles configured in the system.
+    - **Description:** List GPU profiles configured in the system, with an option to extend column width.
     - **Syntax:**
 
       ```bash
-      figo gpu list
+      figo gpu list [-e | --extend]
       ```
+
+    - **Options:**
+      - `-e, --extend`: Extend column width to fit the content.
 
   - **add**
     - **Description:** Add a GPU profile to a specific instance.
@@ -204,32 +211,33 @@ Each command has its own set of subcommands and options.
 - **Aliases:** `pr`, `p`
 - **Description:** Manage profiles.
 - **Subcommands:**
-  - **dump**  
-    - **Description:** Dump profiles to `.yaml` files.  
+  - **dump**
+    - **Description:** Dump profiles to `.yaml` files.
     - **Syntax:**
 
       ```bash
       figo profile dump [-a | --all] [profile_name]
       ```
 
-    - **Options:**  
+    - **Options:**
       - `-a, --all`: Dump all profiles to `.yaml` files.
-      - `profile_name`: Name of the profile to dump.
+      - `profile_name`: The name of the profile to dump.
 
   - **list**
-    - **Description:** List profiles and associated instances.  
+    - **Description:** List profiles and associated instances, with options for inherited profiles and extended column width.
     - **Syntax:**
 
       ```bash
-      figo profile list [scope] [-i | --inherited]
+      figo profile list [scope] [-i | --inherited] [-e | --extend]
       ```
 
-    - **Options:**  
-      - `scope`: Define the scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or just `profile_name`.
+    - **Options:**
+      - `scope`: Define the scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or `profile_name`.
       - `-i, --inherited`: Include inherited profiles in the listing.
+      - `-e, --extend`: Extend column width to fit the content.
 
   - **copy**
-    - **Description:** Copy a profile to a new profile name or to a different remote/project.  
+    - **Description:** Copy a profile to a new profile name or remote/project.
     - **Syntax:**
 
       ```bash
@@ -237,8 +245,8 @@ Each command has its own set of subcommands and options.
       ```
 
     - **Options:**  
-      - `source_profile`: Source profile in the format `remote:project.profile_name` or other similar formats.
-      - `target_profile`: Target profile name or destination, following the same format.
+      - `source_profile`: Source profile in the format `remote:project.profile_name` or `project.profile_name` or `profile_name`.
+      - `target_profile`: Target profile name or destination, following the same format as `source_profile`.
 
     - **Examples:**
       ```bash
@@ -247,14 +255,14 @@ Each command has its own set of subcommands and options.
       ```
 
   - **delete**
-    - **Description:** Delete a profile.  
+    - **Description:** Delete a profile.
     - **Syntax:**
 
       ```bash
       figo profile delete profile_scope
       ```
 
-    - **Options:**  
+    - **Options:**
       - `profile_scope`: Profile scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or `profile_name`.
 
 #### figo user
