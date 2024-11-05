@@ -408,8 +408,6 @@ Each command has its own set of subcommands and options.
     - **Options:**  
       - `project_name`: Name of the project to delete, in the format `remote:project` or `project`.
 
-Here is the updated documentation for the **figo vpn** command:
-
 #### figo vpn
 
 - **Description:** Manage VPN configuration for secure communication and routing.
