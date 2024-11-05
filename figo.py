@@ -128,7 +128,14 @@ def truncate(text, length):
         return f"{text[:length-2]}*>"
     return text
 
-def print_row(COLS, list_of_values, reset_color=False):
+global_counter = 0
+def add_row_to_output(COLS, list_of_values, reset_color=False):
+    global global_counter
+    output_rows.append((COLS, list_of_values, reset_color))
+    print (f"counter: {global_counter} list_of_values: {list_of_values}")
+    global_counter += 1
+
+def print_row2(COLS, list_of_values, reset_color=False):
     """Print the values in a row, right-trimming only the final output."""
     RESET = "\033[0m"
     truncated_values = []
@@ -148,7 +155,30 @@ def print_row(COLS, list_of_values, reset_color=False):
     
     print(formatted_row)
 
-def print_header_line(COLS):
+header_row = ""
+output_rows = []
+
+def add_header_line_to_output(COLS):
+    global header_row
+    global output_rows
+
+    output_rows = []
+    formatted_row = gen_format_str(COLS).format(*gen_header_list(COLS)).rstrip()
+    header_row = formatted_row  # Store the header row for later use
+
+def flush_output():
+    global header_row
+    global output_rows
+
+    print(header_row)
+
+    for row in output_rows:
+        print_row2(*row)
+
+    output_rows = []
+    header_row = ""
+
+def print_header_line2(COLS):
     formatted_row = gen_format_str(COLS).format(*gen_header_list(COLS)).rstrip()
     print(formatted_row)
 
@@ -385,15 +415,14 @@ def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_
         if full:
             # Print all profiles
             profiles_str = ", ".join(instance.get("profiles", []))
-            print_row(COLS, [name, instance_type, state, context, format_ip_device_pairs(ip_device_pairs), profiles_str])
+            add_row_to_output(COLS, [name, instance_type, state, context, format_ip_device_pairs(ip_device_pairs), profiles_str])
         else:
             # Print only GPU profiles with color coding based on state
             gpu_profiles = [profile for profile in instance.get("profiles", []) if profile.startswith("gpu")]
             profiles_str = ", ".join(gpu_profiles)
             colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
-            print_row(COLS, [name, instance_type, state, context, format_ip_device_pairs(ip_device_pairs), colored_profiles_str],
+            add_row_to_output(COLS, [name, instance_type, state, context, format_ip_device_pairs(ip_device_pairs), colored_profiles_str],
                       reset_color=True)
-
     return True
     
 
@@ -407,7 +436,7 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
     else:
         COLS = [('INSTANCE',16), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('GPU PROFILES',75)]
 
-    print_header_line(COLS)
+    add_header_line_to_output(COLS)
 
     # use a set to store the remote nodes that failed to retrieve the projects
     set_of_errored_remotes = set()
@@ -457,6 +486,8 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
                                              instance_scope=instance_scope, full=full)
             if not result:
                 set_of_errored_remotes.add(remote_node)
+
+    flush_output()
 
     if set_of_errored_remotes:
         logger.error(f"Error: Failed to retrieve projects from remote(s): {', '.join(set_of_errored_remotes)}")
@@ -1205,7 +1236,12 @@ def exec_instance_bash(instance_name, remote, project, force=False, timeout=BASH
 #############################################
 
 def show_gpu_status(client):
-    """Show the status of GPUs."""
+    """Show the status of GPUs.
+    
+    It uses lspci to count NVIDIA GPUs
+    I checks the total number of GPUs, the number of available GPUs, and the active GPU profiles.
+
+    """
     try:
         result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
     except subprocess.CalledProcessError as e:
@@ -1225,8 +1261,8 @@ def show_gpu_status(client):
 
     gpu_profiles_str = ", ".join(active_gpu_profiles)
     COLS = [('TOTAL', 10), ('AVAILABLE', 10), ('ACTIVE', 10), ('PROFILES', 40)]
-    print_header_line(COLS)
-    print_row(COLS, [str(total_gpus), str(available_gpus), str(len(active_gpu_profiles)), gpu_profiles_str])
+    add_header_line_to_output(COLS)
+    add_row_to_output(COLS, [str(total_gpus), str(available_gpus), str(len(active_gpu_profiles)), gpu_profiles_str])
 
 def list_gpu_profiles(client):
     """List all GPU profiles."""
@@ -1234,8 +1270,8 @@ def list_gpu_profiles(client):
         profile.name for profile in client.profiles.all() if profile.name.startswith("gpu-")
     ]
     COLS = [('TOTAL', 10), ('PROFILES', 30)]
-    print_header_line(COLS)
-    print_row(COLS, [str(len(gpu_profiles)), ", ".join(gpu_profiles)])
+    add_header_line_to_output(COLS)
+    add_row_to_output(COLS, [str(len(gpu_profiles)), ", ".join(gpu_profiles)])
 
 def add_gpu_profile(instance_name, client):
     """Add a GPU profile to an instance.
@@ -1429,7 +1465,7 @@ def list_profiles_specific(remote, project, profile_name=None, COLS=None):
         ]
         context = f"{remote}:{project}" 
         associated_instances_str = ', '.join(associated_instances) if associated_instances else 'None'
-        print_row(COLS, [profile.name, context, associated_instances_str])
+        add_row_to_output(COLS, [profile.name, context, associated_instances_str])
 
     return True
 
@@ -1445,7 +1481,7 @@ def list_profiles(remote, project, profile_name=None, inherited=False):
     """
 
     COLS = [('PROFILE', 25), ('CONTEXT', 25), ('INSTANCES', 80)]
-    print_header_line(COLS)
+    add_header_line_to_output(COLS)
 
     if remote and project:
         if not inherited and not check_profiles_feature(remote, project):
@@ -1648,15 +1684,15 @@ def list_users(client, full=False):
                ('REAL NAME', 20), ('ORGANIZATION', 15), ('PROJECTS', 20)]
     else:
         COLS = [('NAME', 20), ('FINGERPRINT', 12)]
-    print_header_line(COLS)
+    add_header_line_to_output(COLS)
 
     # Print sorted certificates
     for cert in certificates_info:
         if full:
-            print_row(COLS, [cert["name"], cert["fingerprint"], cert["type"], cert["admin"],
+            add_row_to_output(COLS, [cert["name"], cert["fingerprint"], cert["type"], cert["admin"],
                              cert["email"], cert["real_name"], cert["org"], cert["projects"]])
         else:
-            print_row(COLS, [cert["name"], cert["fingerprint"]])
+            add_row_to_output(COLS, [cert["name"], cert["fingerprint"]])
 
 def get_next_wg_client_ip_address():
     # List to contain the IP addresses found in .conf files
@@ -2675,9 +2711,9 @@ def list_remotes(full=False):
             print("-" * 60)
     else:
         COLS = [('REMOTE NAME', 20), ('ADDRESS', 40)]
-        print_header_line(COLS)
+        add_header_line_to_output(COLS)
         for remote_name, remote_info in remotes.items():
-            print_row(COLS, [remote_name, remote_info['Addr']])
+            add_row_to_output(COLS, [remote_name, remote_info['Addr']])
 
 def resolve_hostname(hostname):
     """Resolve the hostname to an IP address."""
@@ -2786,7 +2822,7 @@ def list_projects(remote_name, project):
     """List projects on the specified remote and project scope."""
 
     COLS = [('PROJECT',20), ('REMOTE',25)]
-    print_header_line(COLS)
+    add_header_line_to_output(COLS)
 
     if remote_name is None:
         # List all projects on all remotes
@@ -2801,7 +2837,7 @@ def list_projects(remote_name, project):
                     if project:
                         if project not in my_project['name']:
                             continue
-                    print_row(COLS, [my_project['name'], my_remote_name])
+                    add_row_to_output(COLS, [my_project['name'], my_remote_name])
 
             else:
                 print("  Error: Failed to retrieve projects.")
@@ -2813,7 +2849,7 @@ def list_projects(remote_name, project):
                 if project:
                     if project not in my_project['name']:
                         continue
-                print_row(COLS, [my_project['name'], remote_name])
+                add_row_to_output(COLS, [my_project['name'], remote_name])
         else:
             print(f"Error: Failed to retrieve projects on remote '{remote_name}'")
 
