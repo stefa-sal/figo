@@ -1667,7 +1667,7 @@ def delete_profile(remote, project, profile_name):
 ###### figo user command functions ##########
 #############################################
 
-def list_users(client, full=False):
+def list_users(client, full=False, extend=False):
     """List all installed certificates with optional full details, adding email, name, and org details with specified lengths."""
 
     certificates_info = []
@@ -1726,7 +1726,7 @@ def list_users(client, full=False):
         else:
             add_row_to_output(COLS, [cert["name"], cert["fingerprint"]])
 
-    flush_output()
+    flush_output(extend=extend)
 
 def get_next_wg_client_ip_address():
     # List to contain the IP addresses found in .conf files
@@ -2723,7 +2723,7 @@ def delete_user(user_name, client, purge=False, removefiles=False):
 ###### figo remote command functions ########
 #############################################
 
-def list_remotes(full=False):
+def list_remotes(full=False, extend=False):
     """Lists the available Incus remotes and their addresses."""
     try:
         remotes = get_incus_remotes()
@@ -2749,7 +2749,7 @@ def list_remotes(full=False):
         for remote_name, remote_info in remotes.items():
             add_row_to_output(COLS, [remote_name, remote_info['Addr']])
 
-    flush_output()
+    flush_output(extend=extend) # Flush the output buffer
 
 def resolve_hostname(hostname):
     """Resolve the hostname to an IP address."""
@@ -3683,6 +3683,7 @@ def create_user_parser(subparsers):
     # List subcommand
     user_list_parser = user_subparsers.add_parser("list", aliases=["l"], help="List installed certificates (use -f or --full for more details)")
     user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
+    user_list_parser.add_argument("-e", "--extend", action="store_true", help="Extend column width to fit the content")
 
     # Add subcommand
     user_add_parser = user_subparsers.add_parser("add", aliases=["a"], help="Add a new user to the system")
@@ -3726,7 +3727,7 @@ def handle_user_command(args, client, parser_dict, client_name=None):
     if not args.user_command:
         parser_dict['user_parser'].print_help()
     elif args.user_command in ["list", "l"]:
-        list_users(client, full=args.full)
+        list_users(client, full=args.full, extend=args.extend)
     elif args.user_command == "add":
         # Pass the 'keys' flag to the add_user function
         add_user(args.username, args.cert, client, remote_name=client_name, admin=args.admin, wireguard=args.wireguard, 
@@ -3749,9 +3750,12 @@ def create_remote_parser(subparsers):
     remote_parser = subparsers.add_parser("remote", help="Manage remotes")
     remote_subparsers = remote_parser.add_subparsers(dest="remote_command")
 
+    # List subcommand with --full and --extend options
     remote_list_parser = remote_subparsers.add_parser("list", aliases=["l"], help="List available remotes (use -f or --full for more details)")
     remote_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of available remotes")
+    remote_list_parser.add_argument("-e", "--extend", action="store_true", help="Extend column width to fit the content")
 
+    # Enroll subcommand
     remote_enroll_parser = remote_subparsers.add_parser("enroll", help="Enroll a remote Incus server")
     remote_enroll_parser.add_argument("remote_server", help="Name to assign to the remote server")
     remote_enroll_parser.add_argument("ip_address", help="IP address or domain name of the remote server")
@@ -3760,6 +3764,7 @@ def create_remote_parser(subparsers):
     remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.crt", help="Client certificate file to transfer (default: ~/.config/incus/client.cr)")
     remote_enroll_parser.add_argument("--loc_name", default="main", help="Suffix of certificate name saved on the remote server (default: main)")
 
+    # Link aliases for easier access
     subparsers._name_parser_map["re"] = remote_parser
     subparsers._name_parser_map["r"] = remote_parser
 
@@ -3769,7 +3774,7 @@ def handle_remote_command(args, parser_dict):
     if not args.remote_command:
         parser_dict['remote_parser'].print_help()
     elif args.remote_command in ["list", "l"]:
-        list_remotes(full=args.full)
+        list_remotes(full=args.full, extend=args.extend)  # Pass --extend option to list_remotes
     elif args.remote_command == "enroll":
         ip_address_port = f"{args.ip_address}:{args.port}"
         enroll_remote(args.remote_server, ip_address_port, args.cert_filename, user=args.user, loc_name=args.loc_name)

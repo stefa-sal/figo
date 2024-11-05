@@ -271,15 +271,16 @@ Each command has its own set of subcommands and options.
 - **Description:** Manage users.
 - **Subcommands:**
   - **list**  
-    - **Description:** List installed certificates, with an option to show detailed information.  
+    - **Description:** List installed certificates, with options to show detailed information and extend column width for better readability.  
     - **Syntax:**
 
       ```bash
-      figo user list [-f | --full]
+      figo user list [-f | --full] [-e | --extend]
       ```
 
     - **Options:**  
       - `-f, --full`: Show full details of installed certificates.
+      - `-e, --extend`: Extend column width to fit the content.
 
   - **add**  
     - **Description:** Add a new user to the system.  
