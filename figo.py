@@ -1226,7 +1226,7 @@ def show_gpu_status(client):
     gpu_profiles_str = ", ".join(active_gpu_profiles)
     COLS = [('TOTAL', 10), ('AVAILABLE', 10), ('ACTIVE', 10), ('PROFILES', 40)]
     print_header_line(COLS)
-    print_row(COLS, [total_gpus, available_gpus, len(active_gpu_profiles), gpu_profiles_str])
+    print_row(COLS, [str(total_gpus), str(available_gpus), str(len(active_gpu_profiles)), gpu_profiles_str])
 
 def list_gpu_profiles(client):
     """List all GPU profiles."""
