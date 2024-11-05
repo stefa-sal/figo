@@ -131,14 +131,17 @@ def truncate(text, length):
 def add_row_to_output(COLS, list_of_values, reset_color=False):
     output_rows.append((COLS, list_of_values, reset_color))
 
-def print_row2(COLS, list_of_values, reset_color=False):
+def print_row(COLS, list_of_values, reset_color=False, column_widths=None):
     """Print the values in a row, right-trimming only the final output."""
     RESET = "\033[0m"
     truncated_values = []
     
     # Iterate over the values, truncating as necessary
     for i, value in enumerate(list_of_values):
-        truncated_value = truncate(value, COLS[i][1])
+        if not column_widths:
+            truncated_value = truncate(value, COLS[i][1] )
+        else:
+            truncated_value = truncate(value, column_widths[i] )
         
         # Check for reset color at the end of the value
         if reset_color and value.endswith(RESET) and not truncated_value.endswith(RESET):
@@ -147,36 +150,54 @@ def print_row2(COLS, list_of_values, reset_color=False):
         truncated_values.append(truncated_value)
 
     # Generate the formatted string and apply rstrip to trim the final output
-    formatted_row = gen_format_str(COLS).format(*truncated_values).rstrip()
+    formatted_row = gen_format_str(COLS,given_widths=column_widths).format(*truncated_values).rstrip()
     
     print(formatted_row)
 
-header_row = ""
+header_row = []
 output_rows = []
 
 def add_header_line_to_output(COLS):
     global header_row
     global output_rows
 
-    output_rows = []
-    formatted_row = gen_format_str(COLS).format(*gen_header_list(COLS)).rstrip()
-    header_row = formatted_row  # Store the header row for later use
+    output_rows = [] # Clear the output rows
+    header_row = [] # Clear the header row
+    header_row.append(COLS)
 
-def flush_output():
+def evaluate_output_rows_column_width():
+    column_widths = [0] * len(output_rows[0][0])
+    #evaluate the width of the columns in the header row
+    for i, header in enumerate(header_row[0]):
+        column_widths[i] = len(header[0])
+
+    for row in output_rows:
+        for i, value in enumerate(row[1]):
+            column_widths[i] = max(column_widths[i], len(value))
+
+    return column_widths
+
+def print_header_line(COLS, column_widths=None):
+    formatted_row = gen_format_str(COLS,given_widths=column_widths).format(*gen_header_list(COLS)).rstrip()
+    print(formatted_row)
+
+def flush_output(extend=False):
     global header_row
     global output_rows
 
-    print(header_row)
+    if extend:
+        column_widths = evaluate_output_rows_column_width() # Evaluate the column width based on the output rows
+    else:
+        column_widths = None
+
+    print_header_line(header_row[0], column_widths=column_widths) # Print the header row
 
     for row in output_rows:
-        print_row2(*row)
+        print_row(*row, column_widths=column_widths) # Print the output rows
 
-    output_rows = []
-    header_row = ""
+    output_rows = [] # Clear the output rows
+    header_row = [] # Clear the header row
 
-def print_header_line2(COLS):
-    formatted_row = gen_format_str(COLS).format(*gen_header_list(COLS)).rstrip()
-    print(formatted_row)
 
 
 def is_valid_ip(ip):
@@ -221,11 +242,21 @@ def matches(target_string, compare_string):
     # Use full match to check if target_string matches the compare_string pattern
     return re.fullmatch(compare_string, target_string) is not None
 
-def gen_format_str(columns):
-    """Generate the format string based on the given columns."""
+def gen_format_str(columns, given_widths=None):
+    """Generate the format string based on the given columns.
+    
+    The format string is used to format the values in each row.
+    columns: A list of tuples with the column name and width.
+    
+    """
     format_str = ""
-    for _, width in columns:
-        format_str += f"{{:<{width}}} "
+    if not given_widths:
+        for _, width in columns:
+            format_str += f"{{:<{width}}} "
+    else:
+        # Use the given widths to generate the format string
+        for col_width in given_widths:
+            format_str += f"{{:<{col_width}}} "
     return format_str.strip()  # Remove the trailing space
 
 def gen_header_list(columns):
@@ -422,7 +453,7 @@ def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_
     return True
     
 
-def list_instances(remote_node=None, project_name=None, instance_scope=None, full=False):
+def list_instances(remote_node=None, project_name=None, instance_scope=None, full=False, extend=False):
     """Print profiles of all instances, either from the local or a remote Incus node.
     If full is False, prints only GPU profiles with color coding.
     """
@@ -483,7 +514,7 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
             if not result:
                 set_of_errored_remotes.add(remote_node)
 
-    flush_output()
+    flush_output(extend=extend)
 
     if set_of_errored_remotes:
         logger.error(f"Error: Failed to retrieve projects from remote(s): {', '.join(set_of_errored_remotes)}")
@@ -1261,7 +1292,7 @@ def show_gpu_status(client):
     add_row_to_output(COLS, [str(total_gpus), str(available_gpus), str(len(active_gpu_profiles)), gpu_profiles_str])
     flush_output()
 
-def list_gpu_profiles(client):
+def list_gpu_profiles(client, extend=False):
     """List all GPU profiles."""
     gpu_profiles = [
         profile.name for profile in client.profiles.all() if profile.name.startswith("gpu-")
@@ -1269,7 +1300,7 @@ def list_gpu_profiles(client):
     COLS = [('TOTAL', 10), ('PROFILES', 30)]
     add_header_line_to_output(COLS)
     add_row_to_output(COLS, [str(len(gpu_profiles)), ", ".join(gpu_profiles)])
-    flush_output()
+    flush_output(extend=extend)
 
 def add_gpu_profile(instance_name, client):
     """Add a GPU profile to an instance.
@@ -3085,6 +3116,9 @@ def create_instance_parser(subparsers):
         "-f", "--full", action="store_true", help="Show full details of instance profiles"
     )
     instance_list_parser.add_argument(
+        "-e", "--extend", action="store_true", help="Extend column width to fit content"
+    )
+    instance_list_parser.add_argument(
         "scope", nargs="?", help="Scope in the format 'remote:project.', 'project.', or 'remote:' to limit the listing"
     )
     add_common_arguments(instance_list_parser)
@@ -3220,7 +3254,10 @@ def handle_instance_list(args):
         remote_node = remote_scope
         project_name = project_scope if project_scope else args.project # Use provided project if no project scope
         # project_name can be None if project_scope is None
-    list_instances(remote_node, project_name=project_name, instance_scope=instance_scope, full=args.full)
+
+    # Pass the `extend` flag to list_instances to adjust column width as specified by user
+    list_instances(remote_node, project_name=project_name, instance_scope=instance_scope, full=args.full, extend=args.extend)
+
 
 def handle_instance_command(args, parser_dict):
     if not args.instance_command:
@@ -3449,14 +3486,26 @@ def create_gpu_parser(subparsers):
     gpu_parser = subparsers.add_parser("gpu", help="Manage GPUs")
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
 
+    # Status command
     gpu_subparsers.add_parser("status", help="Show GPU status")
-    gpu_subparsers.add_parser("list", aliases=["l"], help="List GPU profiles")
+    
+    # List command with extended column width option
+    gpu_list_parser = gpu_subparsers.add_parser("list", aliases=["l"], help="List GPU profiles")
+    gpu_list_parser.add_argument(
+        "-e", "--extend", action="store_true",
+        help="Extend column width to fit the content"
+    )
+    
+    # Add GPU command
     add_gpu_parser = gpu_subparsers.add_parser("add", help="Add a GPU profile to a specific instance")
     add_gpu_parser.add_argument("instance_name", help="Name of the instance to add a GPU profile to")
+    
+    # Remove GPU command
     remove_gpu_parser = gpu_subparsers.add_parser("remove", help="Remove GPU profiles from a specific instance")
     remove_gpu_parser.add_argument("instance_name", help="Name of the instance to remove a GPU profile from")
     remove_gpu_parser.add_argument("--all", action="store_true", help="Remove all GPU profiles from the instance")
 
+    # Aliases for GPU parser
     subparsers._name_parser_map["gp"] = gpu_parser
     subparsers._name_parser_map["g"] = gpu_parser
 
@@ -3468,7 +3517,8 @@ def handle_gpu_command(args, client, parser_dict):
     elif args.gpu_command == "status":
         show_gpu_status(client)
     elif args.gpu_command in ["list", "l"]:
-        list_gpu_profiles(client)
+        # Pass the extend argument to adjust column width
+        list_gpu_profiles(client, extend=args.extend)
     elif args.gpu_command == "add":
         add_gpu_profile(args.instance_name, client)
     elif args.gpu_command == "remove":
