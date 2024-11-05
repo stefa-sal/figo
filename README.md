@@ -347,15 +347,16 @@ Each command has its own set of subcommands and options.
 - **Description:** Manage remotes.
 - **Subcommands:**
   - **list**  
-    - **Description:** List available remotes, with an option to show detailed information.  
+    - **Description:** List available remotes, with options to show detailed information and adjust column width to fit content.  
     - **Syntax:**
 
       ```bash
-      figo remote list [-f | --full]
+      figo remote list [-f | --full] [-e | --extend]
       ```
 
     - **Options:**  
       - `-f, --full`: Show full details of available remotes.
+      - `-e, --extend`: Extend column width to fit the content.
 
   - **enroll**  
     - **Description:** Enroll a remote Incus server.  
