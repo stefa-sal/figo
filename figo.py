@@ -586,9 +586,16 @@ def start_instance(instance_name, remote, project):
     try:
         instance = remote_client.instances.get(instance_name)
 
+        # Check if the instance is already running
+
         if instance.status.lower() != "stopped":
             logger.error(f"Instance '{instance_name}' in project '{project}' on remote '{remote}' is not stopped.")
             return False
+
+        # check if the instance is a vm or a container
+        instance_type = instance.type
+
+        #TODO differentiate the following code based on the instance type
 
         # Get GPU profiles associated with this instance
         instance_profiles = instance.profiles
@@ -596,57 +603,63 @@ def start_instance(instance_name, remote, project):
             profile for profile in instance_profiles if profile.startswith("gpu-")
         ]
         
-        # Check GPU availability
-        try:
-            result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error in lspci: {e.stderr.strip()}")
-            return False
-        
-        total_gpus = len(result.stdout.strip().split('\n'))
-        
-        running_instances = [
-            i for i in remote_client.instances.all() if i.status == "Running"
-        ]
-        active_gpu_profiles = [
-            profile for my_instance in running_instances for profile in my_instance.profiles
-            if profile.startswith("gpu-")
-        ]
+        if gpu_profiles_for_instance: # there is at least one GPU profile
 
-        available_gpus = total_gpus - len(active_gpu_profiles)
-        if len(gpu_profiles_for_instance) > available_gpus:
-            logger.error(
-                f"Not enough available GPUs to start instance '{instance_name}'."
-            )
-            return False
+            # Check GPU availability
+            try:
+                result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Error in lspci: {e.stderr.strip()}")
+                return False
+            
+            total_gpus = len(result.stdout.strip().split('\n'))
+            
+            running_instances = [
+                i for i in remote_client.instances.all() if i.status == "Running"
+            ]
+            active_gpu_profiles = [
+                profile for my_instance in running_instances for profile in my_instance.profiles
+                if profile.startswith("gpu-")
+            ]
 
-        # Resolve GPU conflicts
-        conflict = False
-        for gpu_profile in gpu_profiles_for_instance:
-            for my_instance in running_instances:
-                if gpu_profile in my_instance.profiles:
-                    conflict = True
-                    logger.warning(
-                        f"GPU profile '{gpu_profile}' is already in use by "
-                        f"instance {my_instance.name}."
-                    )
-                    instance_profiles.remove(gpu_profile)
-                    new_profile = [
-                        p for p in remote_client.profiles.all() 
-                        if p.name.startswith("gpu-") and p.name not in active_gpu_profiles
-                        and p.name not in instance_profiles
-                    ][0].name
-                    instance_profiles.append(new_profile)
-                    logger.info(
-                        f"Replaced GPU profile '{gpu_profile}' with '{new_profile}' "
-                        f"for instance '{instance_name}'"
-                    )
-                    break
+            available_gpus = total_gpus - len(active_gpu_profiles)
+            if len(gpu_profiles_for_instance) > available_gpus:
+                logger.error(
+                    f"Not enough available GPUs to start instance '{instance_name}'."
+                )
+                return False
 
-        # Update profiles if needed and start the instance
-        if conflict:
-            instance.profiles = instance_profiles
-            instance.save(wait=True)
+            #TODO (nice to have) check error conditions in the following code
+            # Resolve GPU conflicts
+            conflict = False
+            for gpu_profile in gpu_profiles_for_instance:
+                for my_instance in running_instances:
+                    if gpu_profile in my_instance.profiles:
+                        conflict = True
+                        logger.warning(
+                            f"GPU profile '{gpu_profile}' is already in use by "
+                            f"instance {my_instance.name}."
+                        )
+                        instance_profiles.remove(gpu_profile)
+                        new_profile = [
+                            p for p in remote_client.profiles.all() 
+                            if p.name.startswith("gpu-") and p.name not in active_gpu_profiles
+                            and p.name not in instance_profiles
+                        ][0].name
+                        instance_profiles.append(new_profile)
+                        logger.info(
+                            f"Replaced GPU profile '{gpu_profile}' with '{new_profile}' "
+                            f"for instance '{instance_name}'"
+                        )
+                        break
+
+            # Update profiles if needed and start the instance
+            if conflict:
+                instance.profiles = instance_profiles
+                instance.save(wait=True)
+
+        else: # there are no GPU profiles associated with the instance
+            pass
 
         instance.start(wait=True)
         logger.info(f"Instance '{instance_name}' started on '{remote}:{project}'.")
