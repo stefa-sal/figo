@@ -3289,7 +3289,10 @@ def handle_instance_command(args, parser_dict):
         return True
 
     def parse_instance_scope(instance_name, provided_remote, provided_project):
-        """Parse the instance name to extract remote, project, and instance."""
+        """Parse the instance name to extract remote, project, and instance.
+        
+        return remote, project, instance
+        """
         remote, project, instance = '', '', instance_name  # Default values
 
         if ':' in instance_name:
@@ -3496,6 +3499,39 @@ def handle_instance_command(args, parser_dict):
 ###### figo gpu command CLI #################
 #############################################
 
+def parse_instance_scope(instance_name, provided_remote=None, provided_project=None):
+    """Parse the instance name to extract remote, project, and instance components."""
+    remote, project, instance = None, None, instance_name  # Default to None
+
+    if ':' in instance_name:
+        parts = instance_name.split(':')
+        if len(parts) == 2:
+            remote = parts[0]
+            if '.' in parts[1]:
+                project, instance = parts[1].split('.', 1)
+            else:
+                instance = parts[1]
+        else:
+            logger.error(f"Syntax error in instance name '{instance_name}'.")
+            return None, None, None
+    elif '.' in instance_name:
+        project, instance = instance_name.split('.', 1)
+
+    # Handle conflicts between parsed and provided remote/project
+    if provided_remote:
+        if remote and remote != provided_remote:
+            logger.error(f"Error: Conflict between scope remote '{remote}' and provided remote '{provided_remote}'.")
+            return None, None, None
+        remote = provided_remote
+
+    if provided_project:
+        if project and project != provided_project:
+            logger.error(f"Error: Conflict between scope project '{project}' and provided project '{provided_project}'.")
+            return None, None, None
+        project = provided_project
+
+    return remote, project, instance
+
 def create_gpu_parser(subparsers):
     gpu_parser = subparsers.add_parser("gpu", help="Manage GPUs")
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
@@ -3512,9 +3548,37 @@ def create_gpu_parser(subparsers):
         "-e", "--extend", action="store_true", help="Extend column width to fit the content"
     )
 
-    # Add and Remove GPU commands
-    add_gpu_parser = gpu_subparsers.add_parser("add", help="Add a GPU profile to a specific instance")
-    add_gpu_parser.add_argument("instance_name", help="Name of the instance to add a GPU profile to")
+    # Add GPU profile command with enhanced help and documentation
+    add_gpu_parser = gpu_subparsers.add_parser(
+        "add",
+        help="Add a GPU profile to a specific instance, with optional remote and project scope.",
+        description="Add a GPU profile to a specific instance.\n"
+                    "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
+                    "If the scope is not provided in the instance name, the -r/--remote and -p/--project options can be used.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo gpu add my_instance\n"
+               "  figo gpu add my_project.instance_name -r my_remote\n"
+               "  figo gpu add my_remote:my_project.instance_name"
+    )
+    add_gpu_parser.add_argument(
+        "instance_name", 
+        help="Name of the instance to add a GPU profile to. Can include remote and project scope."
+    )
+    add_gpu_parser.add_argument(
+        "-p", "--project", 
+        help="Specify the project name for the instance."
+    )
+    add_gpu_parser.add_argument(
+        "-r", "--remote", 
+        help="Specify the remote Incus server name."
+    )
+    add_gpu_parser.add_argument(
+        "-u", "--user", 
+        help="Specify the user to infer the project from."
+    )
+
+    # Remove GPU profiles command
     remove_gpu_parser = gpu_subparsers.add_parser("remove", help="Remove GPU profiles from a specific instance")
     remove_gpu_parser.add_argument("instance_name", help="Name of the instance to remove a GPU profile from")
     remove_gpu_parser.add_argument("--all", action="store_true", help="Remove all GPU profiles from the instance")
@@ -3534,13 +3598,37 @@ def handle_gpu_command(args, client, parser_dict):
     elif args.gpu_command in ["list", "l"]:
         # Pass the extend argument to adjust column width
         list_gpu_profiles(client, extend=args.extend)
-    elif args.gpu_command == "add":
-        add_gpu_profile(args.instance_name, client)
-    elif args.gpu_command == "remove":
-        if args.all:
-            remove_gpu_all_profiles(args.instance_name, client)
-        else:
-            remove_gpu_profile(args.instance_name, client)
+
+    else:
+        # Handle project based on user if provided
+        user_project = None
+        if 'user' in args and args.user:
+            user_project = derive_project_from_user(args.user)
+
+        # If user_project is set, check for conflicts
+        if user_project:
+            if args.project and user_project != args.project:
+                logger.error(f"Error: Conflict between derived project '{user_project}' from user '{args.user}'"
+                             f" and provided project '{args.project}'.")
+                return
+            else:
+                args.project = user_project  # Use the derived project
+
+        if args.gpu_command == "add":
+            # Parse the instance scope and validate
+            remote, project, instance = parse_instance_scope(
+                args.instance_name, provided_remote=args.remote, provided_project=args.project
+            )
+            if remote is None or project is None or instance is None:
+                return  # Error already printed in parse_instance_scope
+
+            # Proceed with adding the GPU profile
+            add_gpu_profile(instance, client, remote=remote, project=project)
+        elif args.gpu_command == "remove":
+            if args.all:
+                remove_gpu_all_profiles(args.instance_name, client)
+            else:
+                remove_gpu_profile(args.instance_name, client)
 
 
 #############################################
