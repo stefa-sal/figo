@@ -381,7 +381,7 @@ def get_ip_device_pairs(instance):
                         ip_device_pairs.append((ip_address, device))
 
             except Exception as e:
-                print(f"Error parsing network config for instance '{instance.get('name', 'Unknown')}': {e}")
+                logger.error(f"Error parsing network config for instance '{instance.get('name', 'Unknown')}': {e}")
 
         return ip_device_pairs
 
@@ -1315,30 +1315,53 @@ def list_gpu_profiles(client, extend=False):
     add_row_to_output(COLS, [str(len(gpu_profiles)), ", ".join(gpu_profiles)])
     flush_output(extend=extend)
 
-def add_gpu_profile(instance_name, client):
-    """Add a GPU profile to an instance.
-    
-    Returns:    True if the GPU profile was added successfully, False otherwise.
+def add_gpu_profile(instance_name, client, remote='local', project='default'):
+    """
+    Add a GPU profile to a specified instance within an optional remote and project scope.
+
+    This function checks if the given instance exists within the specified project and 
+    remote, ensures that the instance is in a stopped state, and then adds an available 
+    GPU profile to it if possible.
+
+    Args:
+        instance_name (str): The name of the instance to which the GPU profile will be added.
+                             This can include the project and remote scope.
+        client (pylxd.Client): The LXD client instance used to interact with the Incus server.
+        remote (str, optional): The remote server where the instance is located. Defaults to 'local'.
+        project (str, optional): The project under which the instance resides. Defaults to 'default'.
+
+    Returns:
+        bool: True if the GPU profile was added successfully, False otherwise.
     """
     try:
+        full_instance_name = f"{remote}:{project}.{instance_name}" if remote != 'local' or project != 'default' else instance_name
+        logger.info(f"Adding GPU profile to instance '{full_instance_name}'...")
+
+        # Set the project on the client
+        client = pylxd.Client(project=project)
+
+        # Fetch the instance
         instance = client.instances.get(instance_name)
+
         if instance.status.lower() != "stopped":
-            logger.error(f"Instance '{instance_name}' is running or in error state.")
+            logger.error(f"Instance '{full_instance_name}' is running or in error state.")
             return False
 
         instance_profiles = instance.profiles
         gpu_profiles_for_instance = [
             profile for profile in instance_profiles if profile.startswith("gpu-")
         ]
+        
         try:
             result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
         except subprocess.CalledProcessError as e:
             logger.error(f"Error in lspci: {e.stderr.strip()}")
             return False
+        
         total_gpus = len(result.stdout.strip().split('\n'))
 
         if len(gpu_profiles_for_instance) >= total_gpus:
-            logger.error(f"Instance '{instance_name}' already has the maximum number of GPU profiles.")
+            logger.error(f"Instance '{full_instance_name}' already has the maximum number of GPU profiles.")
             return False
 
         all_profiles = get_all_profiles(client)
@@ -1348,7 +1371,7 @@ def add_gpu_profile(instance_name, client):
         ]
 
         if not available_gpu_profiles:
-            logger.error(f"No available GPU profiles to add to instance '{instance_name}'.")
+            logger.error(f"No available GPU profiles to add to instance '{full_instance_name}'.")
             return False
 
         new_profile = available_gpu_profiles[0]
@@ -1356,9 +1379,9 @@ def add_gpu_profile(instance_name, client):
         instance.profiles = instance_profiles
         instance.save(wait=True)
 
-        logger.info(f"Added GPU profile '{new_profile}' to instance '{instance_name}'.")
+        logger.info(f"Added GPU profile '{new_profile}' to instance '{full_instance_name}'.")
     except pylxd.exceptions.LXDAPIException as e:
-        logger.error(f"Failed to add GPU profile to instance '{instance_name}': {e}")
+        logger.error(f"Failed to add GPU profile to instance '{full_instance_name}': {e}")
         return False
     
     return True
@@ -2889,7 +2912,7 @@ def list_projects(remote_name, project, extend=False):
                     add_row_to_output(COLS, [my_project['name'], my_remote_name])
 
             else:
-                print("  Error: Failed to retrieve projects.")
+                logger.error("  Error: Failed to retrieve projects.")
     else:
         # List projects on the specified remote
         projects = get_projects(remote_name)
@@ -2900,7 +2923,7 @@ def list_projects(remote_name, project, extend=False):
                         continue
                 add_row_to_output(COLS, [my_project['name'], remote_name])
         else:
-            print(f"Error: Failed to retrieve projects on remote '{remote_name}'")
+            logger.error(f"Error: Failed to retrieve projects on remote '{remote_name}'")
 
     flush_output(extend=extend) # Flush the output buffer
 
@@ -3499,36 +3522,67 @@ def handle_instance_command(args, parser_dict):
 ###### figo gpu command CLI #################
 #############################################
 
-def parse_instance_scope(instance_name, provided_remote=None, provided_project=None):
-    """Parse the instance name to extract remote, project, and instance components."""
-    remote, project, instance = None, None, instance_name  # Default to None
+def check_instance_name(instance_name):
+    """Check validity of instance name."""
+    if instance_name is None:
+        return False
+    # Instance name can only contain letters, numbers, hyphens, no underscores
+    if not re.match(r'^[a-zA-Z0-9-]+$', instance_name):
+        logger.error(f"Error: Instance name can only contain letters, numbers, hyphens: '{instance_name}'.")
+        return False
+    return True
+
+def parse_instance_scope(instance_name, provided_remote, provided_project):
+    """Parse the instance name to extract remote, project, and instance.
+    
+    return remote, project, instance
+    """
+    remote, project, instance = '', '', instance_name  # Default values
 
     if ':' in instance_name:
         parts = instance_name.split(':')
         if len(parts) == 2:
-            remote = parts[0]
             if '.' in parts[1]:
-                project, instance = parts[1].split('.', 1)
+                remote, project_instance = parts
+                parts_pro_inst = project_instance.split('.')
+                if len(parts_pro_inst) == 2:
+                    project, instance = parts_pro_inst
+                else:
+                    logger.error(f"Syntax error in instance name '{instance_name}'.")
+                    return None, None, None
             else:
-                instance = parts[1]
+                remote, instance = parts
         else:
             logger.error(f"Syntax error in instance name '{instance_name}'.")
             return None, None, None
     elif '.' in instance_name:
-        project, instance = instance_name.split('.', 1)
-
-    # Handle conflicts between parsed and provided remote/project
-    if provided_remote:
-        if remote and remote != provided_remote:
-            logger.error(f"Error: Conflict between scope remote '{remote}' and provided remote '{provided_remote}'.")
+        parts_pro_inst = instance_name.split('.')
+        if len(parts_pro_inst) == 2:
+            project, instance = parts_pro_inst
+        else:
+            logger.error(f"Syntax error in instance name '{instance_name}'.")
             return None, None, None
-        remote = provided_remote
 
-    if provided_project:
-        if project and project != provided_project:
-            logger.error(f"Error: Conflict between scope project '{project}' and provided project '{provided_project}'.")
-            return None, None, None
-        project = provided_project
+    if not check_instance_name(instance):
+        return None, None, None
+
+    # Resolve conflicts
+    if provided_remote and remote != '' and provided_remote != remote:
+        logger.error(f"Error: Conflict between scope remote '{remote}' and provided remote '{provided_remote}'.")
+        return None, None, None
+    if provided_project and project != '' and provided_project != project:
+        logger.error(f"Error: Conflict between scope project '{project}' and provided project '{provided_project}'.")
+        return None, None, None
+
+    # Use provided flags if there's no conflict and they are provided
+    remote = provided_remote if provided_remote else remote
+    project = provided_project if provided_project else project
+
+    if remote == '':
+        remote = 'local'
+
+    if project == '':
+        project = 'default'
 
     return remote, project, instance
 
@@ -3537,13 +3591,32 @@ def create_gpu_parser(subparsers):
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
 
     # GPU Status with extended column option
-    status_gpu_parser = gpu_subparsers.add_parser("status", help="Show GPU status")
+    status_gpu_parser = gpu_subparsers.add_parser(
+        "status",
+        help="Show the current status of GPUs, including their availability and usage.",
+        description="Show the status of GPUs in the system, displaying their availability and usage.\n"
+                    "Use the -e/--extend option to adjust column width for better readability.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo gpu status\n"
+               "  figo gpu status --extend"
+    )
     status_gpu_parser.add_argument(
         "-e", "--extend", action="store_true", help="Extend column width to fit the content"
     )
 
     # List GPU profiles
-    list_gpu_parser = gpu_subparsers.add_parser("list", aliases=["l"], help="List GPU profiles")
+    list_gpu_parser = gpu_subparsers.add_parser(
+        "list",
+        aliases=["l"],
+        help="List GPU profiles configured in the system.",
+        description="List all GPU profiles configured in the system.\n"
+                    "Use the -e/--extend option to adjust column width for better readability.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo gpu list\n"
+               "  figo gpu list --extend"
+    )
     list_gpu_parser.add_argument(
         "-e", "--extend", action="store_true", help="Extend column width to fit the content"
     )
@@ -3559,7 +3632,9 @@ def create_gpu_parser(subparsers):
         epilog="Examples:\n"
                "  figo gpu add my_instance\n"
                "  figo gpu add my_project.instance_name -r my_remote\n"
-               "  figo gpu add my_remote:my_project.instance_name"
+               "  figo gpu add my_remote:my_project.instance_name\n"
+               "  figo gpu add instance_name -p my_project -r my_remote\n"
+               "  figo gpu add my_instance -u user_name"
     )
     add_gpu_parser.add_argument(
         "instance_name", 
@@ -3578,16 +3653,47 @@ def create_gpu_parser(subparsers):
         help="Specify the user to infer the project from."
     )
 
-    # Remove GPU profiles command
-    remove_gpu_parser = gpu_subparsers.add_parser("remove", help="Remove GPU profiles from a specific instance")
-    remove_gpu_parser.add_argument("instance_name", help="Name of the instance to remove a GPU profile from")
-    remove_gpu_parser.add_argument("--all", action="store_true", help="Remove all GPU profiles from the instance")
+    # Remove GPU profiles command with enhanced help and support for scoped instance_name
+    remove_gpu_parser = gpu_subparsers.add_parser(
+        "remove",
+        help="Remove GPU profiles from a specific instance, with optional remote and project scope.",
+        description="Remove GPU profiles from a specified instance.\n"
+                    "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
+                    "If the scope is not provided in the instance name, the -r/--remote and -p/--project options can be used.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo gpu remove my_instance\n"
+               "  figo gpu remove my_project.instance_name --all\n"
+               "  figo gpu remove my_remote:my_project.instance_name\n"
+               "  figo gpu remove instance_name -p my_project -r my_remote\n"
+               "  figo gpu remove my_instance -u user_name"
+    )
+    remove_gpu_parser.add_argument(
+        "instance_name", 
+        help="Name of the instance to remove a GPU profile from. Can include remote and project scope."
+    )
+    remove_gpu_parser.add_argument(
+        "-p", "--project", 
+        help="Specify the project name for the instance."
+    )
+    remove_gpu_parser.add_argument(
+        "-r", "--remote", 
+        help="Specify the remote Incus server name."
+    )
+    remove_gpu_parser.add_argument(
+        "-u", "--user", 
+        help="Specify the user to infer the project from."
+    )
+    remove_gpu_parser.add_argument(
+        "--all", action="store_true", help="Remove all GPU profiles from the instance."
+    )
 
     # Aliases for main parser
     subparsers._name_parser_map["gp"] = gpu_parser
     subparsers._name_parser_map["g"] = gpu_parser
 
     return gpu_parser
+
 
 def handle_gpu_command(args, client, parser_dict):
     if not args.gpu_command:
@@ -3620,15 +3726,24 @@ def handle_gpu_command(args, client, parser_dict):
                 args.instance_name, provided_remote=args.remote, provided_project=args.project
             )
             if remote is None or project is None or instance is None:
+                logger.error("Error: Invalid instance name.")
                 return  # Error already printed in parse_instance_scope
 
             # Proceed with adding the GPU profile
             add_gpu_profile(instance, client, remote=remote, project=project)
         elif args.gpu_command == "remove":
+            # Parse the instance scope and validate
+            remote, project, instance = parse_instance_scope(
+                args.instance_name, provided_remote=args.remote, provided_project=args.project
+            )
+            if remote is None or project is None or instance is None:
+                return  # Error already printed in parse_instance_scope
+
+            # Proceed with removing the GPU profile(s)
             if args.all:
-                remove_gpu_all_profiles(args.instance_name, client)
+                remove_gpu_all_profiles(instance, client, remote=remote, project=project)
             else:
-                remove_gpu_profile(args.instance_name, client)
+                remove_gpu_profile(instance, client, remote=remote, project=project)
 
 
 #############################################
