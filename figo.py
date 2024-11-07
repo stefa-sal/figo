@@ -276,7 +276,6 @@ def extract_ip_addresses(ip_device_pairs):
 def derive_project_from_user(user_name):
     return f"{PROJECT_PREFIX}{user_name}"
 
-
 #############################################
 ###### figo instance command functions #####
 #############################################
@@ -3117,6 +3116,75 @@ def add_route_on_vpn_access(dst_address, gateway, dev, device_type='mikrotik', u
 #############################################
 
 #############################################
+######### Common helper functions for CLI ###
+#############################################
+
+def check_instance_name(instance_name):
+    """Check validity of instance name."""
+    if instance_name is None:
+        return False
+    # Instance name can only contain letters, numbers, hyphens, no underscores
+    if not re.match(r'^[a-zA-Z0-9-]+$', instance_name):
+        logger.error(f"Error: Instance name can only contain letters, numbers, hyphens: '{instance_name}'.")
+        return False
+    return True
+
+def parse_instance_scope(instance_name, provided_remote, provided_project):
+    """Parse the instance name to extract remote, project, and instance.
+    
+    return remote, project, instance
+    """
+    remote, project, instance = '', '', instance_name  # Default values
+
+    if ':' in instance_name:
+        parts = instance_name.split(':')
+        if len(parts) == 2:
+            if '.' in parts[1]:
+                remote, project_instance = parts
+                parts_pro_inst = project_instance.split('.')
+                if len(parts_pro_inst) == 2:
+                    project, instance = parts_pro_inst
+                else:
+                    logger.error(f"Syntax error in instance name '{instance_name}'.")
+                    return None, None, None
+            else:
+                remote, instance = parts
+        else:
+            logger.error(f"Syntax error in instance name '{instance_name}'.")
+            return None, None, None
+    elif '.' in instance_name:
+        parts_pro_inst = instance_name.split('.')
+        if len(parts_pro_inst) == 2:
+            project, instance = parts_pro_inst
+        else:
+            logger.error(f"Syntax error in instance name '{instance_name}'.")
+            return None, None, None
+
+    if not check_instance_name(instance):
+        return None, None, None
+
+    # Resolve conflicts
+    if provided_remote and remote != '' and provided_remote != remote:
+        logger.error(f"Error: Conflict between scope remote '{remote}' and provided remote '{provided_remote}'.")
+        return None, None, None
+    if provided_project and project != '' and provided_project != project:
+        logger.error(f"Error: Conflict between scope project '{project}' and provided project '{provided_project}'.")
+        return None, None, None
+
+    # Use provided flags if there's no conflict and they are provided
+    remote = provided_remote if provided_remote else remote
+    project = provided_project if provided_project else project
+
+    if remote == '':
+        remote = 'local'
+
+    if project == '':
+        project = 'default'
+
+    return remote, project, instance
+
+
+#############################################
 ###### figo instance command CLI ############
 #############################################
 
@@ -3302,7 +3370,7 @@ def handle_instance_command(args, parser_dict):
         return
 
     def parse_instance_scope_for_all(instance_name, provided_remote, provided_project):
-        """Parse the instance name to extract remote, project, and instance."""
+        """Parse the instance name to extract remote, project, and instance for the '--all' option."""
         remote, project, instance = None, None, instance_name  # Default to None
 
         if ':' in instance_name:
@@ -3457,70 +3525,6 @@ def handle_instance_command(args, parser_dict):
 #############################################
 ###### figo gpu command CLI #################
 #############################################
-
-def check_instance_name(instance_name):
-    """Check validity of instance name."""
-    if instance_name is None:
-        return False
-    # Instance name can only contain letters, numbers, hyphens, no underscores
-    if not re.match(r'^[a-zA-Z0-9-]+$', instance_name):
-        logger.error(f"Error: Instance name can only contain letters, numbers, hyphens: '{instance_name}'.")
-        return False
-    return True
-
-def parse_instance_scope(instance_name, provided_remote, provided_project):
-    """Parse the instance name to extract remote, project, and instance.
-    
-    return remote, project, instance
-    """
-    remote, project, instance = '', '', instance_name  # Default values
-
-    if ':' in instance_name:
-        parts = instance_name.split(':')
-        if len(parts) == 2:
-            if '.' in parts[1]:
-                remote, project_instance = parts
-                parts_pro_inst = project_instance.split('.')
-                if len(parts_pro_inst) == 2:
-                    project, instance = parts_pro_inst
-                else:
-                    logger.error(f"Syntax error in instance name '{instance_name}'.")
-                    return None, None, None
-            else:
-                remote, instance = parts
-        else:
-            logger.error(f"Syntax error in instance name '{instance_name}'.")
-            return None, None, None
-    elif '.' in instance_name:
-        parts_pro_inst = instance_name.split('.')
-        if len(parts_pro_inst) == 2:
-            project, instance = parts_pro_inst
-        else:
-            logger.error(f"Syntax error in instance name '{instance_name}'.")
-            return None, None, None
-
-    if not check_instance_name(instance):
-        return None, None, None
-
-    # Resolve conflicts
-    if provided_remote and remote != '' and provided_remote != remote:
-        logger.error(f"Error: Conflict between scope remote '{remote}' and provided remote '{provided_remote}'.")
-        return None, None, None
-    if provided_project and project != '' and provided_project != project:
-        logger.error(f"Error: Conflict between scope project '{project}' and provided project '{provided_project}'.")
-        return None, None, None
-
-    # Use provided flags if there's no conflict and they are provided
-    remote = provided_remote if provided_remote else remote
-    project = provided_project if provided_project else project
-
-    if remote == '':
-        remote = 'local'
-
-    if project == '':
-        project = 'default'
-
-    return remote, project, instance
 
 def create_gpu_parser(subparsers):
     gpu_parser = subparsers.add_parser("gpu", help="Manage GPUs")
