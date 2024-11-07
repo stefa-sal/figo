@@ -48,6 +48,7 @@ Each command has its own set of subcommands and options.
 - **Aliases:** `in`, `i`
 - **Description:** Manage instances.
 - **Subcommands:**
+
   - **list**
     - **Description:** List instances, with options to show detailed profiles and adjust column width for better readability.
     - **Syntax:**
@@ -57,41 +58,66 @@ Each command has its own set of subcommands and options.
       ```
 
     - **Options:**  
+      - `scope`: Define the scope in the format `remote:project.` to limit the listing.
       - `-f, --full`: Show full details of instance profiles.
-      - `scope`: Define the scope in the format `remote:project` to limit the listing.
       - `-p, --project`: Specify the project name to list instances from.
       - `-r, --remote`: Specify the remote Incus server name.
       - `-e, --extend`: Extend column width to fit content.
 
+    - **Examples:**
+      ```bash
+      figo instance list
+      figo instance list remote:project. -f
+      figo instance list -p my_project -r my_remote --extend
+      ```
+
   - **start**
-    - **Description:** Start a specific instance.
+    - **Description:** Start a specific instance, with optional remote and project scope.
     - **Syntax:**
 
       ```bash
-      figo instance start instance_name
+      figo instance start instance_name [-p project] [-r remote]
       ```
 
     - **Options:**  
       - `instance_name`: The name of the instance to start. Can include remote and project scope.
+      - `-p, --project`: Specify the project name.
+      - `-r, --remote`: Specify the remote Incus server name.
+
+    - **Examples:**
+      ```bash
+      figo instance start my_instance
+      figo instance start remote:project.my_instance
+      figo instance start my_instance -r my_remote -p my_project
+      ```
 
   - **stop**
     - **Description:** Stop a specific instance or all instances in a scope.
     - **Syntax:**
 
       ```bash
-      figo instance stop instance_name [-a | --all]
+      figo instance stop [instance_name] [-a | --all] [-p project] [-r remote]
       ```
 
     - **Options:**  
       - `instance_name`: The name of the instance to stop. Can include remote and project scope.
       - `-a, --all`: Stop all instances within the specified scope.
+      - `-p, --project`: Specify the project name.
+      - `-r, --remote`: Specify the remote Incus server name.
+
+    - **Examples:**
+      ```bash
+      figo instance stop my_instance
+      figo instance stop remote:project.my_instance
+      figo instance stop -a -p my_project -r my_remote
+      ```
 
   - **set_key**
     - **Description:** Set a public key for a user in an instance.
     - **Syntax:**
 
       ```bash
-      figo instance set_key instance_name key_filename [-l login] [-d dir] [-f]
+      figo instance set_key instance_name key_filename [-l login] [-d dir] [-f] [-p project] [-r remote]
       ```
 
     - **Options:**  
@@ -100,23 +126,39 @@ Each command has its own set of subcommands and options.
       - `-l, --login`: Specify the login name (default: ubuntu).
       - `-d, --dir`: Specify the directory path where the key file is located (default: ./users).
       - `-f, --force`: Start the instance if not running, then stop it after setting the key.
+      - `-p, --project`: Specify the project name.
+      - `-r, --remote`: Specify the remote Incus server name.
+
+    - **Examples:**
+      ```bash
+      figo instance set_key my_instance my_key.pub
+      figo instance set_key remote:project.my_instance my_key.pub -l user1 -f
+      ```
 
   - **set_ip**
     - **Description:** Set a static IP address and gateway for a stopped instance.
     - **Syntax:**
 
       ```bash
-      figo instance set_ip instance_name ip_address gw_address [-n nic]
+      figo instance set_ip instance_name -i ip_address -g gw_address [-n nic] [-p project] [-r remote]
       ```
 
     - **Options:**  
       - `instance_name`: The name of the instance to set the IP address for. Can include remote and project scope.
-      - `ip_address`: The static IP address with prefix length (e.g., 192.168.1.10/24).
-      - `gw_address`: The gateway address.
+      - `-i, --ip`: The static IP address with prefix length (e.g., 192.168.1.10/24).
+      - `-g, --gw`: The gateway address.
       - `-n, --nic`: The NIC name (default: eth0 for containers, enp5s0 for VMs).
+      - `-p, --project`: Specify the project name.
+      - `-r, --remote`: Specify the remote Incus server name.
+
+    - **Examples:**
+      ```bash
+      figo instance set_ip my_instance -i 192.168.1.5/24 -g 192.168.1.1
+      figo instance set_ip remote:project.my_instance -i 10.0.0.10/24 -g 10.0.0.1 -n enp5s0
+      ```
 
   - **create**
-    - **Description:** Create a new instance.
+    - **Description:** Create a new instance with a specified image and type.
     - **Syntax:**
 
       ```bash
@@ -124,37 +166,59 @@ Each command has its own set of subcommands and options.
       ```
 
     - **Options:**  
-      - `instance_name`: The name of the new instance.
+      - `instance_name`: The name of the new instance. Can include remote and project scope.
       - `image`: Image source to create the instance from (e.g., `images:ubuntu/20.04`).
       - `-t, --type`: Specify the instance type (`vm` or `container`).
       - `-p, --project`: The project under which the instance will be created.
       - `-r, --remote`: Specify the remote Incus server.
 
+    - **Examples:**
+      ```bash
+      figo instance create my_instance images:ubuntu/22.04
+      figo instance create remote:project.my_instance images:debian/10 -t vm
+      ```
+
   - **delete**
-    - **Description:** Delete a specific instance.
+    - **Description:** Delete a specific instance, with an option to force deletion.
     - **Syntax:**
 
       ```bash
-      figo instance delete instance_name [-f]
+      figo instance delete instance_name [-f] [-p project] [-r remote]
       ```
 
     - **Options:**  
-      - `instance_name`: The name of the instance to delete.
+      - `instance_name`: The name of the instance to delete. Can include remote and project scope.
       - `-f, --force`: Force delete the instance even if it is running.
+      - `-p, --project`: Specify the project name.
+      - `-r, --remote`: Specify the remote Incus server.
+
+    - **Examples:**
+      ```bash
+      figo instance delete my_instance
+      figo instance delete remote:project.my_instance -f
+      ```
 
   - **bash**
-    - **Description:** Execute bash in a specific instance.
+    - **Description:** Execute bash in a specific instance, optionally starting it first.
     - **Syntax:**
 
       ```bash
-      figo instance bash instance_name [-f] [-t timeout] [-a attempts]
+      figo instance bash instance_name [-f] [-t timeout] [-a attempts] [-p project] [-r remote]
       ```
 
     - **Options:**  
-      - `instance_name`: The name of the instance to execute bash.
+      - `instance_name`: The name of the instance to execute bash. Can include remote and project scope.
       - `-f, --force`: Start the instance if not running and execute bash.
       - `-t, --timeout`: Total timeout in seconds for retries.
       - `-a, --attempts`: Number of retry attempts to connect.
+      - `-p, --project`: Specify the project name.
+      - `-r, --remote`: Specify the remote Incus server.
+
+    - **Examples:**
+      ```bash
+      figo instance bash my_instance
+      figo instance bash remote:project.my_instance -f -t 60 -a 3
+      ```
 
 #### figo gpu
 
