@@ -468,27 +468,35 @@ Each command has its own set of subcommands and options.
 - **Aliases:** `re`, `r`
 - **Description:** Manage remotes.
 - **Subcommands:**
-  - **list**  
-    - **Description:** List available remotes, with options to show detailed information and adjust column width to fit content.  
+
+  - **list**
+    - **Description:** List available remotes, with options to show detailed information and adjust column width to fit content.
     - **Syntax:**
 
       ```bash
       figo remote list [-f | --full] [-e | --extend]
       ```
 
-    - **Options:**  
+    - **Options:**
       - `-f, --full`: Show full details of available remotes.
       - `-e, --extend`: Extend column width to fit the content.
 
-  - **enroll**  
-    - **Description:** Enroll a remote Incus server.  
+    - **Examples:**
+      ```bash
+      figo remote list
+      figo remote list -f
+      figo remote list --extend
+      ```
+
+  - **enroll**
+    - **Description:** Enroll a remote Incus server to set up a connection for managing resources.
     - **Syntax:**
 
       ```bash
       figo remote enroll remote_server ip_address [port] [user] [cert_filename] [--loc_name loc_name]
       ```
 
-    - **Options:**  
+    - **Options:**
       - `remote_server`: Name to assign to the remote server.
       - `ip_address`: IP address or domain name of the remote server.
       - `port`: Port of the remote server (default: 8443).
@@ -496,8 +504,28 @@ Each command has its own set of subcommands and options.
       - `cert_filename`: Path to the client certificate file (default: `~/.config/incus/client.crt`).
       - `--loc_name`: Suffix of the certificate name saved on the remote server (default: `main`).
 
-    - **Description:**  
-      This command allows an administrator to enroll a remote Incus server, setting up a connection that enables the management of resources from a centralized main node in the FIGO system.
+    - **Examples:**
+      ```bash
+      figo remote enroll my_remote 192.168.1.100
+      figo remote enroll my_remote 192.168.1.100 8443 ubuntu ~/.config/incus/client.crt --loc_name main
+      ```
+
+  - **delete**
+    - **Description:** Delete a specified remote from the system.
+    - **Syntax:**
+
+      ```bash
+      figo remote delete remote_name
+      ```
+
+    - **Options:**
+      - `remote_name`: The name of the remote to delete.
+
+    - **Examples:**
+      ```bash
+      figo remote delete my_remote
+      figo remote delete test_remote
+      ```
 
 #### figo project
 

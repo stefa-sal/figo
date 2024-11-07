@@ -2896,6 +2896,29 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
     
     return True
 
+def delete_remote(remote_server):
+    """Delete a remote server from the client configuration."""
+    try:
+        # Check if the remote server exists
+        remotes = get_incus_remotes()
+        if remote_server not in remotes:
+            logger.info(f"Remote server {remote_server} not found.")
+            return False
+    except subprocess.CalledProcessError as e:
+        logger.error(f"An error occurred while deleting the remote server from the client configuration: {e}")
+        return False
+
+    try:
+        # Delete the remote server from the client configuration
+        subprocess.run(
+            ["incus", "remote", "remove", remote_server],
+            check=True
+        )
+        logger.info(f"Remote server {remote_server} deleted from client configuration.")
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.error(f"An error occurred while deleting the remote server from the client configuration: {e}")
+        return False
 
 #############################################
 ###### figo project command functions #######
@@ -4000,18 +4023,52 @@ def create_remote_parser(subparsers):
     remote_subparsers = remote_parser.add_subparsers(dest="remote_command")
 
     # List subcommand with --full and --extend options
-    remote_list_parser = remote_subparsers.add_parser("list", aliases=["l"], help="List available remotes (use -f or --full for more details)")
+    remote_list_parser = remote_subparsers.add_parser(
+        "list",
+        aliases=["l"],
+        help="List available remotes, with options to show detailed or extended views.",
+        description="List all available remotes in the system.\n"
+                    "Use the -f/--full option to display full details.\n"
+                    "Use the -e/--extend option to adjust column width for better readability.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo remote list\n"
+               "  figo remote list -f\n"
+               "  figo remote list --extend"
+    )
     remote_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of available remotes")
     remote_list_parser.add_argument("-e", "--extend", action="store_true", help="Extend column width to fit the content")
 
     # Enroll subcommand
-    remote_enroll_parser = remote_subparsers.add_parser("enroll", help="Enroll a remote Incus server")
+    remote_enroll_parser = remote_subparsers.add_parser(
+        "enroll",
+        help="Enroll a remote Incus server.",
+        description="Enroll a remote Incus server by specifying its name, IP address, port, and other optional parameters.\n"
+                    "The enrolled server can then be used for managing instances and resources.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo remote enroll my_remote 192.168.1.100\n"
+               "  figo remote enroll my_remote 192.168.1.100 8443 ubuntu ~/.config/incus/client.crt --loc_name main"
+    )
     remote_enroll_parser.add_argument("remote_server", help="Name to assign to the remote server")
     remote_enroll_parser.add_argument("ip_address", help="IP address or domain name of the remote server")
     remote_enroll_parser.add_argument("port", nargs="?", default="8443", help="Port of the remote server (default: 8443)")
     remote_enroll_parser.add_argument("user", nargs="?", default="ubuntu", help="Username for SSH into the remote (default: ubuntu)")
     remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.crt", help="Client certificate file to transfer (default: ~/.config/incus/client.crt)")
     remote_enroll_parser.add_argument("--loc_name", default="main", help="Suffix of certificate name saved on the remote server (default: main)")
+
+    # Delete subcommand with detailed help
+    remote_delete_parser = remote_subparsers.add_parser(
+        "delete",
+        help="Delete a specified remote.",
+        description="Delete a specified remote from the system by providing its name.\n"
+                    "This action removes the remote configuration from the system.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo remote delete my_remote\n"
+               "  figo remote delete test_remote"
+    )
+    remote_delete_parser.add_argument("remote_name", help="Name of the remote to delete")
 
     # Link aliases for easier access
     subparsers._name_parser_map["re"] = remote_parser
@@ -4027,6 +4084,9 @@ def handle_remote_command(args, parser_dict):
     elif args.remote_command == "enroll":
         ip_address_port = f"{args.ip_address}:{args.port}"
         enroll_remote(args.remote_server, ip_address_port, args.cert_filename, user=args.user, loc_name=args.loc_name)
+    elif args.remote_command == "delete":
+        delete_remote(args.remote_name)
+
 
 #############################################
 ###### figo project command CLI #############
