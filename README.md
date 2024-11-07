@@ -58,7 +58,7 @@ Each command has its own set of subcommands and options.
       ```
 
     - **Options:**  
-      - `scope`: Define the scope in the format `remote:project.` to limit the listing.
+      - `scope`: Define the scope in the format `remote:project` to limit the listing.
       - `-f, --full`: Show full details of instance profiles.
       - `-p, --project`: Specify the project name to list instances from.
       - `-r, --remote`: Specify the remote Incus server name.
@@ -67,12 +67,13 @@ Each command has its own set of subcommands and options.
     - **Examples:**
       ```bash
       figo instance list
-      figo instance list remote:project. -f
-      figo instance list -p my_project -r my_remote --extend
+      figo instance list my_remote:my_project
+      figo instance list -f -r my_remote
+      figo instance list my_project -p my_project -e
       ```
 
   - **start**
-    - **Description:** Start a specific instance, with optional remote and project scope.
+    - **Description:** Start a specific instance.
     - **Syntax:**
 
       ```bash
@@ -87,8 +88,8 @@ Each command has its own set of subcommands and options.
     - **Examples:**
       ```bash
       figo instance start my_instance
-      figo instance start remote:project.my_instance
-      figo instance start my_instance -r my_remote -p my_project
+      figo instance start my_project.my_instance -r my_remote
+      figo instance start my_remote:my_project.my_instance
       ```
 
   - **stop**
@@ -108,8 +109,8 @@ Each command has its own set of subcommands and options.
     - **Examples:**
       ```bash
       figo instance stop my_instance
-      figo instance stop remote:project.my_instance
-      figo instance stop -a -p my_project -r my_remote
+      figo instance stop my_remote:my_project.my_instance
+      figo instance stop my_instance -a -p my_project -r my_remote
       ```
 
   - **set_key**
@@ -132,7 +133,8 @@ Each command has its own set of subcommands and options.
     - **Examples:**
       ```bash
       figo instance set_key my_instance my_key.pub
-      figo instance set_key remote:project.my_instance my_key.pub -l user1 -f
+      figo instance set_key my_project.my_instance my_key.pub -l admin -r my_remote
+      figo instance set_key my_remote:my_project.my_instance my_key.pub -f
       ```
 
   - **set_ip**
@@ -153,29 +155,34 @@ Each command has its own set of subcommands and options.
 
     - **Examples:**
       ```bash
-      figo instance set_ip my_instance -i 192.168.1.5/24 -g 192.168.1.1
-      figo instance set_ip remote:project.my_instance -i 10.0.0.10/24 -g 10.0.0.1 -n enp5s0
+      figo instance set_ip my_instance -i 192.168.1.10/24 -g 192.168.1.1
+      figo instance set_ip my_project.my_instance -i 192.168.1.20/24 -g 192.168.1.1 -r my_remote
+      figo instance set_ip my_remote:my_project.my_instance -i 10.0.0.5/16 -g 10.0.0.1 -n eth1
       ```
 
   - **create**
-    - **Description:** Create a new instance with a specified image and type.
+    - **Description:** Create a new instance.
     - **Syntax:**
 
       ```bash
-      figo instance create instance_name image [-t type] [-p project] [-r remote]
+      figo instance create instance_name image [-t type] [-p project] [-r remote] [-i ip_address] [-g gw_address] [-n nic]
       ```
 
     - **Options:**  
       - `instance_name`: The name of the new instance. Can include remote and project scope.
       - `image`: Image source to create the instance from (e.g., `images:ubuntu/20.04`).
       - `-t, --type`: Specify the instance type (`vm` or `container`).
-      - `-p, --project`: The project under which the instance will be created.
+      - `-p, --project`: Specify the project under which the instance will be created.
       - `-r, --remote`: Specify the remote Incus server.
+      - `-i, --ip`: Specify a static IP address for the instance.
+      - `-g, --gw`: Specify the gateway address for the instance.
+      - `-n, --nic`: Specify the NIC name for the instance (default: eth0 for containers, enp5s0 for VMs).
 
     - **Examples:**
       ```bash
-      figo instance create my_instance images:ubuntu/22.04
-      figo instance create remote:project.my_instance images:debian/10 -t vm
+      figo instance create my_instance images:ubuntu/20.04
+      figo instance create my_project.my_instance images:debian/11 -t vm -r my_remote
+      figo instance create my_remote:my_project.my_instance images:centos/8 -i 10.0.0.10/24 -g 10.0.0.1 -n enp5s0
       ```
 
   - **delete**
@@ -190,16 +197,17 @@ Each command has its own set of subcommands and options.
       - `instance_name`: The name of the instance to delete. Can include remote and project scope.
       - `-f, --force`: Force delete the instance even if it is running.
       - `-p, --project`: Specify the project name.
-      - `-r, --remote`: Specify the remote Incus server.
+      - `-r, --remote`: Specify the remote Incus server name.
 
     - **Examples:**
       ```bash
       figo instance delete my_instance
-      figo instance delete remote:project.my_instance -f
+      figo instance delete my_remote:my_project.my_instance -f
+      figo instance delete my_project.my_instance -p my_project -r my_remote
       ```
 
   - **bash**
-    - **Description:** Execute bash in a specific instance, optionally starting it first.
+    - **Description:** Execute bash in a specific instance.
     - **Syntax:**
 
       ```bash
@@ -212,14 +220,15 @@ Each command has its own set of subcommands and options.
       - `-t, --timeout`: Total timeout in seconds for retries.
       - `-a, --attempts`: Number of retry attempts to connect.
       - `-p, --project`: Specify the project name.
-      - `-r, --remote`: Specify the remote Incus server.
+      - `-r, --remote`: Specify the remote Incus server name.
 
     - **Examples:**
       ```bash
       figo instance bash my_instance
-      figo instance bash remote:project.my_instance -f -t 60 -a 3
+      figo instance bash my_project.my_instance -t 60 -a 5
+      figo instance bash my_remote:my_project.my_instance -f -r my_remote
       ```
-
+      
 #### figo gpu
 
 - **Aliases:** `gp`, `g`
