@@ -165,24 +165,36 @@ Each command has its own set of subcommands and options.
     - **Syntax:**
 
       ```bash
-      figo instance create instance_name image [-t type] [-p project] [-r remote] [-i ip_address] [-g gw_address] [-n nic]
+      figo instance create instance_name image [-t type] [-p project] [-r remote] [-i ip_address] [-g gw_address] [-n nic] [-f profiles]
       ```
 
     - **Options:**  
-      - `instance_name`: The name of the new instance. Can include remote and project scope.
+      - `instance_name`: The name of the new instance. Can include remote and project scope in the format `remote:project.instance_name`.
       - `image`: Image source to create the instance from (e.g., `images:ubuntu/20.04`).
-      - `-t, --type`: Specify the instance type (`vm` or `container`).
+      - `-t, --type`: Specify the instance type (`vm`, `container`, or `cnt` for container). Default is `container`.
       - `-p, --project`: Specify the project under which the instance will be created.
       - `-r, --remote`: Specify the remote Incus server.
       - `-i, --ip`: Specify a static IP address for the instance.
       - `-g, --gw`: Specify the gateway address for the instance.
-      - `-n, --nic`: Specify the NIC name for the instance (default: eth0 for containers, enp5s0 for VMs).
+      - `-n, --nic`: Specify the NIC name for the instance (default: `eth0` for containers, `enp5s0` for VMs).
+      - `-f, --profile`: Comma-separated list of profiles to apply to the instance.
 
     - **Examples:**
       ```bash
+      # Create a container instance with default options
       figo instance create my_instance images:ubuntu/20.04
+
+      # Create a VM instance with specific project and remote
       figo instance create my_project.my_instance images:debian/11 -t vm -r my_remote
+
+      # Create an instance with a static IP, gateway, and specific NIC
       figo instance create my_remote:my_project.my_instance images:centos/8 -i 10.0.0.10/24 -g 10.0.0.1 -n enp5s0
+
+      # Create an instance and apply specific profiles
+      figo instance create my_instance images:ubuntu/22.04 -f profile1,profile2
+
+      # Create an instance with project and remote scope and multiple profiles
+      figo instance create my_project.my_instance images:alpine/3.15 -r my_remote -f profile1,profile3
       ```
 
   - **delete**

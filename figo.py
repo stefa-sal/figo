@@ -86,7 +86,9 @@ PROJECT_PREFIX = FIGO_PREFIX
 
 DEFAULT_LOGIN_FOR_INSTANCES = 'ubuntu'
 
-DEFAULT_INSTANCE_SIZE = 'instance-medium'  # Global default instance size
+DEFAULT_INSTANCE_SIZE = 'instance-medium'  # profile to be added to default if no profile is specified
+#DEFAULT_INSTANCE_SIZE = ''  # if empty, no profile is added to defautl
+
 
 DEFAULT_PREFIX_LEN = 25 # Default prefix length for IP addresses of instances
 
@@ -1021,7 +1023,7 @@ def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote):
 
 def create_instance(instance_name, image, remote_name, project, instance_type, 
                     ip_address_and_prefix_len=None, gw_address=None, nic_device_name=None,
-                    instance_size=None):
+                    profiles=[]):
     """Create a new instance from a local or remote image with specified configurations.
 
     Args:
@@ -1038,14 +1040,15 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
     Returns:
     True if the instance was created successfully, False otherwise.
     """
+
     try:
         remote_client = get_remote_client(remote_name, project_name=project)  # Function to retrieve the remote client
         if not remote_client:
             return False
 
-        # Set instance_size to DEFAULT_INSTANCE_SIZE if not provided
-        if not instance_size:
-            instance_size = DEFAULT_INSTANCE_SIZE
+        # set the default instance size profile if none is provided
+        if not profiles and DEFAULT_INSTANCE_SIZE:
+            profiles = [DEFAULT_INSTANCE_SIZE]
 
         # Check if the project exists
         try:
@@ -1112,11 +1115,12 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
 
         ip_address_and_prefix_len, gw_address = get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote_name)
 
+        final_profiles = ['default'] + profiles  # Add default and instance size profiles   
         # Create the instance configuration
         config = {
             'name': instance_name,
             'source': config_source,
-            'profiles': ['default', instance_size],  # Add default and instance size profiles
+            'profiles': final_profiles,  # Add default and instance size profiles
             'config': {
                 'user.network-config': f"""
                 version: 2
@@ -3216,8 +3220,8 @@ def create_instance_parser(subparsers):
         )
         parser.add_argument(
             "-n", "--nic",
-            help="Specify the nic name for the instance, used in create and set_ip subcommands \n"
-                 "default: eth0 for containers, enp5s0 for VMs"
+            help="Specify the NIC name for the instance, used in create and set_ip subcommands.\n"
+                 "Default: eth0 for containers, enp5s0 for VMs"
         )
 
     # List command
@@ -3333,21 +3337,23 @@ def create_instance_parser(subparsers):
     create_parser = instance_subparsers.add_parser(
         "create",
         aliases=["c"],
-        help="Create a new instance, specifying the instance name, image, and type.",
+        help="Create a new instance, specifying the instance name, image, type, and optional profiles.",
         description="Create a new instance.\n"
                     "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
-                    "Specify the image and instance type (e.g., 'vm' or 'container').",
+                    "Specify the image, instance type, and optional profiles to apply during creation.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
                "  figo instance create instance_name image_name\n"
                "  figo instance create remote:project.instance_name image_name -t vm\n"
-               "  figo instance create instance_name image_name -r remote_name -p project_name"
+               "  figo instance create instance_name image_name -r remote_name -p project_name\n"
+               "  figo instance create instance_name image_name -f profile1,profile2"
     )
     create_parser.add_argument("instance_name", help="Name of the new instance.\n"
                                "Can include remote and project scope in the format 'remote:project.instance_name'")
     create_parser.add_argument("image", help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
     create_parser.add_argument("-t", "--type", choices=["vm", "container", "cnt"], default="container", 
                                help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container').")
+    create_parser.add_argument("-f", "--profile", help="Comma-separated list of profiles to apply to the instance.")
     add_common_arguments(create_parser)
 
     # Delete command
@@ -3542,7 +3548,6 @@ def handle_instance_command(args, parser_dict):
             else:
                 args.project = user_project  # Use the derived project
 
-
         if args.instance_command == "stop":
             if args.all:
                 # Parse instance scope if provided with '--all'
@@ -3597,8 +3602,12 @@ def handle_instance_command(args, parser_dict):
                 if instance_type == "cnt":
                     instance_type = "container"  # Convert 'cnt' to 'container'
 
+                # Parse profiles if provided
+                profiles = [p for p in args.profile.split(',') if p] if args.profile else []
+
                 create_instance(instance, image, remote, project, instance_type,
-                                ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
+                                ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic,
+                                profiles=profiles)
             elif args.instance_command in ["delete", "del", "d"]:
                 delete_instance(instance, remote, project, force=args.force)
             elif args.instance_command in ["bash", "b"]:
