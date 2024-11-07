@@ -2796,21 +2796,33 @@ def resolve_hostname(hostname):
 
 def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus/client.crt",
            user="ubuntu", loc_name="main"):
-    """Enroll a remote server by transferring the client certificate and adding it to the remote Incus daemon.
+    """Enroll a remote server by transferring the client certificate of the figo main node and adding it to the remote Incus daemon.
     
     Before enrolling the remote server, the public key of the local incus user needs to be added 
-    to the remote server's authorized_keys file.
+    to the remote server's authorized_keys file. Unless the public key is already present because it has been added
+    in the deployment process by cloud-init or other means.
 
     Parameters:
     - remote_server: The name of the remote server
     - ip_address_port: The IP address and port of the remote server in the format 'IP:PORT'
-    - cert_filename: The path to the client certificate file
+    - cert_filename: The path to the client certificate file in the main figo node
     - user: The username to use for SSH connection
-    - loc_name: The location name for the certificate
+    - loc_name: The location name for the certificate on the remote server
 
     Returns: True if the remote server was successfully enrolled, False otherwise.
 
     """
+
+    # Check if the remote server already exists
+    try:
+        remotes = get_incus_remotes()
+        if remote_server in remotes:
+            logger.info(f"Warning: Remote server {remote_server} is already configured.")
+            return False
+    except subprocess.CalledProcessError as e:
+        logger.error(f"An error occurred while adding the remote server to the client configuration: {e}")
+        return False
+
     ip_address, port = (ip_address_port.split(":") + ["8443"])[:2]
 
     if not is_valid_ip(ip_address):
@@ -2866,18 +2878,14 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
         logger.error(f"An error occurred while processing the certificate: {e}")
         return False
 
-    # Check if the remote server already exists
     try:
-        remotes = get_incus_remotes()
-        if remote_server in remotes:
-            logger.info(f"Warning: Remote server {remote_server} is already configured.")
-        else:
-            # Add the remote server to the client configuration
-            subprocess.run(
-                ["incus", "remote", "add", remote_server, f"https://{ip_address}:{port}", "--accept-certificate"],
-                check=True
-            )
-            logger.info(f"Remote server {remote_server} added to client configuration.")
+        # (Already checked that the remote server does not exist)
+        # Add the remote server to the client configuration
+        subprocess.run(
+            ["incus", "remote", "add", remote_server, f"https://{ip_address}:{port}", "--accept-certificate"],
+            check=True
+        )
+        logger.info(f"Remote server {remote_server} added to client configuration.")
     except subprocess.CalledProcessError as e:
         logger.error(f"An error occurred while adding the remote server to the client configuration: {e}")
         return False
@@ -3209,13 +3217,23 @@ def create_instance_parser(subparsers):
         parser.add_argument(
             "-n", "--nic",
             help="Specify the nic name for the instance, used in create and set_ip subcommands \n"
-            "default: eth0 for containers, enp5s0 for VMs"
+                 "default: eth0 for containers, enp5s0 for VMs"
         )
 
     # List command
     instance_list_parser = instance_subparsers.add_parser(
-        "list", aliases=["l"], help="List instances (use -f or --full for more details)",
-        formatter_class=argparse.RawTextHelpFormatter
+        "list",
+        aliases=["l"],
+        help="List instances in the system, with options to specify scope, remote, and project.",
+        description="List instances, optionally specifying a scope, remote server, or project.\n"
+                    "The scope can include 'remote:project.', 'project.', or 'remote:'.\n"
+                    "Use the -f/--full option to display more detailed information.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo instance list\n"
+               "  figo instance list remote:project.\n"
+               "  figo instance list project. -r remote_name\n"
+               "  figo instance list -f --extend"
     )
     instance_list_parser.add_argument(
         "-f", "--full", action="store_true", help="Show full details of instance profiles"
@@ -3230,7 +3248,16 @@ def create_instance_parser(subparsers):
 
     # Start command
     start_parser = instance_subparsers.add_parser(
-        "start", help="Start a specific instance", formatter_class=argparse.RawTextHelpFormatter
+        "start",
+        help="Start a specific instance, with optional remote and project scope.",
+        description="Start a specific instance.\n"
+                    "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
+                    "If the scope is not provided in the instance name, the -r/--remote and -p/--project options can be used.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo instance start instance_name\n"
+               "  figo instance start remote:project.instance_name\n"
+               "  figo instance start instance_name -r remote_name -p project_name"
     )
     start_parser.add_argument(
         "instance_name",
@@ -3240,8 +3267,17 @@ def create_instance_parser(subparsers):
 
     # Stop command
     stop_parser = instance_subparsers.add_parser(
-        "stop", help="Stop a specific instance or all instances in a scope",
-        formatter_class=argparse.RawTextHelpFormatter
+        "stop",
+        help="Stop a specific instance or all instances in a specified scope.",
+        description="Stop a specific instance or all instances in a given scope.\n"
+                    "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
+                    "Use the --all option to stop all instances within the specified scope.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo instance stop instance_name\n"
+               "  figo instance stop remote:project.instance_name\n"
+               "  figo instance stop -a -r remote_name\n"
+               "  figo instance stop project. -a"
     )
     stop_parser.add_argument(
         "instance_name", nargs="?", default=None,
@@ -3250,19 +3286,26 @@ def create_instance_parser(subparsers):
     )
     stop_parser.add_argument(
         "-a", "--all", action="store_true",
-        help=(
-            "Stop all instances in the specified scope.\n"
-            "If remote or project is not specified, all remotes or all projects are considered."
-        )
+        help=("Stop all instances in the specified scope.\n"
+              "If remote or project is not specified, all remotes or all projects are considered.")
     )
     add_common_arguments(stop_parser)
 
     # Set Key command
-    set_key_parser = instance_subparsers.add_parser("set_key", help="Set a public key for a user in an instance",
-                             formatter_class=argparse.RawTextHelpFormatter)
+    set_key_parser = instance_subparsers.add_parser(
+        "set_key",
+        help="Set a public key for a user in a specific instance.",
+        description="Set a public key for a user in a specific instance.\n"
+                    "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
+                    "If the scope is not provided in the instance name, the -r/--remote and -p/--project options can be used.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo instance set_key instance_name key_filename\n"
+               "  figo instance set_key remote:project.instance_name key_filename\n"
+               "  figo instance set_key instance_name key_filename -r remote_name -p project_name"
+    )
     set_key_parser.add_argument("instance_name", help="Name of the instance. Can include remote and project scope.")
     set_key_parser.add_argument("key_filename", help="Filename of the public key on the host (by default in the ./users folder)")
-    # Add new options
     set_key_parser.add_argument("-l", "--login", default=DEFAULT_LOGIN_FOR_INSTANCES, 
                                 help="Specify the user login name (default: ubuntu) for which we are setting the key")
     set_key_parser.add_argument("-d", "--dir", default=USER_DIR, 
@@ -3272,15 +3315,34 @@ def create_instance_parser(subparsers):
     add_common_arguments(set_key_parser)
 
     # Set IP command
-    set_ip_parser = instance_subparsers.add_parser("set_ip", help="Set a static IP address and gateway for a stopped instance",
-                             formatter_class=argparse.RawTextHelpFormatter)
+    set_ip_parser = instance_subparsers.add_parser(
+        "set_ip",
+        help="Set a static IP address and gateway for a stopped instance.",
+        description="Set a static IP address and gateway for a stopped instance.\n"
+                    "The instance name can include remote and project scope in the format 'remote:project.instance_name'.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo instance set_ip instance_name -i 192.168.1.10/24 -g 192.168.1.1\n"
+               "  figo instance set_ip remote:project.instance_name -i 10.0.0.5/24 -g 10.0.0.1"
+    )
     set_ip_parser.add_argument("instance_name",
                                help="Name of the instance to set the IP address for. Can include remote and project scope.")
     add_common_arguments(set_ip_parser)
 
     # Create command
-    create_parser = instance_subparsers.add_parser("create", aliases=["c"], help="Create a new instance",
-                               formatter_class=argparse.RawTextHelpFormatter)
+    create_parser = instance_subparsers.add_parser(
+        "create",
+        aliases=["c"],
+        help="Create a new instance, specifying the instance name, image, and type.",
+        description="Create a new instance.\n"
+                    "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
+                    "Specify the image and instance type (e.g., 'vm' or 'container').",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo instance create instance_name image_name\n"
+               "  figo instance create remote:project.instance_name image_name -t vm\n"
+               "  figo instance create instance_name image_name -r remote_name -p project_name"
+    )
     create_parser.add_argument("instance_name", help="Name of the new instance.\n"
                                "Can include remote and project scope in the format 'remote:project.instance_name'")
     create_parser.add_argument("image", help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
@@ -3289,14 +3351,37 @@ def create_instance_parser(subparsers):
     add_common_arguments(create_parser)
 
     # Delete command
-    delete_parser = instance_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete a specific instance",
-                             formatter_class=argparse.RawTextHelpFormatter)
+    delete_parser = instance_subparsers.add_parser(
+        "delete",
+        aliases=["del", "d"],
+        help="Delete a specific instance, with optional force deletion.",
+        description="Delete a specific instance.\n"
+                    "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
+                    "Use the -f/--force option to delete the instance even if it is running.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo instance delete instance_name\n"
+               "  figo instance delete remote:project.instance_name -f\n"
+               "  figo instance delete instance_name -r remote_name -p project_name"
+    )
     delete_parser.add_argument("instance_name", help="Name of the instance to delete. Can include remote and project scope.")
     delete_parser.add_argument("-f", "--force", action="store_true", help="Force delete the instance even if it is running")
     add_common_arguments(delete_parser)
 
     # Bash command
-    bash_parser = instance_subparsers.add_parser("bash", aliases=["b"], help="Execute bash in a specific instance")
+    bash_parser = instance_subparsers.add_parser(
+        "bash",
+        aliases=["b"],
+        help="Execute bash in a specific instance, optionally starting it first.",
+        description="Execute bash in a specific instance.\n"
+                    "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
+                    "Use the -f/--force option to start the instance if it is not running.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo instance bash instance_name\n"
+               "  figo instance bash remote:project.instance_name\n"
+               "  figo instance bash instance_name -f -r remote_name -p project_name"
+    )
     bash_parser.add_argument("instance_name", help="Name of the instance to execute bash. Can include remote and project scope.")
     bash_parser.add_argument("-f", "--force", action="store_true", help="Start the instance if not running and exec bash (stop on exit if not running)")
     bash_parser.add_argument("-t", "--timeout", type=int, default=BASH_CONNECT_TIMEOUT, help="Total timeout in seconds for retries (default: {BASH_CONNECT_TIMEOUT})")
@@ -3362,7 +3447,6 @@ def handle_instance_list(args):
 
     # Pass the `extend` flag to list_instances to adjust column width as specified by user
     list_instances(remote_node, project_name=project_name, instance_scope=instance_scope, full=args.full, extend=args.extend)
-
 
 def handle_instance_command(args, parser_dict):
     if not args.instance_command:
@@ -3917,7 +4001,7 @@ def create_remote_parser(subparsers):
     remote_enroll_parser.add_argument("ip_address", help="IP address or domain name of the remote server")
     remote_enroll_parser.add_argument("port", nargs="?", default="8443", help="Port of the remote server (default: 8443)")
     remote_enroll_parser.add_argument("user", nargs="?", default="ubuntu", help="Username for SSH into the remote (default: ubuntu)")
-    remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.crt", help="Client certificate file to transfer (default: ~/.config/incus/client.cr)")
+    remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.crt", help="Client certificate file to transfer (default: ~/.config/incus/client.crt)")
     remote_enroll_parser.add_argument("--loc_name", default="main", help="Suffix of certificate name saved on the remote server (default: main)")
 
     # Link aliases for easier access
