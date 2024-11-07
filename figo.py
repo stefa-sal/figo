@@ -541,12 +541,13 @@ def get_remote_client(remote_node, project_name='default'):
         try :
             address = get_remote_address(remote_node)
             cert_path = get_certificate_path(remote_node)
+            print(f"address: {address}, cert_path: {cert_path}") # debug
         except FileNotFoundError:
             logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Certificate not found.")
             return None
         except Exception as e:
             logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
-            return
+            return None
 
         # Create a pylxd.Client instance with SSL verification
         try:
@@ -557,6 +558,8 @@ def get_remote_client(remote_node, project_name='default'):
                 if "Project not found" in str(e):
                     logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Project not found.")
                     return None 
+                else:
+                    pass # continue because we expect the instance to be not found
             except Exception as e:
                 logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
                 return None
@@ -576,8 +579,8 @@ def start_instance(instance_name, remote, project):
     try:
         # Connect to the specified remote and project 
         remote_client = get_remote_client(remote, project_name=project)
-
         if not remote_client:
+            logger.error(f"Failed to connect to remote '{remote}' and project '{project}'.")
             return False
         
     except Exception as e:
@@ -679,6 +682,7 @@ def stop_instance(instance_name, remote, project):
     # get the specified instance in project and remote  
     remote_client = get_remote_client(remote, project_name=project)
     if not remote_client:
+        logger.error(f"Failed to connect to remote '{remote}' and project '{project}'.")
         return False
 
     try:
@@ -797,6 +801,7 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
         # Get the specified instance in project and remote  
         remote_client = get_remote_client(remote, project_name=project)
         if not remote_client:
+            logger.error(f"Failed to connect to remote '{remote}' and project '{project}'.")
             return False
         instance = remote_client.instances.get(instance_name)
 
@@ -942,6 +947,7 @@ def set_ip(instance_name, remote, project, ip_address_and_prefix_len=None, gw_ad
         # Get the specified instance in project and remote  
         remote_client = get_remote_client(remote, project_name=project)
         if not remote_client:
+            logger.error(f"Failed to connect to remote '{remote}' and project '{project}'.")
             return False
         instance = remote_client.instances.get(instance_name)
 
@@ -1044,6 +1050,7 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
     try:
         remote_client = get_remote_client(remote_name, project_name=project)  # Function to retrieve the remote client
         if not remote_client:
+            logger.error(f"Failed to connect to remote '{remote_name}' and project '{project}'.")
             return False
 
         # set the default instance size profile if none is provided
@@ -1163,6 +1170,7 @@ def delete_instance(instance_name, remote, project, force=False):
     try:
         remote_client = get_remote_client(remote, project_name=project) # Function to retrieve the remote client
         if not remote_client:
+            logger.error(f"Failed to connect to remote '{remote}' and project '{project}'.")
             return False
 
         # Check if the instance exists
@@ -1211,6 +1219,7 @@ def exec_instance_bash(instance_name, remote, project, force=False, timeout=BASH
         # Check if the instance is running
         remote_client = get_remote_client(remote, project_name=project)
         if not remote_client:
+            logger.error(f"Failed to connect to remote '{remote}' and project '{project}'.")
             return False
         
         instance = remote_client.instances.get(instance_name)
@@ -1508,6 +1517,7 @@ def list_profiles_specific(remote, project, profile_name=None, COLS=None):
     """
     client = get_remote_client(remote, project_name=project)
     if not client:
+        logger.error(f"Failed to retrieve client for '{remote}:{project}'.")
         return False
     
     #check if the project exists
@@ -1552,6 +1562,8 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
     COLS = [('PROFILE', 25), ('CONTEXT', 25), ('INSTANCES', 80)]
     add_header_line_to_output(COLS)
 
+    print(f"remote: {remote}, project: {project}, profile_name: {profile_name}, inherited: {inherited}") # debug
+
     if remote and project:
         if not inherited and not check_profiles_feature(remote, project):
             return
@@ -1574,6 +1586,7 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
                     continue
                 list_profiles_specific(my_remote_node, project, profile_name, COLS)
             else:
+                print(f"remote: {my_remote_node}") # debug
                 for my_project in iterator_over_projects(my_remote_node):
                     if not inherited and not check_profiles_feature(my_remote_node, my_project["name"]):
                         continue
@@ -1592,10 +1605,14 @@ def check_profiles_feature(remote, project, remote_client=None):
 
     Returns:
     - bool: True if profiles are managed within the project, False if profiles are inherited from the default project.
+    - False if the project is not found or an error occurs.
     """
     try:
         # Use the provided remote_client if available, otherwise create a new one
         client = remote_client if remote_client else get_remote_client(remote, project_name=project)
+        if not client:
+            logger.error(f"Failed to retrieve client for '{remote}:{project}'.")
+            return False
         project_data = client.projects.get(project)
         return project_data.config.get('features.profiles', 'false') == 'true'
     except pylxd.exceptions.NotFound:
@@ -1617,9 +1634,11 @@ def copy_profile(source_remote, source_project, source_profile, target_remote, t
         # Get the source and target clients
         source_client = get_remote_client(source_remote, project_name=source_project)
         if not source_client:
+            logger.error(f"Failed to retrieve client for '{source_remote}:{source_project}'.")
             return False 
         target_client = get_remote_client(target_remote, project_name=target_project)
         if not target_client:
+            logger.error(f"Failed to retrieve client for '{target_remote}:{target_project}'.")
             return False
 
         # Check the project's config for 'features.profiles' in the target project
@@ -1678,6 +1697,9 @@ def delete_profile(remote, project, profile_name):
     """
     try:
         client = get_remote_client(remote, project_name=project)
+        if not client:
+            logger.error(f"Failed to retrieve client for '{remote}:{project}'.")
+            return False
 
         # Check the project's config for 'features.profiles'
         if not check_profiles_feature(remote, project, remote_client=client):
@@ -2042,6 +2064,9 @@ def create_project(remote_name, project_name):
             }
         }
         client_object = get_remote_client(remote_name, project_name=project_name)
+        if not client_object:
+            logger.error(f"Failed to retrieve client for remote '{remote_name}'.")
+            return False
 
         # Creating the project using the correct format
         client_object.api.projects.post(json=project_data)
@@ -2234,6 +2259,7 @@ def delete_project(remote_node, project_name):
     
     remote_client = get_remote_client(remote_node, project_name=project_name)
     if not remote_client:
+        logger.error(f"Failed to retrieve client for remote '{remote_node}', project_name '{project_name}'.")
         return False
 
     try:
@@ -2603,6 +2629,7 @@ def list_instances_in_project(remote_node, project_name):
     
     remote_client = get_remote_client(remote_node, project_name=project_name)
     if not remote_client:
+        logger.error(f"Failed to retrieve client for remote '{remote_node}', project_name '{project_name}'.")
         return None
 
     # List all instances in the remote node in the given project
@@ -2622,6 +2649,7 @@ def list_profiles_in_project(remote_node, project_name):
 
     remote_client = get_remote_client(remote_node, project_name=project_name)
     if not remote_client:
+        logger.error(f"Failed to retrieve client for remote '{remote_node}', project_name '{project_name}'.")
         return None
 
     profiles_in_project = []
@@ -2644,6 +2672,7 @@ def list_storage_volumes_in_project(remote_node, project_name):
 
     remote_client = get_remote_client(remote_node, project_name=project_name)
     if not remote_client:
+        logger.error(f"Failed to retrieve client for remote '{remote_node}', project_name '{project_name}'.")
         return None
 
     storage_volumes_in_project = []
