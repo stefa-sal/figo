@@ -4102,7 +4102,7 @@ def create_remote_parser(subparsers):
     remote_enroll_parser.add_argument("remote_cert_filename", nargs="?", default="/var/lib/incus/server.crt",
                                       help="Remote certificate file to transfer locally (default: /var/lib/incus/server.crt)")
     remote_enroll_parser.add_argument("--loc_name", default="main",
-                                      help="Suffix of certificate name saved on the remote server (default: main)")
+                                      help="Name for saving the client certificate on the remote server (default: main)")
 
     # Delete subcommand with detailed help
     remote_delete_parser = remote_subparsers.add_parser(

@@ -503,7 +503,7 @@ Each command has its own set of subcommands and options.
       - `user`: Username for SSH into the remote server (default: `ubuntu`).
       - `cert_filename`: Path to the client certificate file on the main node (default: `~/.config/incus/client.crt`).
       - `remote_cert_filename`: Path to the server certificate file on the remote server (default: `/var/lib/incus/server.crt`).
-      - `--loc_name`: Suffix for the client certificate name saved on the remote server (default: `main`).
+      - `--loc_name`: Name for saving the client certificate on the remote server (default: `main`).
     - **Examples:**
       ```bash
       figo remote enroll my_remote 192.168.1.100
