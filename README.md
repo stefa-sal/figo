@@ -466,11 +466,11 @@ Each command has its own set of subcommands and options.
 #### figo remote
 
 - **Aliases:** `re`, `r`
-- **Description:** Manage remotes.
+- **Description:** Manage remotes for the FIGO system, including listing, enrolling, and deleting remote servers.
 - **Subcommands:**
 
   - **list**
-    - **Description:** List available remotes, with options to show detailed information and adjust column width to fit content.
+    - **Description:** List available remotes, with options to show detailed information and adjust column width for better readability.
     - **Syntax:**
 
       ```bash
@@ -489,11 +489,11 @@ Each command has its own set of subcommands and options.
       ```
 
   - **enroll**
-    - **Description:** Enroll a remote Incus server to set up a connection for managing resources.
+    - **Description:** Enroll a remote Incus server to set up a connection for managing instances and resources.
     - **Syntax:**
 
       ```bash
-      figo remote enroll remote_server ip_address [port] [user] [cert_filename] [--loc_name loc_name]
+      figo remote enroll remote_server ip_address [port] [user] [cert_filename] [remote_cert_filename] [--loc_name loc_name]
       ```
 
     - **Options:**
@@ -501,17 +501,17 @@ Each command has its own set of subcommands and options.
       - `ip_address`: IP address or domain name of the remote server.
       - `port`: Port of the remote server (default: 8443).
       - `user`: Username for SSH into the remote server (default: `ubuntu`).
-      - `cert_filename`: Path to the client certificate file (default: `~/.config/incus/client.crt`).
-      - `--loc_name`: Suffix of the certificate name saved on the remote server (default: `main`).
-
+      - `cert_filename`: Path to the client certificate file on the main node (default: `~/.config/incus/client.crt`).
+      - `remote_cert_filename`: Path to the server certificate file on the remote server (default: `/var/lib/incus/server.crt`).
+      - `--loc_name`: Suffix for the client certificate name saved on the remote server (default: `main`).
     - **Examples:**
       ```bash
       figo remote enroll my_remote 192.168.1.100
-      figo remote enroll my_remote 192.168.1.100 8443 ubuntu ~/.config/incus/client.crt --loc_name main
+      figo remote enroll my_remote 192.168.1.100 8443 ubuntu ~/.config/incus/client.crt /var/lib/incus/server.crt --loc_name main
       ```
 
   - **delete**
-    - **Description:** Delete a specified remote from the system.
+    - **Description:** Delete a specified remote from the system, removing its configuration.
     - **Syntax:**
 
       ```bash

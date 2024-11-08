@@ -541,7 +541,6 @@ def get_remote_client(remote_node, project_name='default'):
         try :
             address = get_remote_address(remote_node)
             cert_path = get_certificate_path(remote_node)
-            print(f"address: {address}, cert_path: {cert_path}") # debug
         except FileNotFoundError:
             logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Certificate not found.")
             return None
@@ -1562,8 +1561,6 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
     COLS = [('PROFILE', 25), ('CONTEXT', 25), ('INSTANCES', 80)]
     add_header_line_to_output(COLS)
 
-    print(f"remote: {remote}, project: {project}, profile_name: {profile_name}, inherited: {inherited}") # debug
-
     if remote and project:
         if not inherited and not check_profiles_feature(remote, project):
             return
@@ -1586,7 +1583,6 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
                     continue
                 list_profiles_specific(my_remote_node, project, profile_name, COLS)
             else:
-                print(f"remote: {my_remote_node}") # debug
                 for my_project in iterator_over_projects(my_remote_node):
                     if not inherited and not check_profiles_feature(my_remote_node, my_project["name"]):
                         continue
@@ -2828,23 +2824,23 @@ def resolve_hostname(hostname):
     
 
 def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus/client.crt",
-           user="ubuntu", loc_name="main"):
-    """Enroll a remote server by transferring the client certificate of the figo main node and adding it to the remote Incus daemon.
-    
-    Before enrolling the remote server, the public key of the local incus user needs to be added 
-    to the remote server's authorized_keys file. Unless the public key is already present because it has been added
-    in the deployment process by cloud-init or other means.
+                  user="ubuntu", loc_name="main", remote_cert_filename="/var/lib/incus/server.crt"):
+    """Enroll a remote server by transferring the client certificate of the figo main node 
+    and adding it to the remote Incus daemon. It also retrieves the remote server's certificate 
+    and stores it locally on the figo main node.
 
     Parameters:
-    - remote_server: The name of the remote server
-    - ip_address_port: The IP address and port of the remote server in the format 'IP:PORT'
-    - cert_filename: The path to the client certificate file in the main figo node
-    - user: The username to use for SSH connection
-    - loc_name: The location name for the certificate on the remote server
+    - remote_server: The name of the remote server.
+    - ip_address_port: The IP address and port of the remote server in the format 'IP:PORT'.
+    - cert_filename: The path to the client certificate file in the main figo node.
+    - user: The username to use for SSH connection.
+    - loc_name: The location name for the client certificate on the remote server.
+    - remote_cert_filename: The path to the server certificate on the remote server.
 
-    Returns: True if the remote server was successfully enrolled, False otherwise.
-
+    Returns:
+    True if the remote server was successfully enrolled, False otherwise.
     """
+    #TODO enroll_remote has several hardcoded paths that should be replaced with global variables
 
     # Check if the remote server already exists
     try:
@@ -2853,7 +2849,7 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
             logger.info(f"Warning: Remote server {remote_server} is already configured.")
             return False
     except subprocess.CalledProcessError as e:
-        logger.error(f"An error occurred while adding the remote server to the client configuration: {e}")
+        logger.error(f"An error occurred while checking configured remotes: {e}")
         return False
 
     ip_address, port = (ip_address_port.split(":") + ["8443"])[:2]
@@ -2867,30 +2863,48 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
             return False
 
     cert_filename = os.path.expanduser(cert_filename)
+    local_cert_path = os.path.join(CERTIFICATE_DIR, f"{remote_server}.crt")
     remote_cert_path = f"{user}@{ip_address}:~/figo/certs/{loc_name}.crt"
 
     try:
-        # Check if the certificate already exists on the remote server
+        # Ensure the local certificate directory exists
+        os.makedirs(CERTIFICATE_DIR, exist_ok=True)
+
+        # Copy the server certificate from the remote server to the local main node
+        scp_command = f"scp {user}@{ip_address}:{remote_cert_filename} {local_cert_path}"
+        subprocess.run(scp_command, shell=True, check=True, capture_output=True, text=True)
+        logger.info(f"Remote server certificate {remote_cert_filename} copied to {local_cert_path}.")
+
+        # Check if the client certificate already exists on the remote server
         check_cmd = f"ssh {user}@{ip_address} '[ -f ~/figo/certs/{loc_name}.crt ]'"
         result = subprocess.run(check_cmd, shell=True, capture_output=True, text=True)
 
         if result.returncode == 0:
             logger.info(f"Warning: Certificate {loc_name}.crt already exists on {ip_address}.")
         else:
-            # Ensure the destination directory exists
-            subprocess.run(
-                ["ssh", f"{user}@{ip_address}", "mkdir -p ~/figo/certs"],
-                check=True, capture_output=True, text=True
-            )
+            try:
+                # Ensure the destination directory exists on the remote server
+                subprocess.run(
+                    ["ssh", f"{user}@{ip_address}", "mkdir -p ~/figo/certs"],
+                    check=True, capture_output=True, text=True
+                )
+                logger.info(f"Directory ~/figo/certs ensured on {ip_address}.")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"An error occurred while creating the directory on {ip_address}: {e}")
+                return False
 
-            # Transfer the certificate to the remote server
-            subprocess.run(
-                ["scp", cert_filename, remote_cert_path],
-                check=True, capture_output=True, text=True
-            )
-            logger.info(f"Certificate {cert_filename} successfully transferred to {ip_address}.")
+            try:
+                # Transfer the client certificate to the remote server
+                subprocess.run(
+                    ["scp", cert_filename, remote_cert_path],
+                    check=True, capture_output=True, text=True
+                )
+                logger.info(f"Client certificate {cert_filename} successfully transferred to {ip_address} as {loc_name}.crt.")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"An error occurred while transferring the certificate to {ip_address}: {e}")
+                return False
 
-            # Add the certificate to the Incus daemon on the remote server
+            # Add the client certificate to the Incus daemon on the remote server
             try:
                 add_cert_cmd = (
                     f"incus config trust add-certificate --name incus_{loc_name} ~/figo/certs/{loc_name}.crt"
@@ -2899,7 +2913,7 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
                     ["ssh", f"{user}@{ip_address}", add_cert_cmd],
                     check=True, capture_output=True, text=True
                 )
-                logger.info(f"Certificate incus_{loc_name}.crt added to Incus on {ip_address}.")
+                logger.info(f"Client certificate incus_{loc_name}.crt added to Incus on {ip_address}.")
             except subprocess.CalledProcessError as e:
                 if "already exists" in str(e):
                     logger.info(f"Warning: Certificate incus_{loc_name} already added to Incus on {ip_address}.")
@@ -2908,7 +2922,7 @@ def enroll_remote(remote_server, ip_address_port, cert_filename="~/.config/incus
                     return False
 
     except subprocess.CalledProcessError as e:
-        logger.error(f"An error occurred while processing the certificate: {e}")
+        logger.error(f"An error occurred while copying or processing the certificate: {e}")
         return False
 
     try:
@@ -4083,8 +4097,12 @@ def create_remote_parser(subparsers):
     remote_enroll_parser.add_argument("ip_address", help="IP address or domain name of the remote server")
     remote_enroll_parser.add_argument("port", nargs="?", default="8443", help="Port of the remote server (default: 8443)")
     remote_enroll_parser.add_argument("user", nargs="?", default="ubuntu", help="Username for SSH into the remote (default: ubuntu)")
-    remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.crt", help="Client certificate file to transfer (default: ~/.config/incus/client.crt)")
-    remote_enroll_parser.add_argument("--loc_name", default="main", help="Suffix of certificate name saved on the remote server (default: main)")
+    remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.crt", 
+                                      help="Client certificate file to transfer (default: ~/.config/incus/client.crt)")
+    remote_enroll_parser.add_argument("remote_cert_filename", nargs="?", default="/var/lib/incus/server.crt",
+                                      help="Remote certificate file to transfer locally (default: /var/lib/incus/server.crt)")
+    remote_enroll_parser.add_argument("--loc_name", default="main",
+                                      help="Suffix of certificate name saved on the remote server (default: main)")
 
     # Delete subcommand with detailed help
     remote_delete_parser = remote_subparsers.add_parser(
@@ -4112,7 +4130,8 @@ def handle_remote_command(args, parser_dict):
         list_remotes(full=args.full, extend=args.extend)  # Pass --extend option to list_remotes
     elif args.remote_command == "enroll":
         ip_address_port = f"{args.ip_address}:{args.port}"
-        enroll_remote(args.remote_server, ip_address_port, args.cert_filename, user=args.user, loc_name=args.loc_name)
+        enroll_remote(args.remote_server, ip_address_port, args.cert_filename, user=args.user,
+                      loc_name=args.loc_name, remote_cert_filename=args.remote_cert_filename)
     elif args.remote_command == "delete":
         delete_remote(args.remote_name)
 
