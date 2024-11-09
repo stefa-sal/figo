@@ -302,7 +302,7 @@ def get_l0_remote(l1_host_name):
         else:
             raise ValueError("Invalid L1 host name format.")
     except Exception as e:
-        print(f"Error extracting remote: {e}")
+        logger.error(f"Error extracting remote: {e}")
         return None
 
 def get_l1_host(remote_name):
@@ -322,42 +322,107 @@ def get_l1_host(remote_name):
         else:
             raise ValueError("Invalid remote name format.")
     except Exception as e:
-        print(f"Error extracting L1 host: {e}")
+        logger.error(f"Error extracting L1 host: {e}")
         return None
 
 def add_l2_ip_address(instance_object, ip_address):
-    """Add an IP address to the l2 IP address list of the instance."""
-    ip_list = instance_object.config.get('user.l2_ip_list', '').split(',')
- 
-    if ip_address not in ip_list:
-        ip_list.append(ip_address)
-        instance_object.config['user.l2_ip_list'] = ','.join(filter(None, ip_list))
-        instance_object.save(wait=True)
-        print(f"IP address {ip_address} added to l2 IP address list.")
-    else:
-        print(f"IP address {ip_address} is already in the list.")
+    """Add an IP address to the l2 IP address list of the instance.
+    
+    The IP address is added only if it is not already in the list.
+
+    return: True if the IP address was added, False otherwise.
+    """
+    try:
+        ip_list = instance_object.config.get('user.l2_ip_list', '').split(',')
+    
+        if ip_address not in ip_list:
+            ip_list.append(ip_address)
+            instance_object.config['user.l2_ip_list'] = ','.join(filter(None, ip_list))
+            instance_object.save(wait=True)
+            logger.info(f"IP address {ip_address} added to l2 IP address list.")
+            return True
+        else:
+            logger.error(f"IP address {ip_address} is already in the list.")
+            return False
+    except Exception as e:
+        logger.error(f"Error adding IP address to l2 IP address list: {e}")
+        return False
+
 
 def remove_l2_ip_address(instance_object, ip_address):
-    """Remove an IP address from the l2 IP address list of the instance."""
-    ip_list = instance_object.config.get('user.l2_ip_list', '').split(',')
-    if ip_address in ip_list:
-        ip_list.remove(ip_address)
-        instance_object.config['user.l2_ip_list'] = ','.join(filter(None, ip_list))
-        instance_object.save(wait=True)
-        print(f"IP address {ip_address} removed from l2 IP address list.")
-    else:
-        print(f"IP address {ip_address} not found in the list.")
+    """Remove an IP address from the l2 IP address list of the instance.
+    
+    The IP address is removed only if it is in the list.
+    
+    return: True if the IP address was removed, False otherwise.
+    """
+    try:
+        ip_list = instance_object.config.get('user.l2_ip_list', '').split(',')
+        if ip_address in ip_list:
+            ip_list.remove(ip_address)
+            instance_object.config['user.l2_ip_list'] = ','.join(filter(None, ip_list))
+            instance_object.save(wait=True)
+            logger.info(f"IP address {ip_address} removed from l2 IP address list.")
+            return True
+        else:
+            logger.error(f"IP address {ip_address} not found in the list.")
+            return False
+    except Exception as e:
+        logger.error(f"Error removing IP address from l2 IP address list: {e}")
+        return False
 
 def get_l2_ip_address_list(instance_object):
-    """Retrieve the l2 IP address list from the instance."""
-    ip_list = instance_object.config.get('user.l2_ip_list', '').split(',')
-    return [ip for ip in ip_list if ip]  # Filter out empty strings
+    """Retrieve the l2 IP address list from the instance.
+    
+    Returns:    A list of IP addresses or None if there is an error.
+    """
+
+    try:
+        ip_list = instance_object.config.get('user.l2_ip_list', '').split(',')
+        return [ip for ip in ip_list if ip]  # Filter out empty strings
+    except Exception as e:
+        logger.error(f"Error retrieving l2 IP address list: {e}")
+        return None
 
 def clear_l2_ip_address_list(instance_object):
-    """Clear all IP addresses from the l2 IP address list of the instance."""
-    instance_object.config['user.l2_ip_list'] = ''
-    instance_object.save(wait=True)
-    print("All IP addresses cleared from l2 IP address list.")
+    """Clear all IP addresses from the l2 IP address list of the instance.
+    
+    Returns:    True if the IP addresses were cleared, False otherwise.
+    """
+    try:
+        instance_object.config['user.l2_ip_list'] = ''
+        instance_object.save(wait=True)
+        print("All IP addresses cleared from l2 IP address list.")
+        return True
+    except Exception as e:
+        logger.error(f"Error clearing l2 IP address list: {e}")
+        return False
+
+def get_instance_state_dict (instance):
+    """Return a dictionary with the state information of the instance."""
+        
+    instance_state = instance.state()  # Get instance state information
+    instance_state_dict = {
+        "name": instance.name,
+        "status": instance.status,
+        "status_code": instance_state.status_code,
+        "type": instance.type,
+        "architecture": instance.architecture,
+        "location": instance.location,
+        "config": instance.config,
+        "expanded_config": instance.expanded_config,
+        "devices": instance.devices,
+        "expanded_devices": instance.expanded_devices,
+        "state": {
+            "status": instance_state.status,
+            "disk": instance_state.disk,
+            "memory": instance_state.memory,
+            "network": instance_state.network,
+            "pid": instance_state.pid,
+            "processes": instance_state.processes
+        }
+    }
+    return instance_state_dict
 
 #############################################
 ###### figo instance command functions #####
@@ -405,9 +470,9 @@ def get_projects(remote_name="local"):
         return None
 
 def run_incus_list(remote_node="local", project_name="default"):
-    """Run the 'incus list -f json' command to show all the instances, optionally targeting a remote node and project.
+    """Run the 'incus list -f json' command to get the instance state all the instances, optionally targeting a remote node and project.
     
-    Return the output as JSON if successful, return None if the project does not exist.
+    Return the output as a list of dict if successful, return None if the project does not exist.
     """
     try:
         # Check if the project exists
@@ -488,16 +553,19 @@ def iterator_over_projects(remote_node):
         yield project
 
 def iterator_over_instances(remote, project_name, instance_scope=None):
-    """Iterate over all instances in the specified remote and project, optionally filtering by instance name."""
-    instances = run_incus_list(remote_node=remote, project_name=project_name)
-    if instances is None:
+    """Iterate over all instances in the specified remote and project, providing an instance state dict for each instance
+    
+    Optionally filter by instance name.
+    """
+    instance_state_list = run_incus_list(remote_node=remote, project_name=project_name)
+    if instance_state_list is None:
         return
 
-    for instance in instances:
-        name = instance.get("name", "Unknown")
+    for instance_state_dict in instance_state_list:
+        name = instance_state_dict.get("name", "Unknown")
         if instance_scope and not matches(name, instance_scope):
             continue
-        yield instance
+        yield instance_state_dict
 
 def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_scope=None, full=False):
     """Get instances from the specified remote node and project and print their details.
@@ -863,13 +931,13 @@ def stop_all_instances(remote_node, project_name):
         else: # remote_node is not None and project_name is not None
 
             # Get all instances in the specified remote node and project
-            instances = run_incus_list(remote_node=remote_node, project_name=project_name)
-            if instances is None:
+            instance_state_list = run_incus_list(remote_node=remote_node, project_name=project_name)
+            if instance_state_list is None:
                 return
 
-            for instance in instances:
-                name = instance.get("name", "Unknown")
-                state = instance.get("status", "err")[:3].lower()  # Shorten the status
+            for instance_state_dict in instance_state_list:
+                name = instance_state_dict.get("name", "Unknown")
+                state = instance_state_dict.get("status", "err")[:3].lower()  # Shorten the status
 
                 if state == "run":
                     logger.info(f"Stopping instance '{name}' in project '{project_name}' on remote '{remote_node}'.")
@@ -1052,14 +1120,16 @@ def retrieve_assigned_ips(remote):
             logger.error(f"Failed to connect to project '{project['name']}'.")
             return None
 
-        for instance in iterator_over_instances(remote, project["name"]):
-            ip_addresses = get_ip_addresses(instance)
+        for instance_state_dict in iterator_over_instances(remote, project["name"]):
+            ip_addresses = get_ip_addresses(instance_state_dict)
             assigned_ips.extend(ip_addresses)
             #if the instance name starts with l1- get the l2 IP addresses
-            if instance["name"].startswith("l1-"):
+            if instance_state_dict["name"].startswith("l1-"):
                 #get the instance object
-                instance_object = client_instance.instances.get(instance["name"])
+                instance_object = client_instance.instances.get(instance_state_dict["name"])
                 l2_ip_addresses = get_l2_ip_address_list(instance_object)
+                if l2_ip_addresses is None:
+                    return None
                 assigned_ips.extend(l2_ip_addresses)
     return assigned_ips
 
@@ -1414,7 +1484,13 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
                 return None
             instance_object = client_instance.instances.get(get_l1_host(remote_name))
 
-            add_l2_ip_address(instance_object, ip_address)
+            my_result = add_l2_ip_address(instance_object, ip_address)
+            if my_result:
+                logger.info(f"Added l2 IP address '{ip_address}' to l1-host '{remote_name}'")
+            else:
+                logger.error(f"Failed to add l2 IP address '{ip_address}' to l1-host '{remote_name}'")
+                return False # it is debatable if we should return False here because the instance has been added... 
+                             # anyway the result value is not used
 
         return True
 
@@ -1444,6 +1520,12 @@ def delete_instance(instance_name, remote, project, force=False):
             logger.error(f"Instance '{instance_name}' not found in project '{project}' on remote '{remote}'.")
             return False
 
+        instance_state_dict = get_instance_state_dict (instance)
+
+        # save the ip addresses of the instance to be deleted in a list called ip_addresses_to_delete
+        ip_addresses_to_delete = get_ip_addresses(instance_state_dict)
+        print(ip_addresses_to_delete) # debug
+
         # Delete the instance
         if force:
             if instance.status.lower() == 'running':
@@ -1456,6 +1538,25 @@ def delete_instance(instance_name, remote, project, force=False):
     except Exception as e:
         logger.error(f"An unexpected error occurred: {e}")
         return False
+
+    # if remote is a l1-host, delete the l2 IP address from the l1-host using remove_l2_ip_address
+    if is_l1_host(remote):
+        client_instance = get_remote_client(get_l0_remote(remote), project_name="figo-stefano")
+        if not client_instance:
+            logger.error(f"Failed to connect to remote : '{remote}', project : 'figo-stefano'.")
+            return None
+        instance_object = client_instance.instances.get(get_l1_host(remote))
+
+        boolean_result_list = []
+        for ip_address in ip_addresses_to_delete:
+            my_result = remove_l2_ip_address(instance_object, ip_address)
+            boolean_result_list.append(my_result)
+
+        if all(boolean_result_list):
+            logger.info(f"Deleted all l2 IP addresses from l1-host '{remote}'")
+        else:
+            logger.error(f"Failed to delete at least one IP address from l1-host '{remote}'")
+
     return True
 
 def exec_instance_bash(instance_name, remote, project, force=False, timeout=BASH_CONNECT_TIMEOUT, max_attempts=BASH_CONNECT_ATTEMPTS):
