@@ -400,6 +400,10 @@ def clear_l2_ip_address_list(instance_object):
 
 def get_instance_state_dict (instance):
     """Return a dictionary with the state information of the instance."""
+
+    #TODO may be it could be replaced with incus list -f json and then filtering the instance by name
+    #TODO I have removed  "created_at": instance.created_at.isoformat() if instance.created_at else None,
+    #TODO I have removed  "last_used_at": instance.last_used_at.isoformat() if instance.last_used_at else None,
         
     instance_state = instance.state()  # Get instance state information
     instance_state_dict = {
