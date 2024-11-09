@@ -86,7 +86,7 @@ PROJECT_PREFIX = FIGO_PREFIX
 
 DEFAULT_LOGIN_FOR_INSTANCES = 'ubuntu'
 
-DEFAULT_INSTANCE_SIZE = 'instance-medium'  # profile to be added to default if no profile is specified
+DEFAULT_INSTANCE_SIZE = 'compute-medium'  # profile to be added to default if no profile is specified
 #DEFAULT_INSTANCE_SIZE = ''  # if empty, no profile is added to defautl
 
 
@@ -278,6 +278,29 @@ def extract_ip_addresses(ip_device_pairs):
 def derive_project_from_user(user_name):
     return f"{PROJECT_PREFIX}{user_name}"
 
+def is_l1_host(remote_name):
+    return remote_name.startswith('l1-')
+
+def get_l0_remote(l1_host_name):
+    """
+    Extracts the remote part from an L1 host name by splitting on the '-l0-' token.
+
+    Parameters:
+    l1_host_name (str): The L1 host name in the format 'l1-host-l0-remote'.
+
+    Returns:
+    str: The extracted 'remote' part, or None if the format is invalid.
+    """
+    try:
+        parts = l1_host_name.split('-l0-')
+        if len(parts) == 2:
+            return parts[1]  # Return the part after '-l0-'
+        else:
+            raise ValueError("Invalid L1 host name format.")
+    except Exception as e:
+        print(f"Error extracting remote: {e}")
+        return None
+
 #############################################
 ###### figo instance command functions #####
 #############################################
@@ -390,6 +413,12 @@ def get_ip_addresses(instance):
     """Return a list of IP addresses for the instance."""
     ip_device_pairs = get_ip_device_pairs(instance)
     return extract_ip_addresses(ip_device_pairs)
+
+def is_same_subnet(ip_address, gw_address, prefix_length):
+    """Check if the IP address is in the same subnet as the gateway address."""
+    ip = ipaddress.ip_interface(f"{ip_address}/{prefix_length}")
+    gw = ipaddress.ip_interface(f"{gw_address}/{prefix_length}")
+    return ip.network == gw.network
 
 def iterator_over_projects(remote_node):
     """Iterate over all projects in the specified remote."""
@@ -520,7 +549,7 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
     if set_of_errored_remotes:
         logger.error(f"Error: Failed to retrieve projects from remote(s): {', '.join(set_of_errored_remotes)}")
 
-def get_remote_client(remote_node, project_name='default', raise_project_not_found=False):  
+def get_remote_client(remote_node, project_name='default', raise_project_not_found=False, test_project=True):  
     """Create a pylxd.Client instance for the specified remote node and project.
     
     Returns:  A pylxd.Client instance for the remote node if successful, None otherwise.
@@ -534,20 +563,22 @@ def get_remote_client(remote_node, project_name='default', raise_project_not_fou
         # Create a pylxd.Client instance for the local server
         try:
             client_instance = pylxd.Client(project=project_name)
-            try:
-                client_instance.instances.get("xxxx-yyyy") # Test if the project exist by fetching a non-existent instance
-            except pylxd.exceptions.NotFound as e:
-                if "Project not found" in str(e):
-                    logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Project not found.")
-                    if raise_project_not_found:
-                        raise ValueError(f"Project not found : '{project_name}' on remote '{remote_node}'")
+            if test_project:
+                # Test if the project exist by fetching a non-existent instance
+                try:
+                    client_instance.instances.get("xxxx-yyyy")
+                except pylxd.exceptions.NotFound as e:
+                    if "Project not found" in str(e):
+                        logger.info(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Project not found.")
+                        if raise_project_not_found:
+                            raise ValueError(f"Project not found : '{project_name}' on remote '{remote_node}'")
+                        else:
+                            return None 
                     else:
-                        return None 
-                else:
-                    pass # continue because we expect the instance to be not found
-            except Exception as e:
-                logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
-                return None
+                        pass # continue because we expect the instance to be not found
+                except Exception as e:
+                    logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
+                    return None
             return client_instance
 
         except pylxd.exceptions.ClientConnectionFailed as e:
@@ -568,28 +599,32 @@ def get_remote_client(remote_node, project_name='default', raise_project_not_fou
         # Create a pylxd.Client instance with SSL verification
         try:
             client_instance = pylxd.Client(endpoint=address, verify=cert_path, project=project_name)
-            try:
-                client_instance.instances.get("xxxx-yyyy") # Test if the project exist by fetching a non-existent instance
-            except pylxd.exceptions.NotFound as e:
-                if "Project not found" in str(e):
-                    logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Project not found.")
-                    if raise_project_not_found:
-                        print("uiuiuiuiuu") # Debug
-                        raise ValueError(f"Project not found : '{project_name}' on remote '{remote_node}'")
+            if test_project:
+                # Test if the project exist by fetching a non-existent instance
+                try:
+                    client_instance.instances.get("xxxx-yyyy") 
+                except pylxd.exceptions.NotFound as e:
+                    if "Project not found" in str(e):
+                        logger.info(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Project not found.")
+                        if raise_project_not_found:
+                            raise ValueError(f"Project not found : '{project_name}' on remote '{remote_node}'")
+                        else:
+                            return None 
                     else:
-                        return None 
-                else:
-                    pass # continue because we expect the instance to be not found
-            except Exception as e:
-                logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
-                return None
+                        pass # continue because we expect the instance to be not found
+                except Exception as e:
+                    logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
+                    return None
             return client_instance   
         except pylxd.exceptions.ClientConnectionFailed as e:
             logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Client connection failed.")
             return None
         except ValueError as e:
-            print(e)
-            raise ValueError(e)
+            if 'Project not found' in str(e):
+                raise ValueError(e)
+            else:
+                logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
+                return None
         except Exception as e:
             logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
             return None
@@ -912,7 +947,13 @@ def assign_ip_address(remote, mode="next"):
     if assigned_ips is None:
         return None
 
-    base_ip = ipaddress.ip_address(REMOTE_TO_IP_INFO_MAP[remote]["base_ip"])
+    try:
+        base_ip_str = REMOTE_TO_IP_INFO_MAP[remote]["base_ip"]
+    except KeyError as e:
+        logger.error(f"key error to get base_ip: remote '{remote}' not found in REMOTE_TO_IP_INFO_MAP.")
+        return None
+
+    base_ip = ipaddress.ip_address(base_ip_str)
     if not assigned_ips:
         new_ip = base_ip
     else:
@@ -933,12 +974,13 @@ def retrieve_assigned_ips(remote):
     Returns: A list of assigned IP addresses or None if an error occurred.
     """
 
+    print(f"retrieve assigned IPs for remote {remote}") # debug
     # if the remote starts with 'l1-', get the IP addresses from the l0-host
-    if remote.startswith("l1-"):
-        # Access the 'user.l0-remote' property from the instance's configuration
-        l0_remote = instance.config.get('user.l0-remote', '')
+    if is_l1_host(remote):
+
+        l0_remote = get_l0_remote(remote)
         if not l0_remote:
-            logger.error(f"Error: 'user.l0-remote' property not found in instance '{instance.name}' configuration.")
+            logger.error(f"Error: cannot get L0 remote from L1 remote name '{remote}'.")
             return None
         
         return retrieve_assigned_ips(l0_remote) 
@@ -951,20 +993,42 @@ def retrieve_assigned_ips(remote):
     return assigned_ips
 
 def get_gw_address(remote):
-    """Get the gateway address for the remote."""
-    return REMOTE_TO_IP_INFO_MAP[remote]["gw"]
+    """Get the gateway address for the remote.
+    
+    Returns: The gateway address as a string or None if an error occurred.
+    """
+    try:
+        return REMOTE_TO_IP_INFO_MAP[remote]["gw"]
+    except KeyError as e:
+        logger.error(f"key error in get_gw_address: remote '{remote}' not found in REMOTE_TO_IP_INFO_MAP.")
+        return None
 
 def get_prefix_len(remote):
-    """Get the prefix length for the remote."""
-    return REMOTE_TO_IP_INFO_MAP[remote]["prefix_len"]
-
+    """Get the prefix length for the remote.
+    
+    Returns: The prefix length as an integer or None if an error occurred.
+    """
+    try:
+        return REMOTE_TO_IP_INFO_MAP[remote]["prefix_len"]
+    except KeyError as e:
+        logger.error(f"key error in get_prefix_len: remote '{remote}' not found in REMOTE_TO_IP_INFO_MAP.")
+        return None
 
 def set_ip(instance_name, remote, project, ip_address_and_prefix_len=None, gw_address=None, nic_device_name=None):
     """Set a static IP address and gateway for a stopped instance.
+
+    Args: 
+    - instance_name: Name of the instance.
+    - remote: Remote server name.
+    - project: Project name.
+    - ip_address_and_prefix_len: IP address and prefix length. If None, the address is assigned automatically.
+    - gw_address: Gateway address. If None, the default gateway for the remote is used.
     
     Returns: True if the IP address was set successfully, False otherwise.
     """
     
+    #TODO check if the ip address is already assigned
+
     if ip_address_and_prefix_len:
     # Split the IP address and prefix length
         try:
@@ -979,10 +1043,18 @@ def set_ip(instance_name, remote, project, ip_address_and_prefix_len=None, gw_ad
         except ValueError as e:
             logger.error(f"Error: '{ip_address_and_prefix_len}' is not a valid IP address with prefix length: {e}")
             return False
-    else:
+    else: 
+    #ip_address_and_prefix_len is None
         # Assign the next available IP address
-        ip_address = assign_ip_address(remote, mode="next")
-        prefix_length = get_prefix_len(remote)
+        remap_remote = remote
+        if is_l1_host(remote):
+            remap_remote = get_l0_remote(remote)
+        ip_address = assign_ip_address(remap_remote, mode="next")
+        prefix_length = get_prefix_len(remap_remote)
+
+    if ip_address is None or prefix_length is None:
+        logger.error(f"Error: Failed to assign IP address for instance '{instance_name}'.")
+        return False
 
     if gw_address :
         if not is_valid_ip(gw_address):
@@ -990,7 +1062,16 @@ def set_ip(instance_name, remote, project, ip_address_and_prefix_len=None, gw_ad
             return False
     else:
         gw_address = get_gw_address(remote)
-    
+
+    if gw_address is None:
+        logger.error(f"Error: Gateway address not found for remote '{remap_remote}'.")
+        return False
+
+    # check that gw_address is in the same subnet as ip_address
+    if not is_same_subnet(ip_address, gw_address, prefix_length):
+        logger.error(f"Error: gw address '{gw_address}' is not in the same subnet as ip address '{ip_address}/{prefix_length}'.")
+        return False
+        
     try:
         # Get the specified instance in project and remote  
         remote_client = get_remote_client(remote, project_name=project)
@@ -1048,21 +1129,34 @@ def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote):
     - remote: The remote from which the IP address and gateway are to be assigned.
 
     Returns:
-    A tuple containing (ip_address_with_prefix, gw_address), or raises an error if the IP is already assigned.
+    A tuple containing (ip_address_with_prefix, gw_address)
+    
+    Raise an exception if there is an error:
+    - the IP is already assigned
+    - the gateway is not a valid IP address
+    - the IP address is not a valid IP address
+    - the IP address is not in the same subnet as the gateway
+    - the gateway address is not found
+    - the IP address is not found
     """
     #TODO: Implement the handling of the case when there are no available IP addresses
 
-    # Retrieve all assigned IP addresses
-    assigned_ips = retrieve_assigned_ips(remote)
-    if assigned_ips is None:
-        raise ValueError("Error: Failed to retrieve assigned IP addresses.")
-    
+    remap_remote = remote
+    if is_l1_host(remote):
+        remap_remote = get_l0_remote(remote)
+
     # If IP address is not provided, assign one
     if ip_address_and_prefix_len is None:
-        ip_address = assign_ip_address(remote, mode="next")
-        prefix_len = get_prefix_len(remote)
+
+        ip_address = assign_ip_address(remap_remote, mode="next")
+        prefix_len = get_prefix_len(remap_remote)
     else:
         ip_address, prefix_len = ip_address_and_prefix_len.split('/')
+
+        # Retrieve all assigned IP addresses
+        assigned_ips = retrieve_assigned_ips(remap_remote)
+        if assigned_ips is None:
+            raise ValueError("Error: Failed to retrieve assigned IP addresses.")
 
         # Check if the provided IP address is already assigned
         if ip_address in assigned_ips:
@@ -1071,15 +1165,25 @@ def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote):
     # Combine IP address and prefix length into one string
     ip_address_with_prefix = f"{ip_address}/{prefix_len}"
 
+    if gw_address :
+        if not is_valid_ip(gw_address):
+            raise ValueError(f"Error: gw address '{gw_address}' is not a valid IP address.")
+    else:
     # If gateway is not provided, get the default for the remote
+        gw_address = get_gw_address(remap_remote)
+
     if gw_address is None:
-        gw_address = get_gw_address(remote)
+        raise ValueError(f"Error: Gateway address not found for remote '{remap_remote}'.")
+
+    # check that gw_address is in the same subnet as ip_address
+    if not is_same_subnet(ip_address, gw_address, prefix_len):
+        raise ValueError(f"Error: gw address '{gw_address}' is not in the same subnet as ip address '{ip_address}/{prefix_len}'.")
 
     return ip_address_with_prefix, gw_address
 
 def create_instance(instance_name, image, remote_name, project, instance_type, 
                     ip_address_and_prefix_len=None, gw_address=None, nic_device_name=None,
-                    profiles=[], create_project=False):
+                    profiles=[], create_project_flag=False):
     """Create a new instance from a local or remote image with specified configurations.
 
     It assigns a static IP address and gateway to the instance.
@@ -1102,23 +1206,22 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
     try:
         remote_client = None
         try:
-            print("before") # Debug
             remote_client = get_remote_client(remote_name, project_name=project, raise_project_not_found=True)  
-            print("after") # Debug
         except ValueError as e:
-            print("ciao") # Debug
-            print(e) # Debug
-            if create_project:
+            if "Project not found" in str(e) and create_project_flag:
                 logger.info(f"Project '{project}' not found on remote '{remote_name}'. Creating project.")
-                if not create_project(remote_name, project):
+                created_project = create_project(remote_name, project)
+                if not created_project:
                     logger.error(f"Failed to create project '{project}' on remote '{remote_name}'.")
                     return False
+                else:
+                    logger.info(f"Project '{project}' created on remote '{remote_name}'.")
                 remote_client = get_remote_client(remote_name, project_name=project)
         if not remote_client:
             logger.error(f"Failed to connect to remote '{remote_name}' and project '{project}'.")
             return False
 
-        # set the default instance size profile if none is provided
+        # set the as a profile the DEFAULT_INSTANCE_SIZE profile if none is provided
         if not profiles and DEFAULT_INSTANCE_SIZE:
             profiles = [DEFAULT_INSTANCE_SIZE]
 
@@ -1128,9 +1231,11 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
             logger.info(f"Project '{project}' exists on remote '{remote_name}'.")
         except pylxd.exceptions.NotFound:
             logger.info(f"Project '{project}' does not exist on remote '{remote_name}'. Creating project.")
-            if not create_project(remote_name, project):
-                logger.error(f"Failed to create project '{project}' on remote '{remote_name}'.")
-                return False
+            if create_project_flag: # Create the project if the flag is set (second attempt, we should never reach this point)
+                created_project = create_project(remote_name, project)
+                if not created_project:
+                    logger.error(f"2nd attempt failed to create project '{project}' on remote '{remote_name}'.")
+                    return False
 
         # Check if the instance already exists
         try:
@@ -1168,6 +1273,7 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
 
             # Get the image server address
             image_server_address, protocol = get_remote_address(image_server, get_protocol=True)
+            
             if protocol != "simplestreams":
                 logger.error(f"Error: Image server '{image_server}' does not use the 'simplestreams' protocol.")
                 return False
@@ -1191,8 +1297,7 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
             logger.error(f"Failed to assign IP address and gateway: {e}")
             return False
 
-        print(f"IP address: {ip_address_and_prefix_len}, Gateway: {gw_address}") # Debug
-        return False
+        logger.info(f"IP address: {ip_address_and_prefix_len}, Gateway: {gw_address}") # Debug
 
         final_profiles = ['default'] + profiles  # Add default and instance size profiles   
         # Create the instance configuration
@@ -2119,7 +2224,6 @@ def create_project(remote_name, project_name):
     Returns:
     - True if the project was created successfully, False otherwise.
     """
-
     try:
         # Explicitly define the project details as a dictionary
         project_data = {
@@ -2132,7 +2236,7 @@ def create_project(remote_name, project_name):
                                                # images from the default project will be inherited
             }
         }
-        client_object = get_remote_client(remote_name, project_name=project_name)
+        client_object = get_remote_client(remote_name, project_name=project_name, test_project=False)
         if not client_object:
             logger.error(f"Failed to retrieve client for remote '{remote_name}'.")
             return False
@@ -3479,20 +3583,23 @@ def create_instance_parser(subparsers):
         help="Create a new instance, specifying the instance name, image, type, and optional profiles.",
         description="Create a new instance.\n"
                     "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
-                    "Specify the image, instance type, and optional profiles to apply during creation.",
+                    "Specify the image, instance type, optional profiles, and the option to create the project if it does not exist.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
-               "  figo instance create instance_name image_name\n"
-               "  figo instance create remote:project.instance_name image_name -t vm\n"
-               "  figo instance create instance_name image_name -r remote_name -p project_name\n"
-               "  figo instance create instance_name image_name -f profile1,profile2"
+            "  figo instance create instance_name image_name\n"
+            "  figo instance create remote:project.instance_name image_name -t vm\n"
+            "  figo instance create instance_name image_name -r remote_name -p project_name\n"
+            "  figo instance create instance_name image_name -f profile1,profile2\n"
+            "  figo instance create instance_name image_name -m"
     )
     create_parser.add_argument("instance_name", help="Name of the new instance.\n"
-                               "Can include remote and project scope in the format 'remote:project.instance_name'")
+                            "Can include remote and project scope in the format 'remote:project.instance_name'")
     create_parser.add_argument("image", help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
     create_parser.add_argument("-t", "--type", choices=["vm", "container", "cnt"], default="container", 
-                               help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container').")
+                            help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container').")
     create_parser.add_argument("-f", "--profile", help="Comma-separated list of profiles to apply to the instance.")
+    create_parser.add_argument("-m", "--make_project", action="store_true",
+                            help="Create the project if it does not exist on the remote specified.")
     add_common_arguments(create_parser)
 
     # Delete command
@@ -3741,12 +3848,12 @@ def handle_instance_command(args, parser_dict):
                 if instance_type == "cnt":
                     instance_type = "container"  # Convert 'cnt' to 'container'
 
-                # Parse profiles if provided
-                profiles = [p for p in args.profile.split(',') if p] if args.profile else []
+                profiles = [p for p in args.profile.split(',') if p.strip()] if args.profile else []
 
+                # Pass the --make_project option as create_project to create_instance
                 create_instance(instance, image, remote, project, instance_type,
                                 ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic,
-                                profiles=profiles)
+                                profiles=profiles, create_project_flag=args.make_project)
             elif args.instance_command in ["delete", "del", "d"]:
                 delete_instance(instance, remote, project, force=args.force)
             elif args.instance_command in ["bash", "b"]:

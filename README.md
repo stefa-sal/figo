@@ -160,12 +160,18 @@ Each command has its own set of subcommands and options.
       figo instance set_ip my_remote:my_project.my_instance -i 10.0.0.5/16 -g 10.0.0.1 -n eth1
       ```
 
+#### figo instance
+
+- **Aliases:** `in`, `i`
+- **Description:** Manage instances.
+- **Subcommands:**
+
   - **create**
     - **Description:** Create a new instance.
     - **Syntax:**
 
       ```bash
-      figo instance create instance_name image [-t type] [-p project] [-r remote] [-i ip_address] [-g gw_address] [-n nic] [-f profiles]
+      figo instance create instance_name image [-t type] [-p project] [-r remote] [-i ip_address] [-g gw_address] [-n nic] [-f profiles] [-m | --make_project]
       ```
 
     - **Options:**  
@@ -178,6 +184,7 @@ Each command has its own set of subcommands and options.
       - `-g, --gw`: Specify the gateway address for the instance.
       - `-n, --nic`: Specify the NIC name for the instance (default: `eth0` for containers, `enp5s0` for VMs).
       - `-f, --profile`: Comma-separated list of profiles to apply to the instance.
+      - `-m, --make_project`: Create the project if it does not exist on the remote specified.
 
     - **Examples:**
       ```bash
@@ -195,8 +202,11 @@ Each command has its own set of subcommands and options.
 
       # Create an instance with project and remote scope and multiple profiles
       figo instance create my_project.my_instance images:alpine/3.15 -r my_remote -f profile1,profile3
-      ```
 
+      # Create an instance and ensure the project is created if it does not exist
+      figo instance create my_project.my_instance images:ubuntu/20.04 -m
+      ```
+      
   - **delete**
     - **Description:** Delete a specific instance, with an option to force deletion.
     - **Syntax:**
