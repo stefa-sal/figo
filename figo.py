@@ -275,6 +275,10 @@ def extract_ip_addresses(ip_device_pairs):
     """Return a list of IP addresses (without the prefix length) from a list of 'ip/device'."""
     return [ip.split('/')[0] for ip, _ in ip_device_pairs]
 
+def get_ip_string_from_ip_and_prefix(ip_address_and_prefix_len):
+    """Return the IP address string from an 'ip/prefix' string."""
+    return ip_address_and_prefix_len.split('/')[0]
+
 def derive_project_from_user(user_name):
     return f"{PROJECT_PREFIX}{user_name}"
 
@@ -300,6 +304,60 @@ def get_l0_remote(l1_host_name):
     except Exception as e:
         print(f"Error extracting remote: {e}")
         return None
+
+def get_l1_host(remote_name):
+    """
+    Extracts the L1 host name from a remote name by splitting on the '-l0-' token.
+
+    Parameters:
+    remote_name (str): The remote name in the format 'l1-host-l0-remote'.
+
+    Returns:
+    str: The extracted 'l1-host' part, or None if the format is invalid.
+    """
+    try:
+        parts = remote_name.split('-l0-')
+        if len(parts) == 2:
+            return parts[0]  # Return the part before '-l0-'
+        else:
+            raise ValueError("Invalid remote name format.")
+    except Exception as e:
+        print(f"Error extracting L1 host: {e}")
+        return None
+
+def add_l2_ip_address(instance_object, ip_address):
+    """Add an IP address to the l2 IP address list of the instance."""
+    ip_list = instance_object.config.get('user.l2_ip_list', '').split(',')
+ 
+    if ip_address not in ip_list:
+        ip_list.append(ip_address)
+        instance_object.config['user.l2_ip_list'] = ','.join(filter(None, ip_list))
+        instance_object.save(wait=True)
+        print(f"IP address {ip_address} added to l2 IP address list.")
+    else:
+        print(f"IP address {ip_address} is already in the list.")
+
+def remove_l2_ip_address(instance_object, ip_address):
+    """Remove an IP address from the l2 IP address list of the instance."""
+    ip_list = instance_object.config.get('user.l2_ip_list', '').split(',')
+    if ip_address in ip_list:
+        ip_list.remove(ip_address)
+        instance_object.config['user.l2_ip_list'] = ','.join(filter(None, ip_list))
+        instance_object.save(wait=True)
+        print(f"IP address {ip_address} removed from l2 IP address list.")
+    else:
+        print(f"IP address {ip_address} not found in the list.")
+
+def get_l2_ip_address_list(instance_object):
+    """Retrieve the l2 IP address list from the instance."""
+    ip_list = instance_object.config.get('user.l2_ip_list', '').split(',')
+    return [ip for ip in ip_list if ip]  # Filter out empty strings
+
+def clear_l2_ip_address_list(instance_object):
+    """Clear all IP addresses from the l2 IP address list of the instance."""
+    instance_object.config['user.l2_ip_list'] = ''
+    instance_object.save(wait=True)
+    print("All IP addresses cleared from l2 IP address list.")
 
 #############################################
 ###### figo instance command functions #####
@@ -969,12 +1027,13 @@ def assign_ip_address(remote, mode="next"):
 def retrieve_assigned_ips(remote):
     """Retrieve all assigned IP addresses for instances in the specified remote.
 
-    If the remote is a l1-host, return the list of all IP addresses assigned in the l0-host
+    If the remote is a l1-host, return the list of all IP addresses assigned in the associated l0-host
+    If the instance is a l1-host the list includes all l2 IP addresses assigned in the l1-host
 
     Returns: A list of assigned IP addresses or None if an error occurred.
     """
 
-    print(f"retrieve assigned IPs for remote {remote}") # debug
+
     # if the remote starts with 'l1-', get the IP addresses from the l0-host
     if is_l1_host(remote):
 
@@ -984,12 +1043,24 @@ def retrieve_assigned_ips(remote):
             return None
         
         return retrieve_assigned_ips(l0_remote) 
-    
+       
     assigned_ips = []
     for project in iterator_over_projects(remote):
+
+        client_instance = get_remote_client(remote, project_name=project["name"])
+        if not client_instance:
+            logger.error(f"Failed to connect to project '{project['name']}'.")
+            return None
+
         for instance in iterator_over_instances(remote, project["name"]):
             ip_addresses = get_ip_addresses(instance)
-            assigned_ips.extend(ip_addresses)  
+            assigned_ips.extend(ip_addresses)
+            #if the instance name starts with l1- get the l2 IP addresses
+            if instance["name"].startswith("l1-"):
+                #get the instance object
+                instance_object = client_instance.instances.get(instance["name"])
+                l2_ip_addresses = get_l2_ip_address_list(instance_object)
+                assigned_ips.extend(l2_ip_addresses)
     return assigned_ips
 
 def get_gw_address(remote):
@@ -1113,7 +1184,6 @@ ethernets:
         logger.error(f"An error occurred: {e}")
         return False
     return True
-
 
 def get_all_profiles(client):
     """Get all available profiles."""
@@ -1297,7 +1367,7 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
             logger.error(f"Failed to assign IP address and gateway: {e}")
             return False
 
-        logger.info(f"IP address: {ip_address_and_prefix_len}, Gateway: {gw_address}") # Debug
+        logger.info(f"IP address: {ip_address_and_prefix_len}, Gateway: {gw_address}")
 
         final_profiles = ['default'] + profiles  # Add default and instance size profiles   
         # Create the instance configuration
@@ -1329,6 +1399,23 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
         instance = remote_client.instances.create(config, wait=True)
 
         logger.info(f"Instance '{instance_name}' created successfully.")
+
+        # if remote_name is a l1-host, set the l2 IP addresses
+        # get the instance name from the remote_name
+        # get the ip address from ip_address_and_prefix_len
+        
+        if is_l1_host(remote_name):
+            # get the IP address from the ip_address_and_prefix_len
+            ip_address = get_ip_string_from_ip_and_prefix(ip_address_and_prefix_len)
+
+            client_instance = get_remote_client(get_l0_remote(remote_name), project_name="figo-stefano")
+            if not client_instance:
+                logger.error(f"Failed to connect to remote : '{remote_name}', project : 'figo-stefano'.")
+                return None
+            instance_object = client_instance.instances.get(get_l1_host(remote_name))
+
+            add_l2_ip_address(instance_object, ip_address)
+
         return True
 
     except pylxd.exceptions.LXDAPIException as e:
