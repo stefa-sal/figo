@@ -342,21 +342,41 @@ Each command has its own set of subcommands and options.
 
 - **Aliases:** `pr`, `p`
 - **Description:** Manage profiles.
+
 - **Subcommands:**
+
   - **dump**
-    - **Description:** Dump profiles to `.yaml` files.
+    - **Description:** Dump profiles to .yaml files for backup or inspection. Only the name, description, config, and devices are included in the output. Currently, this functionality only works for local profiles and does not support remote profiles.
     - **Syntax:**
 
       ```bash
-      figo profile dump [-a | --all] [profile_name]
+      figo profile dump [profile_name] [-a | --all]
       ```
 
     - **Options:**
-      - `-a, --all`: Dump all profiles to `.yaml` files.
-      - `profile_name`: The name of the profile to dump.
+      - `profile_name`: Name of the profile to dump. The file is saved in the `./profiles` directory as a `.yaml` file. If omitted, use the `--all` option to dump all profiles.
+      - `-a, --all`: Dump all local profiles to `.yaml` files in the `./profiles` directory.
 
+    - **Details:**
+      - Each profile is saved with its name as the filename, e.g., `my_profile.yaml`.
+      - The directory for saving profiles is `./profiles`, which will be created if it does not exist.
+      - The dumped data includes:
+        - Profile name
+        - Profile description
+        - Profile config
+        - Profile devices
+
+    - **Examples:**
+      ```bash
+      # Dump a specific profile
+      figo profile dump my_profile
+
+      # Dump all available local profiles
+      figo profile dump --all
+      ``` 
+      
   - **list**
-    - **Description:** List profiles and associated instances, with options for inherited profiles and extended column width.
+    - **Description:** List profiles and their associated instances, with options to include inherited profiles and extend column width.
     - **Syntax:**
 
       ```bash
@@ -364,9 +384,16 @@ Each command has its own set of subcommands and options.
       ```
 
     - **Options:**
-      - `scope`: Define the scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or `profile_name`.
+      - `scope`: Scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or defaults to `local:default`.
       - `-i, --inherited`: Include inherited profiles in the listing.
       - `-e, --extend`: Extend column width to fit the content.
+
+    - **Examples:**
+      ```bash
+      figo profile list
+      figo profile list remote:project.profile_name
+      figo profile list -i --extend
+      ```
 
   - **copy**
     - **Description:** Copy a profile to a new profile name or remote/project.
@@ -376,18 +403,19 @@ Each command has its own set of subcommands and options.
       figo profile copy source_profile [target_profile]
       ```
 
-    - **Options:**  
+    - **Options:**
       - `source_profile`: Source profile in the format `remote:project.profile_name` or `project.profile_name` or `profile_name`.
-      - `target_profile`: Target profile name or destination, following the same format as `source_profile`.
+      - `target_profile`: Target profile in the format `remote:project.profile_name` or `project.profile_name` or `profile_name`.
 
     - **Examples:**
       ```bash
       figo profile copy remote:project.profile1 remote:project.profile2
       figo profile copy remote:project.profile1 remote:project
+      figo profile copy profile1 profile2
       ```
 
   - **delete**
-    - **Description:** Delete a profile.
+    - **Description:** Delete a specific profile from the system.
     - **Syntax:**
 
       ```bash
@@ -397,6 +425,13 @@ Each command has its own set of subcommands and options.
     - **Options:**
       - `profile_scope`: Profile scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or `profile_name`.
 
+    - **Examples:**
+      ```bash
+      figo profile delete remote:project.profile_name
+      figo profile delete project.profile_name
+      figo profile delete profile_name
+      ``` 
+      
 #### figo user
 
 - **Aliases:** `us`, `u`

@@ -4222,36 +4222,98 @@ def handle_gpu_command(args, client, parser_dict):
 #############################################
 
 def create_profile_parser(subparsers):
-    profile_parser = subparsers.add_parser("profile", help="Manage profiles", 
-                epilog="Use 'figo profile <command> -h' for more information on a specific command.") 
+    profile_parser = subparsers.add_parser(
+        "profile", 
+        help="Manage profiles", 
+        description="Manage and manipulate profiles for instances, including listing, copying, deleting, and dumping.",
+        epilog="Use 'figo profile <command> -h' for more detailed help on a specific command.",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
     profile_subparsers = profile_parser.add_subparsers(dest="profile_command")
 
-    # Profile dump command
-    dump_profiles_parser = profile_subparsers.add_parser("dump", help="Dump profiles to .yaml files")
-    dump_profiles_parser.add_argument("-a", "--all", action="store_true", help="Dump all profiles to .yaml files")
-    dump_profiles_parser.add_argument("profile_name", nargs="?", help="Name of the profile to dump")
+    # Profile dump command with options to dump all profiles or a specific profile
+    dump_profiles_parser = profile_subparsers.add_parser(
+        "dump",
+        help="Dump profiles to .yaml files for backup or inspection.",
+        description="Dump profile(s) to .yaml files. This allows for easy backup or inspection of profile configurations.\n"
+                    "The profile data includes only the name, description, config, and devices.\n"
+                    "Note: This currently only works for local profiles and not for remote profiles.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+            "  figo profile dump my_profile  # Dumps the specified profile to a .yaml file.\n"
+            "  figo profile dump --all       # Dumps all available local profiles to .yaml files in the './profiles' directory."
+    )
+    dump_profiles_parser.add_argument(
+        "-a", "--all", 
+        action="store_true", 
+        help="Dump all profiles to .yaml files in the './profiles' directory."
+    )
+    dump_profiles_parser.add_argument(
+        "profile_name", 
+        nargs="?", 
+        help="Name of the profile to dump. If omitted, use the --all option to dump all profiles."
+    )
 
     # List command with extend option
-    list_parser = profile_subparsers.add_parser("list", aliases=["l"], help="List profiles and associated instances")
-    list_parser.add_argument("scope", nargs="?", help="Scope in the format 'remote:project.profile_name', 'remote:project', 'project.profile_name', 'profile_name', or defaults to 'local:default'")
-    list_parser.add_argument("-i", "--inherited", action="store_true", help="Include inherited profiles in the listing")
-    list_parser.add_argument("-e", "--extend", action="store_true", help="Extend column width to fit the content")
+    list_parser = profile_subparsers.add_parser(
+        "list",
+        aliases=["l"],
+        help="List profiles and associated instances.",
+        description="List profiles and their associated instances.\n"
+                    "You can specify a scope to filter by remote, project, or profile.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo profile list\n"
+               "  figo profile list remote:project.profile_name\n"
+               "  figo profile list -i --extend"
+    )
+    list_parser.add_argument(
+        "scope",
+        nargs="?",
+        help="Scope in the format 'remote:project.profile_name', 'remote:project', 'project.profile_name', 'profile_name', or defaults to 'local:default'."
+    )
+    list_parser.add_argument("-i", "--inherited", action="store_true", help="Include inherited profiles in the listing.")
+    list_parser.add_argument("-e", "--extend", action="store_true", help="Extend column width to fit the content.")
 
     # Copy command
-    copy_parser = profile_subparsers.add_parser("copy", 
-                        help="Copy a profile to a new profile name or remote/project",
-                        description="Copy a profile to a new profile name or remote/project.\n"
-                        "If the target profile is not provided, the source profile name will be used.",
-                        formatter_class=argparse.RawTextHelpFormatter,
-                        epilog="Examples:\n"
-                        "  figo profile copy remote:project.profile1 remote:project.profile2\n"
-                        "  figo profile copy remote:project.profile1 remote:project\n")
-    copy_parser.add_argument("source_profile", help="Source profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'")
-    copy_parser.add_argument("target_profile", nargs="?", help="Target profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'")
+    copy_parser = profile_subparsers.add_parser(
+        "copy",
+        help="Copy a profile to a new profile name or remote/project.",
+        description="Copy a profile to a new profile name or remote/project.\n"
+                    "If the target profile is not provided, the source profile name will be used.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo profile copy remote:project.profile1 remote:project.profile2\n"
+               "  figo profile copy remote:project.profile1 remote:project\n"
+               "  figo profile copy profile1 profile2"
+    )
+    copy_parser.add_argument(
+        "source_profile",
+        help="Source profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'."
+    )
+    copy_parser.add_argument(
+        "target_profile",
+        nargs="?",
+        help="Target profile in the format 'remote:project.profile_name' or 'project.profile_name' or 'profile_name'."
+    )
 
     # Delete command
-    delete_parser = profile_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete a profile")
-    delete_parser.add_argument("profile_scope", help="Profile scope in the format 'remote:project.profile_name', 'remote:project', 'project.profile_name', 'profile_name'")
+    delete_parser = profile_subparsers.add_parser(
+        "delete",
+        aliases=["del", "d"],
+        help="Delete a profile.",
+        description="Delete a specific profile.\n"
+                    "Provide the profile name along with optional remote and project scopes.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo profile delete remote:project.profile_name\n"
+               "  figo profile delete project.profile_name\n"
+               "  figo profile delete profile_name"
+    )
+    delete_parser.add_argument(
+        "profile_scope",
+        help="Profile scope in the format 'remote:project.profile_name', 'remote:project', 'project.profile_name', or 'profile_name'."
+    )
 
     # Aliases for main parser
     subparsers._name_parser_map["pr"] = profile_parser
