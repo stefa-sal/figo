@@ -4235,13 +4235,14 @@ def create_profile_parser(subparsers):
     dump_profiles_parser = profile_subparsers.add_parser(
         "dump",
         help="Dump profiles to .yaml files for backup or inspection.",
-        description="Dump profile(s) to .yaml files. This allows for easy backup or inspection of profile configurations.\n"
+        description="Dump profile(s) to .yaml files for backup or inspection.\n"
                     "The profile data includes only the name, description, config, and devices.\n"
-                    "Note: This currently only works for local profiles and not for remote profiles.",
+                    "Note: This currently only works for local profiles and not for remote profiles.\n"
+                    "Each dumped profile is saved in the './profiles' directory, with the filename matching the profile name.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
-            "  figo profile dump my_profile  # Dumps the specified profile to a .yaml file.\n"
-            "  figo profile dump --all       # Dumps all available local profiles to .yaml files in the './profiles' directory."
+            "  figo profile dump my_profile  # Dumps the specified profile to 'my_profile.yaml' in the './profiles' directory.\n"
+            "  figo profile dump --all       # Dumps all available local profiles to individual .yaml files in the './profiles' directory."
     )
     dump_profiles_parser.add_argument(
         "-a", "--all", 

@@ -346,34 +346,31 @@ Each command has its own set of subcommands and options.
 - **Subcommands:**
 
   - **dump**
-    - **Description:** Dump profiles to .yaml files for backup or inspection. Only the name, description, config, and devices are included in the output. Currently, this functionality only works for local profiles and does not support remote profiles.
+    - **Description:** Dump profile(s) to `.yaml` files for backup or inspection.
     - **Syntax:**
-
+      
       ```bash
       figo profile dump [profile_name] [-a | --all]
       ```
 
     - **Options:**
-      - `profile_name`: Name of the profile to dump. The file is saved in the `./profiles` directory as a `.yaml` file. If omitted, use the `--all` option to dump all profiles.
-      - `-a, --all`: Dump all local profiles to `.yaml` files in the `./profiles` directory.
+      - `profile_name`: Name of the profile to dump. If omitted, use the `--all` option to dump all profiles.
+      - `-a, --all`: Dump all profiles to `.yaml` files in the `./profiles` directory.
 
     - **Details:**
-      - Each profile is saved with its name as the filename, e.g., `my_profile.yaml`.
-      - The directory for saving profiles is `./profiles`, which will be created if it does not exist.
-      - The dumped data includes:
-        - Profile name
-        - Profile description
-        - Profile config
-        - Profile devices
+      - The profile data includes only the name, description, config, and devices.
+      - Each dumped profile is saved in the `./profiles` directory with the filename matching the profile name, e.g., `./profiles/my_profile.yaml`.
+      - The directory `./profiles` is created if it does not exist.
+      - Note: This currently only works for local profiles and not for remote profiles.
 
     - **Examples:**
       ```bash
-      # Dump a specific profile
+      # Dump a specific profile to a .yaml file
       figo profile dump my_profile
 
-      # Dump all available local profiles
+      # Dump all available local profiles to individual .yaml files in the './profiles' directory
       figo profile dump --all
-      ``` 
+      ```
       
   - **list**
     - **Description:** List profiles and their associated instances, with options to include inherited profiles and extend column width.
@@ -431,7 +428,7 @@ Each command has its own set of subcommands and options.
       figo profile delete project.profile_name
       figo profile delete profile_name
       ``` 
-      
+
 #### figo user
 
 - **Aliases:** `us`, `u`
