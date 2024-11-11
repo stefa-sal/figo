@@ -345,6 +345,23 @@ Each command has its own set of subcommands and options.
 
 - **Subcommands:**
 
+  - **show**
+    - **Description:** Display detailed information about a specific profile.
+    - **Syntax:**
+
+      ```bash
+      figo profile show profile_name
+      ```
+
+    - **Options:**
+      - `profile_name`: The name of the profile to display.
+
+    - **Examples:**
+      ```bash
+      # Display details of a specific profile
+      figo profile show my_profile
+      ```
+
   - **dump**
     - **Description:** Dump profile(s) to `.yaml` files for backup or inspection.
     - **Syntax:**

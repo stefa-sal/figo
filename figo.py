@@ -1863,7 +1863,10 @@ def dump_profiles(client):
         dump_profile_to_file(profile, directory)
 
 def dump_profile(client, profile_name):
-    """Dump a specific profile into a .yaml file."""
+    """Dump a specific profile into a .yaml file.
+    
+    Retuns true if the profile was dumped successfully, false otherwise.
+    """
     try:
         profile = client.profiles.get(profile_name)
         directory = os.path.expanduser(PROFILE_DIR)
@@ -1875,7 +1878,35 @@ def dump_profile(client, profile_name):
     
     except pylxd.exceptions.NotFound:
         logger.error(f"Profile '{profile_name}' not found.")
-        return
+        return False
+    
+    except Exception as e:
+        logger.error(f"Failed to dump profile '{profile_name}': {e}")
+        return False
+    
+    return True
+
+def show_profile(client, profile_name):
+    """Display the details of a profile.
+    
+    Retuns true if the profile was displayed successfully, false otherwise.
+    """
+    try:
+        profile = client.profiles.get(profile_name)
+        profile_data = {
+            'name': profile.name,
+            'description': profile.description,
+            'config': profile.config,
+            'devices': profile.devices
+        }
+        print(yaml.dump(profile_data, default_flow_style=False))
+    except pylxd.exceptions.NotFound:
+        logger.error(f"Profile '{profile_name}' not found.")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to retrieve profile '{profile_name}': {e}")
+        return False
+    return True
 
 def list_profiles_specific(remote, project, profile_name=None, COLS=None):
     """List all profiles on a specific remote and project optionally with a match on profile_name
@@ -4223,13 +4254,28 @@ def handle_gpu_command(args, client, parser_dict):
 
 def create_profile_parser(subparsers):
     profile_parser = subparsers.add_parser(
-        "profile", 
-        help="Manage profiles", 
-        description="Manage and manipulate profiles for instances, including listing, copying, deleting, and dumping.",
+        "profile",
+        help="Manage profiles",
+        description="Manage and manipulate profiles for instances, including listing, copying, deleting, dumping, and displaying profiles.",
         epilog="Use 'figo profile <command> -h' for more detailed help on a specific command.",
         formatter_class=argparse.RawTextHelpFormatter
     )
     profile_subparsers = profile_parser.add_subparsers(dest="profile_command")
+
+    # Show command
+    show_parser = profile_subparsers.add_parser(
+        "show",
+        help="Display the details of a profile.",
+        description="Display detailed information about a specific profile, including its name, description, config, and devices.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo profile show my_profile\n"
+               "  figo profile show remote:project.my_profile"
+    )
+    show_parser.add_argument(
+        "profile_name",
+        help="Name of the profile to display. Can include remote and project scope."
+    )
 
     # Profile dump command with options to dump all profiles or a specific profile
     dump_profiles_parser = profile_subparsers.add_parser(
@@ -4241,17 +4287,17 @@ def create_profile_parser(subparsers):
                     "Each dumped profile is saved in the './profiles' directory, with the filename matching the profile name.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
-            "  figo profile dump my_profile  # Dumps the specified profile to 'my_profile.yaml' in the './profiles' directory.\n"
-            "  figo profile dump --all       # Dumps all available local profiles to individual .yaml files in the './profiles' directory."
+               "  figo profile dump my_profile  # Dumps the specified profile to 'my_profile.yaml' in the './profiles' directory.\n"
+               "  figo profile dump --all       # Dumps all available local profiles to individual .yaml files in the './profiles' directory."
     )
     dump_profiles_parser.add_argument(
-        "-a", "--all", 
-        action="store_true", 
+        "-a", "--all",
+        action="store_true",
         help="Dump all profiles to .yaml files in the './profiles' directory."
     )
     dump_profiles_parser.add_argument(
-        "profile_name", 
-        nargs="?", 
+        "profile_name",
+        nargs="?",
         help="Name of the profile to dump. If omitted, use the --all option to dump all profiles."
     )
 
@@ -4373,22 +4419,37 @@ def parse_profile_scope(profile_scope, command='list'):
     return remote, project, profile
 
 def handle_profile_command(args, client, parser_dict):
+    """
+    Handle subcommands for managing profiles, including dump, show, list, copy, and delete.
+    """
     if not args.profile_command:
         parser_dict['profile_parser'].print_help()
     elif args.profile_command == "dump":
+        # Parse scope to get remote, project, and profile for the dump command
+        remote, project, profile = parse_profile_scope(args.profile_name, command='list')
+
         if args.all:
             dump_profiles(client)
-        elif args.profile_name:
-            dump_profile(client, args.profile_name)
+        elif profile:
+            dump_profile(client, profile)
         else:
             logger.error("You must provide a profile name or use the --all option.")
+    elif args.profile_command == "show":
+        # Parse scope to get remote, project, and profile for the show command
+        remote, project, profile = parse_profile_scope(args.profile_name, command='list')
+
+        if profile:
+            show_profile(remote, project, profile)
+        else:
+            logger.error("You must provide a valid profile name to display.")
     elif args.profile_command in ["list", "l"]:
         remote, project, profile = parse_profile_scope(args.scope, command='list')
         list_profiles(remote, project, profile_name=profile, inherited=args.inherited, extend=args.extend)
     elif args.profile_command == "copy":
         source_remote, source_project, source_profile = parse_profile_scope(args.source_profile, command='copy')
-        target_remote, target_project, target_profile = parse_profile_scope(args.target_profile 
-                                                                            if args.target_profile else source_profile, command='copy')
+        target_remote, target_project, target_profile = parse_profile_scope(
+            args.target_profile if args.target_profile else source_profile, command='copy'
+        )
 
         if source_profile is None or source_profile == "":
             logger.error("Error: Source profile name cannot be empty.")
