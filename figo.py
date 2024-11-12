@@ -1974,6 +1974,39 @@ def list_profiles_specific(remote, project, profile_name=None, COLS=None):
 
     return True
 
+def check_profiles_feature(remote, project, remote_client=None):
+    """
+    Check if the 'features.profiles' value is True for the specified project on the remote.
+    If True, profiles are managed within the project; 
+    If False, profiles are inherited from the default project.
+
+    Args:
+    - remote (str): The name of the remote.
+    - project (str): The name of the project.
+    - remote_client (pylxd.Client, optional): An existing pylxd client for the remote. If provided, it will be used instead of creating a new client.
+
+    Returns:
+    - bool: True if profiles are managed within the project, False if profiles are inherited from the default project.
+    - None if the project is not found or an error occurs.
+    """
+    try:
+        # Use the provided remote_client if available, otherwise create a new one
+        client = remote_client if remote_client else get_remote_client(remote, project_name=project)
+        if not client:
+            logger.error(f"Failed to retrieve client for '{remote}:{project}'.")
+            return None
+        project_data = client.projects.get(project)
+        return project_data.config.get('features.profiles', 'false') == 'true'
+    except pylxd.exceptions.NotFound:
+        logger.error(f"Project '{project}' not found on remote '{remote}'.")
+        return None
+    except pylxd.exceptions.LXDAPIException as e:
+        logger.error(f"Failed to retrieve project '{project}' on remote '{remote}': {e}")
+        return None
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while checking profiles feature: {e}")
+        return None
+
 def list_profiles(remote, project, profile_name=None, inherited=False, extend=False):
     """
     List profiles overall or on specific remote and project optionally with a match on profile_name.
@@ -2062,39 +2095,6 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
                     list_profiles_specific(my_remote_node, my_project["name"], profile_name, COLS)
     
     flush_output(extend=extend)
-
-def check_profiles_feature(remote, project, remote_client=None):
-    """
-    Check if the 'features.profiles' value is True for the specified project on the remote.
-    If True, profiles are managed within the project; 
-    If False, profiles are inherited from the default project.
-
-    Args:
-    - remote (str): The name of the remote.
-    - project (str): The name of the project.
-    - remote_client (pylxd.Client, optional): An existing pylxd client for the remote. If provided, it will be used instead of creating a new client.
-
-    Returns:
-    - bool: True if profiles are managed within the project, False if profiles are inherited from the default project.
-    - None if the project is not found or an error occurs.
-    """
-    try:
-        # Use the provided remote_client if available, otherwise create a new one
-        client = remote_client if remote_client else get_remote_client(remote, project_name=project)
-        if not client:
-            logger.error(f"Failed to retrieve client for '{remote}:{project}'.")
-            return None
-        project_data = client.projects.get(project)
-        return project_data.config.get('features.profiles', 'false') == 'true'
-    except pylxd.exceptions.NotFound:
-        logger.error(f"Project '{project}' not found on remote '{remote}'.")
-        return None
-    except pylxd.exceptions.LXDAPIException as e:
-        logger.error(f"Failed to retrieve project '{project}' on remote '{remote}': {e}")
-        return None
-    except Exception as e:
-        logger.error(f"An unexpected error occurred while checking profiles feature: {e}")
-        return None
 
 def copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile):
     """Copy a profile from one location to another with error handling, including the description.
