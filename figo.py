@@ -2270,6 +2270,11 @@ def list_users(client, full=False, extend=False):
     flush_output(extend=extend)
 
 def get_next_wg_client_ip_address():
+    """ Get the next available IP address for a WireGuard client.
+    
+    Look for the last IP address assigned to a WireGuard client in the .conf files in the USER_DIR directory.
+    """
+
     # List to contain the IP addresses found in .conf files
     ip_addresses = []
 
