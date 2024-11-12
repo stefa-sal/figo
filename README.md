@@ -390,25 +390,34 @@ Each command has its own set of subcommands and options.
       ```
       
   - **list**
-    - **Description:** List profiles and their associated instances, with options to include inherited profiles and extend column width.
+    - **Description:** List profiles and their associated instances, with options to include inherited profiles, extend column width, and recursively list instances associated with inherited profiles.
     - **Syntax:**
 
       ```bash
-      figo profile list [scope] [-i | --inherited] [-e | --extend]
+      figo profile list [scope] [-i | --inherited] [-e | --extend] [-r | --recurse_instances]
       ```
 
     - **Options:**
       - `scope`: Scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or defaults to `local:default`.
       - `-i, --inherited`: Include inherited profiles in the listing.
       - `-e, --extend`: Extend column width to fit the content.
+      - `-r, --recurse_instances`: Recursively list instances associated with inherited profiles.
 
     - **Examples:**
       ```bash
+      # List profiles with default options
       figo profile list
+      
+      # List a specific profile with a given scope
       figo profile list remote:project.profile_name
+      
+      # List profiles, including inherited profiles, with extended column width
       figo profile list -i --extend
-      ```
 
+      # List profiles and recursively show instances associated with inherited profiles
+      figo profile list --recurse_instances
+      ```
+      
   - **copy**
     - **Description:** Copy a profile to a new profile name or remote/project.
     - **Syntax:**

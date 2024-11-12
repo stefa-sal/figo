@@ -1972,8 +1972,12 @@ def show_profile(remote, project, profile_name):
     
     return True
 
+# dictionary to store the instances associated with each profile
+profiles_instances_dict = {}
 
-def list_profiles_specific(remote, project, profile_name=None, COLS=None, remote_client=None):
+
+def list_profiles_specific(remote, project, profile_name=None, COLS=None, remote_client=None,
+                           recurse_instances=False):
     """List all profiles on a specific remote and project optionally with a match on profile_name
     
     For each profile, list the associated instances.
@@ -1985,9 +1989,12 @@ def list_profiles_specific(remote, project, profile_name=None, COLS=None, remote
     - COLS (list, optional): The columns to display.
     - remote_client (pylxd.Client, optional): An existing pylxd client for the remote.
         If provided, it will be used instead of creating a new client.
+    - recurse_instances (bool, optional): If True, list the instances associated with inherited profiles.
     
     Returns:    False if fetching the profiles failed, True otherwise.
     """
+    global profiles_instances_dict
+
     client = remote_client if remote_client else get_remote_client(remote, project_name=project)
     if not client:
         logger.error(f"Failed to retrieve client for '{remote}:{project}'.")
@@ -2009,13 +2016,19 @@ def list_profiles_specific(remote, project, profile_name=None, COLS=None, remote
     for profile in profiles:
         if profile_name and not matches(profile.name, profile_name):
             continue
-        instances = client.instances.all()
-        associated_instances = [
-            instance.name for instance in instances
-            if profile.name in instance.profiles
-        ]
+        
+        if not recurse_instances:
+            instances = client.instances.all()
+            associated_instances = [
+                instance.name for instance in instances
+                if profile.name in instance.profiles
+            ]
+            associated_instances_str = ', '.join(associated_instances) if associated_instances else 'None'
+        else:
+            associated_instances = profiles_instances_dict.get((remote, profile.name), [])
+            associated_instances_str = ', '.join([f"{project}:{instance}" for project, instance in associated_instances]) if associated_instances else 'None'
+
         context = f"{remote}:{project}" 
-        associated_instances_str = ', '.join(associated_instances) if associated_instances else 'None'
         add_row_to_output(COLS, [profile.name, context, associated_instances_str])
 
     return True
@@ -2054,7 +2067,7 @@ def check_profiles_feature(remote, project, remote_client=None):
         logger.error(f"An unexpected error occurred while checking profiles feature: {e}")
         return None
 
-def list_profiles(remote, project, profile_name=None, inherited=False, extend=False):
+def list_profiles(remote, project, profile_name=None, inherited=False, extend=False, recurse_instances=False):
     """
     List profiles overall or on specific remote and project optionally with a match on profile_name.
 
@@ -2064,28 +2077,48 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
     - If remote and project are specified, list all profiles on the remote and project.
     - If `inherited` is False, skip profiles from projects which inherit profiles from default.
     - extend: If True, adapts the output column width to the content.
+    - recurse_instances: If True, list the instances associated with inherithed profiles.
 
     Returns:    False if fetching the profiles failed, True otherwise.
     """
+    global profiles_instances_dict
 
     COLS = [('PROFILE', 25), ('CONTEXT', 25), ('INSTANCES', 80)]
     add_header_line_to_output(COLS)
 
+    if recurse_instances:
+        # reset the dictionary to store the instances associated with each profile
+        profiles_instances_dict = {}
+        # the key of the profiles_instances_dict is a tuple (remote, profile_name)
+        # the value is a list of tuple (project, instance) associated with the profile        
+
+        # for each remote
+        for my_remote in get_incus_remotes():
+            # check to skip all the remote nodes of type images
+            if get_incus_remotes()[my_remote]["Protocol"] == "simplestreams":
+                continue
+            # for each project
+            for my_project in iterator_over_projects(my_remote):
+                remote_client = wrap_get_remote_client(my_remote, project_name=my_project['name'], 
+                                                       raise_project_not_found=True, show_info=False)
+                if not remote_client:
+                    logger.error(f"Failed to retrieve client for '{my_remote}:{my_project['name']}'.")
+                    return False
+                # get all the instances in the project
+                instances = remote_client.instances.all()
+                for instance in instances:
+                    # get the profiles of the instance
+                    instance_profiles = instance.profiles
+                    # for each profile in the instance_profiles
+                    for profile in instance_profiles:
+                        # add the instance to the list of instances associated with the profile
+                        if (my_remote, profile) not in profiles_instances_dict:
+                            profiles_instances_dict[(my_remote, profile)] = []
+                        profiles_instances_dict[(my_remote, profile)].append((my_project["name"], instance.name))
+
     if remote and project:
         remote_client = wrap_get_remote_client(remote, project_name=project, 
                                                raise_project_not_found=True, show_info=False)
-        # try:
-        #     remote_client = None
-        #     remote_client = get_remote_client(remote, project_name=project, raise_project_not_found=True, show_info=False)
-        # except ValueError as e:
-        #     if "Project not found" in str(e):
-        #         pass # the project is not found
-        #     else:
-        #         logger.error(f"Failed to retrieve client for '{my_remote_node}:{project}': {e}.")
-        #         return False 
-        # except Exception as e:
-        #     logger.error(f"Failed to retrieve client for '{my_remote_node}:{project}': {e}")
-        #     return False
         if not remote_client:
             logger.error(f"Failed to retrieve client for '{remote}:{project}'.")
             return False
@@ -2097,7 +2130,8 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
             return False  # Error occurred while checking the target project
         if not inherited and not profiles_managed_separately_for_project:
             return False  # Skip profiles from projects where `features.profiles` is False
-        list_profiles_specific(remote, project, profile_name, COLS, remote_client=remote_client)
+        list_profiles_specific(remote, project, profile_name, COLS, remote_client=remote_client,
+                               recurse_instances=recurse_instances)
 
     elif remote:  # list all profiles on the remote
         for project in iterator_over_projects(remote):
@@ -2113,7 +2147,8 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
                 return False  # Error occurred while checking the target project            
             if not inherited and not profiles_managed_separately_for_project:
                 continue
-            list_profiles_specific(remote, project["name"], profile_name, COLS, remote_client=remote_client)
+            list_profiles_specific(remote, project["name"], profile_name, COLS, remote_client=remote_client,
+                                   recurse_instances=recurse_instances)
 
     else:  # list all profiles on all remotes associated with all the project or with a specific project
         remotes = get_incus_remotes()
@@ -2140,7 +2175,8 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
                     return False  # Error occurred while checking the target project            
                 if not inherited and not profiles_managed_separately_for_project:
                     continue
-                list_profiles_specific(my_remote_node, project, profile_name, COLS, remote_client=remote_client)
+                list_profiles_specific(my_remote_node, project, profile_name, COLS, remote_client=remote_client,
+                                       recurse_instances=recurse_instances)
             else: # all the projects
                 for my_project in iterator_over_projects(my_remote_node):
                     remote_client = wrap_get_remote_client(my_remote_node, project_name=my_project["name"], 
@@ -2155,7 +2191,8 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
                         return False  # Error occurred while checking the target project                              
                     if not inherited and not profiles_managed_separately_for_project:
                         continue
-                    list_profiles_specific(my_remote_node, my_project["name"], profile_name, COLS, remote_client=remote_client)
+                    list_profiles_specific(my_remote_node, my_project["name"], profile_name, COLS,
+                                           remote_client=remote_client, recurse_instances=recurse_instances)
     
     flush_output(extend=extend)
 
@@ -4452,18 +4489,19 @@ def create_profile_parser(subparsers):
         help="Name of the profile to dump. If omitted, use the --all option to dump all profiles."
     )
 
-    # List command with extend option
+    # List command with extend option and recursive instance option
     list_parser = profile_subparsers.add_parser(
         "list",
         aliases=["l"],
         help="List profiles and associated instances.",
         description="List profiles and their associated instances.\n"
-                    "You can specify a scope to filter by remote, project, or profile.",
+                    "You can specify a scope to filter by remote, project, or profile.\n"
+                    "Use --recurse_instances to recursively list instances associated with inherited profiles.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
                "  figo profile list\n"
                "  figo profile list remote:project.profile_name\n"
-               "  figo profile list -i --extend"
+               "  figo profile list -i --extend --recurse_instances"
     )
     list_parser.add_argument(
         "scope",
@@ -4472,6 +4510,7 @@ def create_profile_parser(subparsers):
     )
     list_parser.add_argument("-i", "--inherited", action="store_true", help="Include inherited profiles in the listing.")
     list_parser.add_argument("-e", "--extend", action="store_true", help="Extend column width to fit the content.")
+    list_parser.add_argument("-r", "--recurse_instances", action="store_true", help="Recursively list instances associated with inherited profile.")
 
     # Copy command
     copy_parser = profile_subparsers.add_parser(
@@ -4610,7 +4649,8 @@ def handle_profile_command(args, parser_dict):
             logger.error("You must provide a valid profile name to display.")
     elif args.profile_command in ["list", "l"]:
         remote, project, profile = parse_profile_scope(args.scope, assign_defaults=False)
-        list_profiles(remote, project, profile_name=profile, inherited=args.inherited, extend=args.extend)
+        list_profiles(remote, project, profile_name=profile, inherited=args.inherited,
+                      extend=args.extend, recurse_instances=args.recurse_instances)
     elif args.profile_command == "copy":
         source_remote, source_project, source_profile = parse_profile_scope(args.source_profile)
         target_remote, target_project, target_profile = parse_profile_scope(
