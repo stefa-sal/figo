@@ -473,10 +473,14 @@ def get_projects(remote_name="local"):
         logger.error("Failed to parse JSON output.")
         return None
 
-def run_incus_list(remote_node="local", project_name="default"):
+def run_incus_list(remote_node="local", project_name="default", empty_list_if_project_not_found=False):
     """Run the 'incus list -f json' command to get the instance state all the instances, optionally targeting a remote node and project.
     
-    Return the output as a list of dict if successful, return None if the project does not exist.
+    Return the output as a list of dict if successful
+    Return None if the command fails.
+    Return None if the project does not exist and empty_list_if_project_not_found is False (default).
+    Retun an empty list if the project does not exist and empty_list_if_project_not_found is True.
+
     """
     try:
         # Check if the project exists
@@ -485,6 +489,22 @@ def run_incus_list(remote_node="local", project_name="default"):
             command_check = ["incus", "project", "show", f"{remote_node}:{project_name}"]
 
         result_check = subprocess.run(command_check, capture_output=True, text=True, check=True)
+
+    except subprocess.CalledProcessError as e:
+        if "Project not found" in e.stderr:
+            if empty_list_if_project_not_found:
+                return []
+            else:
+                return None
+        else:
+            logger.error(f"Failed to check if the project exists: {e}")
+            return None
+
+    except Exception as e:
+        logger.error(f"Unexpected error while running 'incus project show': {e}")
+        return None
+    
+    try:
 
         # If the project exists, proceed to list instances
         command = ["incus", "list", "-f", "json", "--project", project_name]
@@ -495,12 +515,8 @@ def run_incus_list(remote_node="local", project_name="default"):
 
         # Parse the JSON output
         instances = json.loads(result.stdout)
-        
-        return instances
 
-    except subprocess.CalledProcessError as e:
-        #logger.error(f"Error: {e.stderr.strip()}")
-        return None
+        return instances
 
     except json.JSONDecodeError as e:
         logger.error(f"Error: Failed to parse JSON output. {e}")
@@ -572,7 +588,7 @@ def iterator_over_instances(remote, project_name, instance_scope=None):
         yield instance_state_dict
 
 def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_scope=None, full=False):
-    """Get instances from the specified remote node and project and print their details.
+    """Get instances from the specified remote node and project and add their details using add_row_to_output.
     
     Returns:    False if fetching the instances failed, True otherwise.
     """
@@ -581,7 +597,7 @@ def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_
     GREEN = "\033[92m"
     RESET = "\033[0m"
     # Get the instances from 'incus list -f json'
-    instances = run_incus_list(remote_node=remote_node, project_name=project_name)
+    instances = run_incus_list(remote_node=remote_node, project_name=project_name, empty_list_if_project_not_found=True)
     if instances is None:
         return False  # Exit if fetching the instances failed
 
@@ -648,7 +664,8 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
                                                          instance_scope=instance_scope, full=full)
                         if not result:
                             set_of_errored_remotes.add(my_remote_node)
-            else:
+            else: # project_name is not None
+                # Get instances for the specified project_name
                 result = get_and_print_instances(COLS, remote_node=my_remote_node, project_name=project_name,
                                                  instance_scope=instance_scope, full=full)
                 if not result:
@@ -1909,9 +1926,6 @@ def show_profile(remote, project, profile_name):
     if not project:
         logger.error("Error: Project name must be specified.")
         return False
-
-    print(f" remote: {remote}, project: {project}, profile_name: {profile_name}") # debug
-
 
     try:
         # Handle retrieving the client based on remote and project (if needed)
