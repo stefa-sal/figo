@@ -4470,12 +4470,26 @@ def create_profile_parser(subparsers):
 
     return profile_parser
 
-def parse_profile_scope(profile_scope, command='list'):
+def parse_profile_scope(profile_scope, assign_defaults=True):
     """Parse a profile scope string and return remote, project, and profile names.
+
+    The profile scope can be in the following formats:
+    - remote:project.profile
+    - remote:project.
+    - remote:profile
+    - project.profile
+    - project.
+    - profile
+
+    Parameters:
+    profile_scope (str): The profile scope string to parse.
+    assign_defaults (bool): Assign default values for remote and project if not provided.
+
+    The list and dump commands use assign_defaults=False to avoid assigning defaults for remote and project.
     
-    It is used for profile list and profile copy commands.
-    command: list or copy
-    
+    Returns:
+    Tuple[str, str, str]: The remote, project, and profile names parsed from the scope.
+
     """
     remote = None
     project = None
@@ -4510,9 +4524,7 @@ def parse_profile_scope(profile_scope, command='list'):
         else: # profile
             profile = profile_scope
 
-    if command == 'list':
-        pass
-    if command == 'copy':
+    if assign_defaults:
         if remote is None:
             remote = "local"
         if project is None:
@@ -4528,7 +4540,7 @@ def handle_profile_command(args, parser_dict):
         parser_dict['profile_parser'].print_help()
     elif args.profile_command == "dump":
         # Parse scope to get remote, project, and profile for the dump command
-        remote, project, profile = parse_profile_scope(args.profile_name, command='list')
+        remote, project, profile = parse_profile_scope(args.profile_name, assign_defaults=False)
 
         client = pylxd.Client()
         if args.all:
@@ -4539,7 +4551,7 @@ def handle_profile_command(args, parser_dict):
             logger.error("You must provide a profile name or use the --all option.")
     elif args.profile_command == "show":
         # Parse scope to get remote, project, and profile for the show command
-        remote, project, profile = parse_profile_scope(args.profile_name, command='list')
+        remote, project, profile = parse_profile_scope(args.profile_name)
 
         if profile:
             result = show_profile(remote, project, profile)
@@ -4548,12 +4560,12 @@ def handle_profile_command(args, parser_dict):
         else:
             logger.error("You must provide a valid profile name to display.")
     elif args.profile_command in ["list", "l"]:
-        remote, project, profile = parse_profile_scope(args.scope, command='list')
+        remote, project, profile = parse_profile_scope(args.scope, assign_defaults=False)
         list_profiles(remote, project, profile_name=profile, inherited=args.inherited, extend=args.extend)
     elif args.profile_command == "copy":
-        source_remote, source_project, source_profile = parse_profile_scope(args.source_profile, command='copy')
+        source_remote, source_project, source_profile = parse_profile_scope(args.source_profile)
         target_remote, target_project, target_profile = parse_profile_scope(
-            args.target_profile if args.target_profile else source_profile, command='copy'
+            args.target_profile if args.target_profile else source_profile
         )
 
         if source_profile is None or source_profile == "":
@@ -4565,7 +4577,7 @@ def handle_profile_command(args, parser_dict):
 
         copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile)
     elif args.profile_command in ["delete", "del", "d"]:
-        remote, project, profile = parse_profile_scope(args.profile_scope, command='copy')
+        remote, project, profile = parse_profile_scope(args.profile_scope)
 
         if profile is None or profile == "":
             logger.error("Error: Profile name cannot be empty.")
