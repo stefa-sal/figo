@@ -784,6 +784,30 @@ def get_remote_client(remote_node, project_name='default', raise_project_not_fou
             logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
             return None
 
+def wrap_get_remote_client(remote_node, project_name='default', raise_project_not_found=False,
+                           test_project=True, show_info=True):
+    """Wrapper function to handle exceptions when getting a remote client.
+    
+    Returns:    A pylxd.Client instance for the remote node and project if successful, False otherwise.
+    """
+
+    try:
+        remote_client = get_remote_client(remote_node, project_name=project_name, raise_project_not_found=raise_project_not_found,
+                                          test_project=test_project, show_info=show_info)
+        return remote_client
+
+    except ValueError as e:
+        if "Project not found" in str(e):
+            # do not log the error message if the project is not found
+            return False 
+        else:
+            logger.error(f"Failed to retrieve client for '{remote_node}:{project_name}': {e}.")
+            return False 
+    except Exception as e:
+        logger.error(f"Failed to retrieve client for '{remote_node}:{project_name}': {e}")
+        return False
+
+
 def start_instance(instance_name, remote, project):
     """Start a specific instance on a given remote and within a specific project.
     
@@ -1949,14 +1973,22 @@ def show_profile(remote, project, profile_name):
     return True
 
 
-def list_profiles_specific(remote, project, profile_name=None, COLS=None):
+def list_profiles_specific(remote, project, profile_name=None, COLS=None, remote_client=None):
     """List all profiles on a specific remote and project optionally with a match on profile_name
     
     For each profile, list the associated instances.
+
+    Args:
+    - remote (str): The name of the remote.
+    - project (str): The name of the project.
+    - profile_name (str, optional): The name of the profile to match.
+    - COLS (list, optional): The columns to display.
+    - remote_client (pylxd.Client, optional): An existing pylxd client for the remote.
+        If provided, it will be used instead of creating a new client.
     
     Returns:    False if fetching the profiles failed, True otherwise.
     """
-    client = get_remote_client(remote, project_name=project)
+    client = remote_client if remote_client else get_remote_client(remote, project_name=project)
     if not client:
         logger.error(f"Failed to retrieve client for '{remote}:{project}'.")
         return False
@@ -1997,7 +2029,8 @@ def check_profiles_feature(remote, project, remote_client=None):
     Args:
     - remote (str): The name of the remote.
     - project (str): The name of the project.
-    - remote_client (pylxd.Client, optional): An existing pylxd client for the remote. If provided, it will be used instead of creating a new client.
+    - remote_client (pylxd.Client, optional): An existing pylxd client for the remote. 
+      If provided, it will be used instead of creating a new client.
 
     Returns:
     - bool: True if profiles are managed within the project, False if profiles are inherited from the default project.
@@ -2029,7 +2062,7 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
     - If remote is specified but project is not, list all profiles on the remote.
     - If project is specified but remote is not, list all profiles on the project on all remotes.
     - If remote and project are specified, list all profiles on the remote and project.
-    - If `inherited` is False, skip profiles from projects where `features.profiles` is False.
+    - If `inherited` is False, skip profiles from projects which inherit profiles from default.
     - extend: If True, adapts the output column width to the content.
 
     Returns:    False if fetching the profiles failed, True otherwise.
@@ -2039,38 +2072,48 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
     add_header_line_to_output(COLS)
 
     if remote and project:
-        try:
-            remote_client = None
-            remote_client = get_remote_client(remote, project_name=project, raise_project_not_found=True, show_info=False)
-        except ValueError as e:
-            if "Project not found" in str(e):
-                pass # the project is not found
-            else:
-                logger.error(f"Failed to retrieve client for '{my_remote_node}:{project}': {e}.")
-                return False 
-        except Exception as e:
-            logger.error(f"Failed to retrieve client for '{my_remote_node}:{project}': {e}")
-            return False
+        remote_client = wrap_get_remote_client(remote, project_name=project, 
+                                               raise_project_not_found=True, show_info=False)
+        # try:
+        #     remote_client = None
+        #     remote_client = get_remote_client(remote, project_name=project, raise_project_not_found=True, show_info=False)
+        # except ValueError as e:
+        #     if "Project not found" in str(e):
+        #         pass # the project is not found
+        #     else:
+        #         logger.error(f"Failed to retrieve client for '{my_remote_node}:{project}': {e}.")
+        #         return False 
+        # except Exception as e:
+        #     logger.error(f"Failed to retrieve client for '{my_remote_node}:{project}': {e}")
+        #     return False
         if not remote_client:
+            logger.error(f"Failed to retrieve client for '{remote}:{project}'.")
             return False
 
-        profiles_managed_separately_for_project = check_profiles_feature(remote, project, remote_client=remote_client)
+        profiles_managed_separately_for_project = check_profiles_feature(remote, project,
+                                                                         remote_client=remote_client)
         if profiles_managed_separately_for_project is None:
             logger.error(f"Failed to check the 'features.profiles' value for '{remote}:{project}'.")
             return False  # Error occurred while checking the target project
         if not inherited and not profiles_managed_separately_for_project:
             return False  # Skip profiles from projects where `features.profiles` is False
-        return list_profiles_specific(remote, project, profile_name, COLS)
+        list_profiles_specific(remote, project, profile_name, COLS, remote_client=remote_client)
 
     elif remote:  # list all profiles on the remote
         for project in iterator_over_projects(remote):
-            profiles_managed_separately_for_project = check_profiles_feature(remote, project["name"])
+            remote_client = wrap_get_remote_client(remote, project_name=project["name"], 
+                                                   raise_project_not_found=True, show_info=False)
+            if not remote_client:
+                logger.error(f"Failed to retrieve client for '{remote}:{project}'.")
+                return False
+            profiles_managed_separately_for_project = check_profiles_feature(remote, project["name"], 
+                                                                             remote_client=remote_client)
             if profiles_managed_separately_for_project is None:
                 logger.error(f"Failed to check the 'features.profiles' value for '{remote}:{project}'.")
                 return False  # Error occurred while checking the target project            
             if not inherited and not profiles_managed_separately_for_project:
                 continue
-            list_profiles_specific(remote, project["name"], profile_name, COLS)
+            list_profiles_specific(remote, project["name"], profile_name, COLS, remote_client=remote_client)
 
     else:  # list all profiles on all remotes associated with all the project or with a specific project
         remotes = get_incus_remotes()
@@ -2097,16 +2140,22 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
                     return False  # Error occurred while checking the target project            
                 if not inherited and not profiles_managed_separately_for_project:
                     continue
-                list_profiles_specific(my_remote_node, project, profile_name, COLS)
+                list_profiles_specific(my_remote_node, project, profile_name, COLS, remote_client=remote_client)
             else: # all the projects
                 for my_project in iterator_over_projects(my_remote_node):
-                    profiles_managed_separately_for_project = check_profiles_feature(my_remote_node, my_project["name"])
+                    remote_client = wrap_get_remote_client(my_remote_node, project_name=my_project["name"], 
+                                                           raise_project_not_found=True, show_info=False)
+                    if not remote_client:
+                        logger.error(f"Failed to retrieve client for '{my_remote_node}:{project}'.")
+                        return False
+                    profiles_managed_separately_for_project = check_profiles_feature(my_remote_node, my_project["name"],
+                                                                                     remote_client=remote_client)
                     if profiles_managed_separately_for_project is None:
                         logger.error(f"Failed to check the 'features.profiles' value for '{remote}:{project}'.")
                         return False  # Error occurred while checking the target project                              
                     if not inherited and not profiles_managed_separately_for_project:
                         continue
-                    list_profiles_specific(my_remote_node, my_project["name"], profile_name, COLS)
+                    list_profiles_specific(my_remote_node, my_project["name"], profile_name, COLS, remote_client=remote_client)
     
     flush_output(extend=extend)
 
