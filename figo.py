@@ -102,15 +102,26 @@ REMOTE_TO_IP_INFO_MAP = {
         "base_ip": "10.202.8.150"
         },
     "eln_cloud": {
+        "ssh_user": "ubuntu",
+        "ssh_port": 22,
+        "ssh_host": "160.80.223.231",
         "gw": "10.202.10.129",
         "prefix_len": 25,
         "base_ip": "10.202.10.150"
         },
     "blade3": {
+        "ssh_user": "ubuntu",
+        "ssh_port": 22,
+        "ssh_host": "160.80.105.53",        
         "gw": "10.202.9.129",
         "prefix_len": 25,
         "base_ip": "10.202.9.150"
         },
+    "l1-gpuserv-l0-local":  {
+        "ssh_user": "ubuntu",
+        "ssh_port": 22,
+        "ssh_host": "10.202.8.208",        
+        }, 
 }
 
 # Set up logging
@@ -807,6 +818,79 @@ def wrap_get_remote_client(remote_node, project_name='default', raise_project_no
         logger.error(f"Failed to retrieve client for '{remote_node}:{project_name}': {e}")
         return False
 
+def return_available_gpu(remote, instance_type):
+    """
+    Return a list of available PCI addresses for GPUs on a given remote based on the specified type.
+    
+    Parameters:
+        remote (str): Name of the remote to check for available GPUs.
+        instance_type (str): Type of GPU profile to check for, either 'vm' or 'container'.
+    
+    Returns:
+        list: A list of PCI addresses of available GPUs.
+    """
+    # Determine prefix for profile based on instance type
+    if instance_type == 'vm':
+        profile_prefix = 'gpu-vm'
+    elif instance_type == 'container':
+        profile_prefix = 'gpu-cnt'
+    else:
+        raise ValueError("Invalid instance type. Must be 'vm' or 'container'.")
+
+    # Initialize a pylxd client on the remote
+    client = get_remote_client(remote)
+    if not client:
+        logger.error(f"Failed to connect to remote '{remote}'.")
+        return []
+
+    # Get PCI addresses from profiles
+    profile_pci_addresses = []
+    for profile in client.profiles.all():
+        if profile.name.startswith(profile_prefix):
+            for device in profile.devices.values():
+                if device.get('type') == 'gpu' and device.get('gputype') == 'physical':
+                    pci_address = device.get('pci')
+                    if pci_address:
+                        profile_pci_addresses.append(pci_address)
+
+    # Determine the command for retrieving available PCI addresses
+    if remote == 'local':
+        try:
+            result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+            result.check_returncode()
+            available_pci_addresses = [line.split()[0] for line in result.stdout.splitlines()]
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error running lspci locally: {e.stderr.strip()}")
+            return []
+    else:
+        # Retrieve SSH connection details from REMOTE_TO_IP_INFO_MAP
+        remote_info = REMOTE_TO_IP_INFO_MAP.get(remote)
+        if not remote_info:
+            logger.error(f"No SSH information found for remote '{remote}'.")
+            return []
+
+        ssh_user = remote_info.get("ssh_user", "ubuntu")
+        ssh_host = remote_info.get("ssh_host")
+        ssh_port = remote_info.get("ssh_port", 22)
+        if not ssh_host:
+            logger.error(f"No SSH host specified for remote '{remote}'.")
+            return []
+
+        # Build SSH command
+        ssh_command = f"ssh -p {ssh_port} {ssh_user}@{ssh_host} 'lspci | grep NVIDIA'"
+        try:
+            result = subprocess.run(ssh_command, capture_output=True, text=True, shell=True)
+            result.check_returncode()
+            available_pci_addresses = [line.split()[0] for line in result.stdout.splitlines()]
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error running lspci on remote '{remote}': {e.stderr.strip()}")
+            return []
+
+    print(available_pci_addresses) # debug
+    # Find intersection of PCI addresses from profiles and available PCI addresses
+    available_gpus = list(set(profile_pci_addresses) & set(available_pci_addresses))
+    return available_gpus
+
 
 def start_instance(instance_name, remote, project):
     """Start a specific instance on a given remote and within a specific project.
@@ -834,7 +918,11 @@ def start_instance(instance_name, remote, project):
             return False
 
         # check if the instance is a vm or a container
-        instance_type = instance.type
+        instance_type = instance.type # can be 'virtual-machine' or 'container'
+        if instance_type == "virtual-machine":
+            instance_type = "vm"
+        else:
+            instance_type = "container"
 
         #TODO differentiate the following code based on the instance type
 
@@ -844,17 +932,28 @@ def start_instance(instance_name, remote, project):
             profile for profile in instance_profiles if profile.startswith("gpu-")
         ]
         
-        if gpu_profiles_for_instance: # there is at least one GPU profile
+        if gpu_profiles_for_instance or True: # there is at least one GPU profile # debug
 
-            # Check GPU availability
-            try:
-                result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Error in lspci: {e.stderr.strip()}")
-                return False
+            # # Check GPU availability
+            # try:
+            #     result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+            # except subprocess.CalledProcessError as e:
+            #     logger.error(f"Error in lspci: {e.stderr.strip()}")
+            #     return False
             
-            total_gpus = len(result.stdout.strip().split('\n'))
-            
+            # total_gpus = len(result.stdout.strip().split('\n'))
+
+            gpu_list = return_available_gpu(remote, instance_type)
+            print(gpu_list)
+            total_gpus = len(gpu_list)
+
+            return False # debug
+
+            #TODO BUG
+            # id does not consider as running instances the instances in the same project of the instance to be started
+            # so it does not consider GPUs that are taken by instances in different projects
+
+
             running_instances = [
                 i for i in remote_client.instances.all() if i.status == "Running"
             ]
@@ -1386,7 +1485,7 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
     - image: Image source. If it starts with 'local:', it uses a local image; otherwise, it defaults to 'remote:image'.
     - remote_name: Remote server name.
     - project: Project name.
-    - instance_type: Type of the instance ('vm' or 'container').
+    - instance_type: Type of the instance (can be 'vm' or 'container').
     - ip_address: Static IP address for the instance.
     - gw_address: Gateway address for the instance.
     - nic_device_name: Optional NIC device name for the instance.
