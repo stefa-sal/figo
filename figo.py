@@ -4151,7 +4151,7 @@ def create_instance_parser(subparsers):
     set_ip_parser.add_argument("instance_name",
                             help="Name of the instance to set the IP address for. Can include remote and project scope.")
     set_ip_parser.add_argument(
-        "-h", "--hole",
+        "-o", "--hole",
         action="store_true",
         help="Assign the first available IP address hole in the range, rather than the next sequential IP."
     )

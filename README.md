@@ -152,7 +152,7 @@ Each command has its own set of subcommands and options.
       - `-n, --nic`: The NIC name (default: `eth0` for containers, `enp5s0` for VMs).
       - `-p, --project`: Specify the project name.
       - `-r, --remote`: Specify the remote Incus server name (default is `local`).
-      - `-h, --hole`: Assigns the first available gap in the IP range rather than the next sequential IP.
+      - `-o, --hole`: Assigns the first available gap in the IP range rather than the next sequential IP.
 
     - **Examples:**
       ```bash
@@ -171,7 +171,7 @@ Each command has its own set of subcommands and options.
       # Automatically assign the first available IP hole
       figo instance set_ip my_remote:my_project.my_instance --hole
       ```
-            
+
 #### figo instance
 
 - **Aliases:** `in`, `i`
