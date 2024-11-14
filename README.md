@@ -48,7 +48,7 @@ Each command has its own set of subcommands and options.
 - **Aliases:** `in`, `i`
 - **Description:** Manage instances, including creating, listing, starting, stopping, setting IP addresses, setting keys, and executing bash commands.
 
-- **Subcommands:**
+#### Subcommands
 
 #### figo instance list
 
@@ -229,16 +229,15 @@ Each command has its own set of subcommands and options.
   ```bash
   figo instance bash instance_name
   figo instance bash remote:project.instance_name
-  figo instance
-
- bash instance_name -f -r remote_name -p project_name
+  figo instance bash instance_name -f -r remote_name -p project_name
   ```
       
 ### figo gpu
 
 - **Aliases:** `gp`, `g`
 - **Description:** Manage GPUs in instances within the federated testbed.
-- **Subcommands:**
+
+#### Subcommands
 
 #### figo gpu status
 
@@ -274,52 +273,54 @@ Each command has its own set of subcommands and options.
     figo gpu list --extend
     ```
     
-  - **add**
-    - **Description:** Add a GPU profile to a specific instance. The instance name can include remote and project scope in the format `remote:project.instance_name`. If not provided, use the `-r/--remote` and `-p/--project` options.
-    - **Syntax:**
+#### figo gpu add
 
-      ```bash
-      figo gpu add instance_name [-p | --project project_name] [-r | --remote remote_name] [-u | --user user_name]
-      ```
+- **Description:** Add a GPU profile to a specific instance. The instance name can include remote and project scope in the format `remote:project.instance_name`. If not provided, use the `-r/--remote` and `-p/--project` options.
+- **Syntax:**
 
-    - **Options:**
-      - `instance_name`: The name of the instance to which the GPU profile will be added. Can include remote and project scope.
-      - `-p, --project`: Specify the project name for the instance.
-      - `-r, --remote`: Specify the remote Incus server name.
-      - `-u, --user`: Specify the user to infer the project from.
+  ```bash
+  figo gpu add instance_name [-p | --project project_name] [-r | --remote remote_name] [-u | --user user_name]
+  ```
 
-    - **Examples:**
-      ```bash
-      figo gpu add my_instance
-      figo gpu add my_project.instance_name -r my_remote
-      figo gpu add my_remote:my_project.instance_name
-      figo gpu add instance_name -p my_project -r my_remote
-      figo gpu add my_instance -u user_name
-      ```
+- **Options:**
+  - `instance_name`: The name of the instance to which the GPU profile will be added. Can include remote and project scope.
+  - `-p, --project`: Specify the project name for the instance.
+  - `-r, --remote`: Specify the remote Incus server name.
+  - `-u, --user`: Specify the user to infer the project from.
 
-  - **remove**
-    - **Description:** Remove GPU profiles from a specific instance. Optionally, remove all profiles. The instance name can include remote and project scope in the format `remote:project.instance_name`. If not provided, use the `-r/--remote` and `-p/--project` options.
-    - **Syntax:**
+- **Examples:**
+  ```bash
+  figo gpu add my_instance
+  figo gpu add my_project.instance_name -r my_remote
+  figo gpu add my_remote:my_project.instance_name
+  figo gpu add instance_name -p my_project -r my_remote
+  figo gpu add my_instance -u user_name
+  ```
 
-      ```bash
-      figo gpu remove instance_name [-p | --project project_name] [-r | --remote remote_name] [-u | --user user_name] [--all]
-      ```
+#### figo gpu remove
 
-    - **Options:**
-      - `instance_name`: The name of the instance from which the GPU profile will be removed. Can include remote and project scope.
-      - `-p, --project`: Specify the project name for the instance.
-      - `-r, --remote`: Specify the remote Incus server name.
-      - `-u, --user`: Specify the user to infer the project from.
-      - `--all`: Remove all GPU profiles from the specified instance.
+- **Description:** Remove GPU profiles from a specific instance. Optionally, remove all profiles. The instance name can include remote and project scope in the format `remote:project.instance_name`. If not provided, use the `-r/--remote` and `-p/--project` options.
+- **Syntax:**
 
-    - **Examples:**
-      ```bash
-      figo gpu remove my_instance
-      figo gpu remove my_project.instance_name --all
-      figo gpu remove my_remote:my_project.instance_name
-      figo gpu remove instance_name -p my_project -r my_remote --all
-      figo gpu remove my_instance -u user_name
-      ```
+  ```bash
+  figo gpu remove instance_name [-p | --project project_name] [-r | --remote remote_name] [-u | --user user_name] [--all]
+  ```
+
+- **Options:**
+  - `instance_name`: The name of the instance from which the GPU profile will be removed. Can include remote and project scope.
+  - `-p, --project`: Specify the project name for the instance.
+  - `-r, --remote`: Specify the remote Incus server name.
+  - `-u, --user`: Specify the user to infer the project from.
+  - `--all`: Remove all GPU profiles from the specified instance.
+
+- **Examples:**
+  ```bash
+  figo gpu remove my_instance
+  figo gpu remove my_project.instance_name --all
+  figo gpu remove my_remote:my_project.instance_name
+  figo gpu remove instance_name -p my_project -r my_remote --all
+  figo gpu remove my_instance -u user_name
+  ```
 
 ### figo profile
 
