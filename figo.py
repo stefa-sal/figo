@@ -4133,14 +4133,18 @@ def create_instance_parser(subparsers):
         "set_ip",
         help="Set a static IP address and gateway for a stopped instance.",
         description="Set a static IP address and gateway for a stopped instance.\n"
-                    "The instance name can include remote and project scope in the format 'remote:project.instance_name'.",
+                    "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
+                    "If the IP address/prefix len is not provided, an available IP address will"
+                    " be assigned with the default prefix len associated with the remote.\n"
+                    "If the gateway is not provided, the default gateway associated with the remote will be used.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
-               "  figo instance set_ip instance_name -i 192.168.1.10/24 -g 192.168.1.1\n"
-               "  figo instance set_ip remote:project.instance_name -i 10.0.0.5/24 -g 10.0.0.1"
+            "  figo instance set_ip instance_name -i 192.168.1.10/24 -g 192.168.1.1\n"
+            "  figo instance set_ip remote:project.instance_name -i 10.0.0.5/24 -g 10.0.0.1\n"
+            "  figo instance set_ip remote:project.instance_name  # Automatically assigns an available IP and default gateway"
     )
     set_ip_parser.add_argument("instance_name",
-                               help="Name of the instance to set the IP address for. Can include remote and project scope.")
+                            help="Name of the instance to set the IP address for. Can include remote and project scope.")
     add_common_arguments(set_ip_parser)
 
     # Create command

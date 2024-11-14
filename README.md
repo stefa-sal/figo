@@ -138,28 +138,36 @@ Each command has its own set of subcommands and options.
       ```
 
   - **set_ip**
-    - **Description:** Set a static IP address and gateway for a stopped instance.
+    - **Description:** Set a static IP address and gateway for a stopped instance. If the IP address or gateway is not provided, they will be assigned automatically from the defaults associated with the remote.
     - **Syntax:**
 
       ```bash
-      figo instance set_ip instance_name -i ip_address -g gw_address [-n nic] [-p project] [-r remote]
+      figo instance set_ip instance_name [-i ip_address] [-g gw_address] [-n nic] [-p project] [-r remote]
       ```
 
     - **Options:**  
       - `instance_name`: The name of the instance to set the IP address for. Can include remote and project scope.
-      - `-i, --ip`: The static IP address with prefix length (e.g., 192.168.1.10/24).
-      - `-g, --gw`: The gateway address.
-      - `-n, --nic`: The NIC name (default: eth0 for containers, enp5s0 for VMs).
+      - `-i, --ip`: The static IP address with prefix length (e.g., 192.168.1.10/24). If omitted, an available IP address will be assigned with the default prefix length of the remote.
+      - `-g, --gw`: The gateway address. If omitted, the default gateway associated with the remote will be used.
+      - `-n, --nic`: The NIC name (default: `eth0` for containers, `enp5s0` for VMs).
       - `-p, --project`: Specify the project name.
-      - `-r, --remote`: Specify the remote Incus server name.
+      - `-r, --remote`: Specify the remote Incus server name (default is `local`).
 
     - **Examples:**
       ```bash
+      # Set specific IP and gateway
       figo instance set_ip my_instance -i 192.168.1.10/24 -g 192.168.1.1
+      
+      # Set IP and gateway for an instance in a remote project
       figo instance set_ip my_project.my_instance -i 192.168.1.20/24 -g 192.168.1.1 -r my_remote
-      figo instance set_ip my_remote:my_project.my_instance -i 10.0.0.5/16 -g 10.0.0.1 -n eth1
-      ```
 
+      # Set IP with a specific NIC for a remote instance
+      figo instance set_ip my_remote:my_project.my_instance -i 10.0.0.5/16 -g 10.0.0.1 -n eth1
+      
+      # Automatically assign IP and gateway based on remote defaults
+      figo instance set_ip my_remote:my_project.my_instance
+      ```
+      
 #### figo instance
 
 - **Aliases:** `in`, `i`
