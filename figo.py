@@ -1331,7 +1331,8 @@ def get_prefix_len(remote):
         logger.error(f"key error in get_prefix_len: remote '{remote}' not found in REMOTE_TO_IP_INFO_MAP.")
         return None
 
-def set_ip(instance_name, remote, project, ip_address_and_prefix_len=None, gw_address=None, nic_device_name=None):
+def set_ip(instance_name, remote, project, ip_address_and_prefix_len=None, gw_address=None,
+           nic_device_name=None, hole=False):
     """Set a static IP address and gateway for a stopped instance.
 
     Args: 
@@ -1340,6 +1341,8 @@ def set_ip(instance_name, remote, project, ip_address_and_prefix_len=None, gw_ad
     - project: Project name.
     - ip_address_and_prefix_len: IP address and prefix length. If None, the address is assigned automatically.
     - gw_address: Gateway address. If None, the default gateway for the remote is used.
+    - nic_device_name: NIC device name. If None, the default NIC device name is used.
+    - hole: If True, assign the first available hole starting from the base IP address.
     
     Returns: True if the IP address was set successfully, False otherwise.
     """
@@ -1366,7 +1369,8 @@ def set_ip(instance_name, remote, project, ip_address_and_prefix_len=None, gw_ad
         remap_remote = remote
         if is_l1_host(remote):
             remap_remote = get_l0_remote(remote)
-        ip_address = assign_ip_address(remap_remote, mode="next")
+        my_mode = "hole" if hole else "next"
+        ip_address = assign_ip_address(remap_remote, mode=my_mode)
         prefix_length = get_prefix_len(remap_remote)
 
     if ip_address is None or prefix_length is None:
@@ -4134,18 +4138,25 @@ def create_instance_parser(subparsers):
         help="Set a static IP address and gateway for a stopped instance.",
         description="Set a static IP address and gateway for a stopped instance.\n"
                     "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
-                    "If the IP address/prefix len is not provided, an available IP address will"
-                    " be assigned with the default prefix len associated with the remote.\n"
+                    "If the IP address/prefix len is not provided, an available IP address will be assigned with the default prefix len associated with the remote.\n"
+                    "By default, the next IP address after the highest assigned IP is chosen, but using --hole assigns the first available gap in the IP range.\n"
                     "If the gateway is not provided, the default gateway associated with the remote will be used.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
             "  figo instance set_ip instance_name -i 192.168.1.10/24 -g 192.168.1.1\n"
             "  figo instance set_ip remote:project.instance_name -i 10.0.0.5/24 -g 10.0.0.1\n"
+            "  figo instance set_ip my_remote:my_project.instance_name --hole\n"
             "  figo instance set_ip remote:project.instance_name  # Automatically assigns an available IP and default gateway"
     )
     set_ip_parser.add_argument("instance_name",
                             help="Name of the instance to set the IP address for. Can include remote and project scope.")
+    set_ip_parser.add_argument(
+        "-h", "--hole",
+        action="store_true",
+        help="Assign the first available IP address hole in the range, rather than the next sequential IP."
+    )
     add_common_arguments(set_ip_parser)
+
 
     # Create command
     create_parser = instance_subparsers.add_parser(
@@ -4407,8 +4418,13 @@ def handle_instance_command(args, parser_dict):
                 force = args.force
                 set_user_key(instance, remote, project, args.key_filename, login=login, folder=folder, force=force)
             elif args.instance_command == "set_ip":
+                # if args.hole and args.ip return error
+                if args.hole and args.ip:
+                    logger.error("Error: Cannot use both --hole and --ip options together.")
+                    return
+
                 set_ip(instance, remote, project, 
-                    ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic)
+                    ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic, hole=args.hole)
             elif args.instance_command in ["create", "c"]:
                 image = parse_image(args.image)
                 if image is None:
