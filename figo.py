@@ -944,15 +944,14 @@ def start_instance(instance_name, remote, project):
             # total_gpus = len(result.stdout.strip().split('\n'))
 
             gpu_list = return_available_gpu(remote, instance_type)
-            print(gpu_list)
+            print(gpu_list) # debug
             total_gpus = len(gpu_list)
 
-            return False # debug
+            # return False # debug
 
             #TODO BUG
-            # id does not consider as running instances the instances in the same project of the instance to be started
+            # it does not consider as running instances the instances in the same project of the instance to be started
             # so it does not consider GPUs that are taken by instances in different projects
-
 
             running_instances = [
                 i for i in remote_client.instances.all() if i.status == "Running"
@@ -1804,7 +1803,7 @@ def exec_instance_bash(instance_name, remote, project, force=False, timeout=BASH
 #############################################
 
 def show_gpu_status(client, extend=False):
-    """Show the status of GPUs.
+    """Show the status of GPUs on the remote node implicitly associated with the client.
     
     It uses lspci to count NVIDIA GPUs
     I checks the total number of GPUs, the number of available GPUs, and the active GPU profiles.
@@ -1817,6 +1816,8 @@ def show_gpu_status(client, extend=False):
         return
     total_gpus = len(result.stdout.strip().split('\n'))
 
+    #TODO BUG: the following code only considers the instances in the project associated with the client
+    
     running_instances = [
         i for i in client.instances.all() if i.status == "Running"
     ]
@@ -1834,7 +1835,7 @@ def show_gpu_status(client, extend=False):
     flush_output(extend=extend)
 
 def list_gpu_profiles(client, extend=False):
-    """List all GPU profiles."""
+    """List all GPU profiles on the remote node implicitly associated with the client."""
     gpu_profiles = [
         profile.name for profile in client.profiles.all() if profile.name.startswith("gpu-")
     ]
@@ -1843,7 +1844,7 @@ def list_gpu_profiles(client, extend=False):
     add_row_to_output(COLS, [str(len(gpu_profiles)), ", ".join(gpu_profiles)])
     flush_output(extend=extend)
 
-def add_gpu_profile(instance_name, client, remote='local', project='default'):
+def add_gpu_profile(instance_name, remote='local', project='default'):
     """
     Add a GPU profile to a specified instance within an optional remote and project scope.
 
@@ -1853,8 +1854,6 @@ def add_gpu_profile(instance_name, client, remote='local', project='default'):
 
     Args:
         instance_name (str): The name of the instance to which the GPU profile will be added.
-                             This can include the project and remote scope.
-        client (pylxd.Client): The LXD client instance used to interact with the Incus server.
         remote (str, optional): The remote server where the instance is located. Defaults to 'local'.
         project (str, optional): The project under which the instance resides. Defaults to 'default'.
 
@@ -1862,7 +1861,7 @@ def add_gpu_profile(instance_name, client, remote='local', project='default'):
         bool: True if the GPU profile was added successfully, False otherwise.
     """
     try:
-        full_instance_name = f"{remote}:{project}.{instance_name}" if remote != 'local' or project != 'default' else instance_name
+        full_instance_name = f"{remote}:{project}.{instance_name}" 
         logger.info(f"Adding GPU profile to instance '{full_instance_name}'...")
 
         # Set the project on the client
@@ -1892,6 +1891,7 @@ def add_gpu_profile(instance_name, client, remote='local', project='default'):
             logger.error(f"Instance '{full_instance_name}' already has the maximum number of GPU profiles.")
             return False
 
+        #TODO BUG : we need to differentiate between instance type container and virtual-machine
         all_profiles = get_all_profiles(client)
         available_gpu_profiles = [
             profile for profile in all_profiles if profile.startswith("gpu-")
@@ -1914,10 +1914,19 @@ def add_gpu_profile(instance_name, client, remote='local', project='default'):
     
     return True
 
-def remove_gpu_all_profiles(instance_name, client):
+def remove_gpu_all_profiles(instance_name, remote='local', project='default'):
     """Remove all GPU profiles from an instance."""
+
     try:
+        full_instance_name = f"{remote}:{project}.{instance_name}" 
+        logger.info(f"Removing all GPU profiles from instance '{full_instance_name}'...")
+
+        # Set the project on the client
+        client = pylxd.Client(project=project)
+
+        # Fetch the instance
         instance = client.instances.get(instance_name)
+
         if instance.status.lower() != "stopped":
             logger.error(f"Instance '{instance_name}' is running or in error state.")
             return
@@ -1945,9 +1954,15 @@ def remove_gpu_all_profiles(instance_name, client):
             f"Failed to remove GPU profiles from instance '{instance_name}': {e}"
         )
 
-def remove_gpu_profile(instance_name, client):
+def remove_gpu_profile(instance_name, remote='local', project='default'):
     """Remove a GPU profile from an instance."""
     try:
+        full_instance_name = f"{remote}:{project}.{instance_name}"
+        logger.info(f"Removing GPU profile from instance '{full_instance_name}'...")
+
+        # Set the project on the client
+        client = pylxd.Client(project=project)
+
         instance = client.instances.get(instance_name)
         if instance.status.lower() != "stopped":
             logger.error(f"Instance '{instance_name}' is running or in error state.")
@@ -4379,32 +4394,46 @@ def create_gpu_parser(subparsers):
     gpu_parser = subparsers.add_parser("gpu", help="Manage GPUs")
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
 
-    # GPU Status with extended column option
+    # GPU Status with extended column option and optional remote
     status_gpu_parser = gpu_subparsers.add_parser(
         "status",
         help="Show the current status of GPUs, including their availability and usage.",
-        description="Show the status of GPUs in the system, displaying their availability and usage.\n"
-                    "Use the -e/--extend option to adjust column width for better readability.",
+        description="Show the status of GPUs on a specified remote, displaying their availability and usage.\n"
+                    "If no remote is specified, defaults to 'local'. Use the -e/--extend option to adjust column width for better readability.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
                "  figo gpu status\n"
+               "  figo gpu status my_remote:\n"
                "  figo gpu status --extend"
+    )
+    status_gpu_parser.add_argument(
+        "remote",
+        nargs="?",
+        default="local",
+        help="Specify the remote name for the GPU status. Defaults to 'local'."
     )
     status_gpu_parser.add_argument(
         "-e", "--extend", action="store_true", help="Extend column width to fit the content"
     )
 
-    # List GPU profiles
+    # List GPU profiles with optional remote
     list_gpu_parser = gpu_subparsers.add_parser(
         "list",
         aliases=["l"],
         help="List GPU profiles configured in the system.",
-        description="List all GPU profiles configured in the system.\n"
-                    "Use the -e/--extend option to adjust column width for better readability.",
+        description="List all GPU profiles configured on a specified remote.\n"
+                    "If no remote is specified, defaults to 'local'. Use the -e/--extend option to adjust column width for better readability.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
                "  figo gpu list\n"
+               "  figo gpu list my_remote:\n"
                "  figo gpu list --extend"
+    )
+    list_gpu_parser.add_argument(
+        "remote",
+        nargs="?",
+        default="local",
+        help="Specify the remote name for the GPU list. Defaults to 'local'."
     )
     list_gpu_parser.add_argument(
         "-e", "--extend", action="store_true", help="Extend column width to fit the content"
@@ -4483,16 +4512,35 @@ def create_gpu_parser(subparsers):
 
     return gpu_parser
 
+def handle_gpu_command(args, parser_dict):
+    """
+    Handle subcommands for managing GPUs, including status, list, add, and remove.
+    """
 
-def handle_gpu_command(args, client, parser_dict):
+    def fix_remote_name(remote_name):
+        """Fix the remote name by removing any trailing ':'."""
+        return remote_name.rstrip(':')
+    
     if not args.gpu_command:
         parser_dict['gpu_parser'].print_help()
     elif args.gpu_command == "status":
-        # Pass the extend argument to adjust column width
-        show_gpu_status(client, extend=args.extend)
+        remote = args.remote
+        remote = fix_remote_name(remote)
+
+        client = get_remote_client(remote)
+        if client:
+            show_gpu_status(client, extend=args.extend)
+        else:
+            logger.error(f"Failed to retrieve GPU status for remote '{remote}'.")
     elif args.gpu_command in ["list", "l"]:
-        # Pass the extend argument to adjust column width
-        list_gpu_profiles(client, extend=args.extend)
+        remote = args.remote
+        remote = fix_remote_name(remote)
+
+        client = get_remote_client(remote)
+        if client:
+            list_gpu_profiles(client, extend=args.extend)
+        else:
+            logger.error(f"Failed to list GPU profiles for remote '{remote}'.")
 
     else:
         # Handle project based on user if provided
@@ -4519,20 +4567,32 @@ def handle_gpu_command(args, client, parser_dict):
                 return  # Error already printed in parse_instance_scope
 
             # Proceed with adding the GPU profile
-            add_gpu_profile(instance, client, remote=remote, project=project)
+            my_result = add_gpu_profile(instance, remote=remote, project=project)
+            if my_result:
+                logger.info(f"Successfully added GPU profile to instance '{instance}'.")
+            else:
+                logger.error(f"Failed to add GPU profile to instance '{instance}'.")
+
         elif args.gpu_command == "remove":
             # Parse the instance scope and validate
             remote, project, instance = parse_instance_scope(
                 args.instance_name, provided_remote=args.remote, provided_project=args.project
             )
             if remote is None or project is None or instance is None:
+                logger.error("Error: Invalid instance name.")
                 return  # Error already printed in parse_instance_scope
 
             # Proceed with removing the GPU profile(s)
             if args.all:
-                remove_gpu_all_profiles(instance, client, remote=remote, project=project)
+                my_result = remove_gpu_all_profiles(instance, remote=remote, project=project)
             else:
-                remove_gpu_profile(instance, client, remote=remote, project=project)
+                my_result = remove_gpu_profile(instance, remote=remote, project=project)
+
+            if my_result:
+                logger.info(f"Successfully removed GPU profile(s) from instance '{instance}'.")
+            else:
+                logger.error(f"Failed to remove GPU profile(s) from instance '{instance}'.")
+
 
 
 #############################################
@@ -5190,8 +5250,7 @@ def handle_command(args, parser, parser_dict):
     if args.command in ["instance", "in", "i"]:
         handle_instance_command(args, parser_dict)
     elif args.command in ["gpu", "gp", "g"]:
-        client = pylxd.Client()
-        handle_gpu_command(args, client, parser_dict)
+        handle_gpu_command(args, parser_dict)
     elif args.command in ["profile", "pr", "p"]:
         handle_profile_command(args, parser_dict)
     elif args.command in ["user", "us", "u"]:

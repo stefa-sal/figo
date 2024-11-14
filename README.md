@@ -257,40 +257,38 @@ Each command has its own set of subcommands and options.
 - **Description:** Manage GPUs in instances within the federated testbed.
 - **Subcommands:**
 
-  - **status**
-    - **Description:** Show the current status of GPUs, including their availability and usage.  
-    - **Syntax:**
+### figo gpu status
+- **Description**: Display the status of GPUs on the specified remote or local system.
+- **Syntax**:
+    ```bash
+    figo gpu status [remote] [-e | --extend]
+    ```
+- **Options**:
+    - `remote`: Specify the remote name to show the GPU status. Defaults to `local` if omitted.
+    - `-e, --extend`: Extend column width for better readability.
+- **Examples**:
+    ```bash
+    figo gpu status
+    figo gpu status my_remote:
+    figo gpu status --extend
+    ```
 
-      ```bash
-      figo gpu status [-e | --extend]
-      ```
-
-    - **Options:**
-      - `-e, --extend`: Extend column width to fit the content for better readability.
-
-    - **Examples:**
-      ```bash
-      figo gpu status
-      figo gpu status --extend
-      ```
-
-  - **list**
-    - **Description:** List GPU profiles configured in the system, with an option to extend column width.
-    - **Syntax:**
-
-      ```bash
-      figo gpu list [-e | --extend]
-      ```
-
-    - **Options:**
-      - `-e, --extend`: Extend column width to fit the content for better readability.
-
-    - **Examples:**
-      ```bash
-      figo gpu list
-      figo gpu list --extend
-      ```
-
+### figo gpu list
+- **Description**: List all GPU profiles configured on a specified remote or locally.
+- **Syntax**:
+    ```bash
+    figo gpu list [remote] [-e | --extend]
+    ```
+- **Options**:
+    - `remote`: Specify the remote name to list the GPU profiles. Defaults to `local` if omitted.
+    - `-e, --extend`: Extend column width for better readability.
+- **Examples**:
+    ```bash
+    figo gpu list
+    figo gpu list my_remote:
+    figo gpu list --extend
+    ```
+    
   - **add**
     - **Description:** Add a GPU profile to a specific instance. The instance name can include remote and project scope in the format `remote:project.instance_name`. If not provided, use the `-r/--remote` and `-p/--project` options.
     - **Syntax:**
