@@ -4148,8 +4148,10 @@ def create_instance_parser(subparsers):
             "  figo instance set_ip my_remote:my_project.instance_name --hole\n"
             "  figo instance set_ip remote:project.instance_name  # Automatically assigns an available IP and default gateway"
     )
-    set_ip_parser.add_argument("instance_name",
-                            help="Name of the instance to set the IP address for. Can include remote and project scope.")
+    set_ip_parser.add_argument(
+        "instance_name",
+        help="Name of the instance to set the IP address for. Can include remote and project scope."
+    )
     set_ip_parser.add_argument(
         "-o", "--hole",
         action="store_true",
@@ -4165,23 +4167,44 @@ def create_instance_parser(subparsers):
         help="Create a new instance, specifying the instance name, image, type, and optional profiles.",
         description="Create a new instance.\n"
                     "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
-                    "Specify the image, instance type, optional profiles, and the option to create the project if it does not exist.",
+                    "Specify the image, instance type, optional profiles, and the option to create the project if it does not exist.\n"
+                    "If the IP address is not provided, an available IP address is automatically assigned with the default prefix length for the remote.\n"
+                    "By default, the next IP address after the highest assigned IP is chosen, but using --hole assigns the first available gap in the IP range.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
             "  figo instance create instance_name image_name\n"
             "  figo instance create remote:project.instance_name image_name -t vm\n"
             "  figo instance create instance_name image_name -r remote_name -p project_name\n"
             "  figo instance create instance_name image_name -f profile1,profile2\n"
-            "  figo instance create instance_name image_name -m"
+            "  figo instance create instance_name image_name -m --hole"
     )
-    create_parser.add_argument("instance_name", help="Name of the new instance.\n"
-                            "Can include remote and project scope in the format 'remote:project.instance_name'")
-    create_parser.add_argument("image", help="Image source to create the instance from. Format: 'remote:image' or 'image'.")
-    create_parser.add_argument("-t", "--type", choices=["vm", "container", "cnt"], default="container", 
-                            help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container').")
-    create_parser.add_argument("-f", "--profile", help="Comma-separated list of profiles to apply to the instance.")
-    create_parser.add_argument("-m", "--make_project", action="store_true",
-                            help="Create the project if it does not exist on the remote specified.")
+    create_parser.add_argument(
+        "instance_name",
+        help="Name of the new instance.\n"
+            "Can include remote and project scope in the format 'remote:project.instance_name'"
+    )
+    create_parser.add_argument(
+        "image",
+        help="Image source to create the instance from. Format: 'remote:image' or 'image'."
+    )
+    create_parser.add_argument(
+        "-t", "--type", choices=["vm", "container", "cnt"], default="container",
+        help="Specify the instance type: 'vm', 'container', or 'cnt' (default: 'container')."
+    )
+    create_parser.add_argument(
+        "-f", "--profile",
+        help="Comma-separated list of profiles to apply to the instance."
+    )
+    create_parser.add_argument(
+        "-m", "--make_project", action="store_true",
+        help="Create the project if it does not exist on the remote specified."
+    )
+    create_parser.add_argument(
+        "-o", "--hole",
+        action="store_true",
+        help="Assign the first available IP address hole in the range, rather than the next sequential IP."
+    )
+    
     add_common_arguments(create_parser)
 
     # Delete command
