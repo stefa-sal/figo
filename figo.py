@@ -211,8 +211,6 @@ def flush_output(extend=False):
     output_rows = [] # Clear the output rows
     header_row = [] # Clear the header row
 
-
-
 def is_valid_ip(ip):
     """Check if the provided string is a valid IPv4 address."""
     pattern = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
@@ -439,9 +437,116 @@ def get_instance_state_dict (instance):
     }
     return instance_state_dict
 
-#############################################
-###### figo instance command functions #####
-#############################################
+def get_remote_client(remote_node, project_name='default', raise_project_not_found=False, test_project=True, show_info=True):  
+    """Create a pylxd.Client instance for the specified remote node and project.
+
+    Parameters:
+    remote_node (str): The name of the remote node.
+    project_name (str): The name of the project.
+    raise_project_not_found (bool): If True, raise a ValueError if the project does not exist on the remote.
+    test_project (bool): If True, test if the project exists on the remote.
+    
+    Returns:  A pylxd.Client instance for the remote node if successful, None otherwise.
+
+    If not successful, the function logs an error message and returns None.
+    If raise_project_not_found is True and the project does not exist on the remote the function raises a ValueError.
+    """
+    #TODO add the code to handle the case when the remote node is not reachable and return None
+
+    if remote_node == "local":
+        # Create a pylxd.Client instance for the local server
+        try:
+            client_instance = pylxd.Client(project=project_name)
+            if test_project:
+                # Test if the project exist by fetching a non-existent instance
+                try:
+                    client_instance.instances.get("xxxx-yyyy")
+                except pylxd.exceptions.NotFound as e:
+                    if "Project not found" in str(e):
+                        if show_info:
+                            logger.info(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Project not found.")
+                        if raise_project_not_found:
+                            raise ValueError(f"Project not found : '{project_name}' on remote '{remote_node}'")
+                        else:
+                            return None 
+                    else:
+                        pass # continue because we expect the instance to be not found
+                except Exception as e:
+                    logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
+                    return None
+            return client_instance
+
+        except pylxd.exceptions.ClientConnectionFailed as e:
+            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Client connection failed.")
+            return None
+        
+    else:
+        try :
+            address = get_remote_address(remote_node)
+            cert_path = get_certificate_path(remote_node)
+        except FileNotFoundError:
+            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Certificate not found.")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
+            return None
+
+        # Create a pylxd.Client instance with SSL verification
+        try:
+            client_instance = pylxd.Client(endpoint=address, verify=cert_path, project=project_name)
+            if test_project:
+                # Test if the project exist by fetching a non-existent instance
+                try:
+                    client_instance.instances.get("xxxx-yyyy") 
+                except pylxd.exceptions.NotFound as e:
+                    if "Project not found" in str(e):
+                        if show_info:
+                            logger.info(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Project not found.")
+                        if raise_project_not_found:
+                            raise ValueError(f"Project not found : '{project_name}' on remote '{remote_node}'")
+                        else:
+                            return None 
+                    else:
+                        pass # continue because we expect the instance to be not found
+                except Exception as e:
+                    logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
+                    return None
+            return client_instance   
+        except pylxd.exceptions.ClientConnectionFailed as e:
+            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Client connection failed.")
+            return None
+        except ValueError as e:
+            if 'Project not found' in str(e):
+                raise ValueError(e)
+            else:
+                logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
+                return None
+        except Exception as e:
+            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
+            return None
+
+def wrap_get_remote_client(remote_node, project_name='default', raise_project_not_found=False,
+                           test_project=True, show_info=True):
+    """Wrapper function to handle exceptions when getting a remote client.
+    
+    Returns:    A pylxd.Client instance for the remote node and project if successful, False otherwise.
+    """
+
+    try:
+        remote_client = get_remote_client(remote_node, project_name=project_name, raise_project_not_found=raise_project_not_found,
+                                          test_project=test_project, show_info=show_info)
+        return remote_client
+
+    except ValueError as e:
+        if "Project not found" in str(e):
+            # do not log the error message if the project is not found
+            return False 
+        else:
+            logger.error(f"Failed to retrieve client for '{remote_node}:{project_name}': {e}.")
+            return False 
+    except Exception as e:
+        logger.error(f"Failed to retrieve client for '{remote_node}:{project_name}': {e}")
+        return False
 
 def get_incus_remotes():
     """Fetches the list of Incus remotes as a JSON object.
@@ -583,7 +688,7 @@ def iterator_over_projects(remote_node):
     for project in projects:
         yield project
 
-def iterator_over_instances(remote, project_name, instance_scope=None):
+def iterator_over_instance_dicts(remote, project_name, instance_scope=None):
     """Iterate over all instances in the specified remote and project, providing an instance state dict for each instance
     
     Optionally filter by instance name.
@@ -597,6 +702,32 @@ def iterator_over_instances(remote, project_name, instance_scope=None):
         if instance_scope and not matches(name, instance_scope):
             continue
         yield instance_state_dict
+
+def iterator_over_instances(remote, project=None):
+    """
+    Iterates over all instances on a given Incus remote, covering all projects or a specific project.
+
+    Returns:    A generator that yields a tuple of project name and instance object for each instance.
+
+    """
+    # Connect to the remote Incus server
+    client = get_remote_client(remote)  
+
+    # Iterate over all projects
+    for project in client.projects.all():
+        project_name = project.name
+
+        # Create a project-specific client and switch to the current project
+        project_client = get_remote_client(remote, project_name=project_name)
+        project_client.project = project_name
+
+        # Iterate over all instances within the current project
+        for instance in project_client.instances.all():
+            yield project_name, instance  # Yield both project name and instance object for each instance
+
+#############################################
+###### figo instance command functions #####
+#############################################
 
 def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_scope=None, full=False):
     """Get instances from the specified remote node and project and add their details using add_row_to_output.
@@ -707,117 +838,6 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
     if set_of_errored_remotes:
         logger.error(f"Error: Failed to retrieve projects from remote(s): {', '.join(set_of_errored_remotes)}")
 
-def get_remote_client(remote_node, project_name='default', raise_project_not_found=False, test_project=True, show_info=True):  
-    """Create a pylxd.Client instance for the specified remote node and project.
-
-    Parameters:
-    remote_node (str): The name of the remote node.
-    project_name (str): The name of the project.
-    raise_project_not_found (bool): If True, raise a ValueError if the project does not exist on the remote.
-    test_project (bool): If True, test if the project exists on the remote.
-    
-    Returns:  A pylxd.Client instance for the remote node if successful, None otherwise.
-
-    If not successful, the function logs an error message and returns None.
-    If raise_project_not_found is True and the project does not exist on the remote the function raises a ValueError.
-    """
-    #TODO add the code to handle the case when the remote node is not reachable and return None
-
-    if remote_node == "local":
-        # Create a pylxd.Client instance for the local server
-        try:
-            client_instance = pylxd.Client(project=project_name)
-            if test_project:
-                # Test if the project exist by fetching a non-existent instance
-                try:
-                    client_instance.instances.get("xxxx-yyyy")
-                except pylxd.exceptions.NotFound as e:
-                    if "Project not found" in str(e):
-                        if show_info:
-                            logger.info(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Project not found.")
-                        if raise_project_not_found:
-                            raise ValueError(f"Project not found : '{project_name}' on remote '{remote_node}'")
-                        else:
-                            return None 
-                    else:
-                        pass # continue because we expect the instance to be not found
-                except Exception as e:
-                    logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
-                    return None
-            return client_instance
-
-        except pylxd.exceptions.ClientConnectionFailed as e:
-            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Client connection failed.")
-            return None
-        
-    else:
-        try :
-            address = get_remote_address(remote_node)
-            cert_path = get_certificate_path(remote_node)
-        except FileNotFoundError:
-            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Certificate not found.")
-            return None
-        except Exception as e:
-            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
-            return None
-
-        # Create a pylxd.Client instance with SSL verification
-        try:
-            client_instance = pylxd.Client(endpoint=address, verify=cert_path, project=project_name)
-            if test_project:
-                # Test if the project exist by fetching a non-existent instance
-                try:
-                    client_instance.instances.get("xxxx-yyyy") 
-                except pylxd.exceptions.NotFound as e:
-                    if "Project not found" in str(e):
-                        if show_info:
-                            logger.info(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Project not found.")
-                        if raise_project_not_found:
-                            raise ValueError(f"Project not found : '{project_name}' on remote '{remote_node}'")
-                        else:
-                            return None 
-                    else:
-                        pass # continue because we expect the instance to be not found
-                except Exception as e:
-                    logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
-                    return None
-            return client_instance   
-        except pylxd.exceptions.ClientConnectionFailed as e:
-            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': Client connection failed.")
-            return None
-        except ValueError as e:
-            if 'Project not found' in str(e):
-                raise ValueError(e)
-            else:
-                logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
-                return None
-        except Exception as e:
-            logger.error(f"Failed to connect to remote '{remote_node}' and project '{project_name}': {e}")
-            return None
-
-def wrap_get_remote_client(remote_node, project_name='default', raise_project_not_found=False,
-                           test_project=True, show_info=True):
-    """Wrapper function to handle exceptions when getting a remote client.
-    
-    Returns:    A pylxd.Client instance for the remote node and project if successful, False otherwise.
-    """
-
-    try:
-        remote_client = get_remote_client(remote_node, project_name=project_name, raise_project_not_found=raise_project_not_found,
-                                          test_project=test_project, show_info=show_info)
-        return remote_client
-
-    except ValueError as e:
-        if "Project not found" in str(e):
-            # do not log the error message if the project is not found
-            return False 
-        else:
-            logger.error(f"Failed to retrieve client for '{remote_node}:{project_name}': {e}.")
-            return False 
-    except Exception as e:
-        logger.error(f"Failed to retrieve client for '{remote_node}:{project_name}': {e}")
-        return False
-
 def return_available_gpu(remote, instance_type):
     """
     Return a list of available PCI addresses for GPUs on a given remote based on the specified type.
@@ -921,8 +941,10 @@ def start_instance(instance_name, remote, project):
         instance_type = instance.type # can be 'virtual-machine' or 'container'
         if instance_type == "virtual-machine":
             instance_type = "vm"
+            start_prefix = "gpu-vm"
         else:
             instance_type = "container"
+            start_prefix = "gpu-cnt"
 
         #TODO differentiate the following code based on the instance type
 
@@ -949,17 +971,20 @@ def start_instance(instance_name, remote, project):
 
             # return False # debug
 
-            #TODO BUG
+            #DONE BUG
             # it does not consider as running instances the instances in the same project of the instance to be started
             # so it does not consider GPUs that are taken by instances in different projects
 
-            running_instances = [
-                i for i in remote_client.instances.all() if i.status == "Running"
+            running_instances_couple = [
+                i for i in iterator_over_instances(remote, project=project) if i[1].status == "Running"
             ]
             active_gpu_profiles = [
-                profile for my_instance in running_instances for profile in my_instance.profiles
+                profile for my_profile, my_instance in running_instances_couple for profile in my_instance.profiles
                 if profile.startswith("gpu-")
             ]
+
+            print(f"Total GPUs: {total_gpus}") # debug
+            print(f"Active GPU profiles: {active_gpu_profiles}") # debug
 
             available_gpus = total_gpus - len(active_gpu_profiles)
             if len(gpu_profiles_for_instance) > available_gpus:
@@ -972,23 +997,23 @@ def start_instance(instance_name, remote, project):
             # Resolve GPU conflicts
             conflict = False
             for gpu_profile in gpu_profiles_for_instance:
-                for my_instance in running_instances:
+                for my_project, my_instance in running_instances_couple:
                     if gpu_profile in my_instance.profiles:
                         conflict = True
                         logger.warning(
                             f"GPU profile '{gpu_profile}' is already in use by "
-                            f"instance {my_instance.name}."
+                            f"instance {my_project}.{my_instance.name}."
                         )
                         instance_profiles.remove(gpu_profile)
                         new_profile = [
                             p for p in remote_client.profiles.all() 
-                            if p.name.startswith("gpu-") and p.name not in active_gpu_profiles
+                            if p.name.startswith(start_prefix) and p.name not in active_gpu_profiles
                             and p.name not in instance_profiles
                         ][0].name
                         instance_profiles.append(new_profile)
                         logger.info(
                             f"Replaced GPU profile '{gpu_profile}' with '{new_profile}' "
-                            f"for instance '{instance_name}'"
+                            f"for instance {my_project}.'{instance_name}'"
                         )
                         break
 
@@ -1271,7 +1296,7 @@ def retrieve_assigned_ips(remote):
             logger.error(f"Failed to connect to project '{project['name']}'.")
             return None
 
-        for instance_state_dict in iterator_over_instances(remote, project["name"]):
+        for instance_state_dict in iterator_over_instance_dicts(remote, project["name"]):
             ip_addresses = get_ip_addresses(instance_state_dict)
             assigned_ips.extend(ip_addresses)
             #if the instance name starts with l1- get the l2 IP addresses
@@ -1864,8 +1889,8 @@ def add_gpu_profile(instance_name, remote='local', project='default'):
         full_instance_name = f"{remote}:{project}.{instance_name}" 
         logger.info(f"Adding GPU profile to instance '{full_instance_name}'...")
 
-        # Set the project on the client
-        client = pylxd.Client(project=project)
+        # Get the client for the remote and project
+        client = get_remote_client(remote, project_name=project)
 
         # Fetch the instance
         instance = client.instances.get(instance_name)
@@ -1928,8 +1953,8 @@ def remove_gpu_all_profiles(instance_name, remote='local', project='default'):
         full_instance_name = f"{remote}:{project}.{instance_name}" 
         logger.info(f"Removing all GPU profiles from instance '{full_instance_name}'...")
 
-        # Set the project on the client
-        client = pylxd.Client(project=project)
+        # Get the client for the remote and project
+        client = get_remote_client(remote, project_name=project)
 
         # Fetch the instance
         instance = client.instances.get(instance_name)
@@ -1972,8 +1997,12 @@ def remove_gpu_profile(instance_name, remote='local', project='default'):
         full_instance_name = f"{remote}:{project}.{instance_name}"
         logger.info(f"Removing GPU profile from instance '{full_instance_name}'...")
 
-        # Set the project on the client
-        client = pylxd.Client(project=project)
+        # Get the client for the remote and project
+        client = get_remote_client(remote, project_name=project)
+
+        if not client:
+            logger.error(f"Failed to connect to remote '{remote}' and project '{project}'.")
+            return False
 
         instance = client.instances.get(instance_name)
         if instance.status.lower() != "stopped":
