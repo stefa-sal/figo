@@ -1891,10 +1891,14 @@ def add_gpu_profile(instance_name, remote='local', project='default'):
             logger.error(f"Instance '{full_instance_name}' already has the maximum number of GPU profiles.")
             return False
 
-        #TODO BUG : we need to differentiate between instance type container and virtual-machine
+        if instance.type == "virtual-machine":
+            start_prefix = "gpu-vm-"
+        else:
+            start_prefix = "gpu-cnt-"
+            
         all_profiles = get_all_profiles(client)
         available_gpu_profiles = [
-            profile for profile in all_profiles if profile.startswith("gpu-")
+            profile for profile in all_profiles if profile.startswith(start_prefix)
             and profile not in instance_profiles
         ]
 
@@ -1915,7 +1919,10 @@ def add_gpu_profile(instance_name, remote='local', project='default'):
     return True
 
 def remove_gpu_all_profiles(instance_name, remote='local', project='default'):
-    """Remove all GPU profiles from an instance."""
+    """Remove all GPU profiles from an instance.
+    
+    Returns: True if the GPU profiles were removed successfully, False otherwise.
+    """
 
     try:
         full_instance_name = f"{remote}:{project}.{instance_name}" 
@@ -1929,7 +1936,7 @@ def remove_gpu_all_profiles(instance_name, remote='local', project='default'):
 
         if instance.status.lower() != "stopped":
             logger.error(f"Instance '{instance_name}' is running or in error state.")
-            return
+            return False
 
         instance_profiles = instance.profiles
         gpu_profiles_for_instance = [
@@ -1938,7 +1945,7 @@ def remove_gpu_all_profiles(instance_name, remote='local', project='default'):
 
         if not gpu_profiles_for_instance:
             logger.error(f"Instance '{instance_name}' has no GPU profiles to remove.")
-            return
+            return False
 
         for gpu_profile in gpu_profiles_for_instance:
             instance_profiles.remove(gpu_profile)
@@ -1946,16 +1953,21 @@ def remove_gpu_all_profiles(instance_name, remote='local', project='default'):
         instance.profiles = instance_profiles
         instance.save(wait=True)
 
-        logger.info(
-            f"Removed all GPU profiles from instance '{instance_name}'."
-        )
+        logger.info(f"Removed all GPU profiles from instance '{instance_name}'.")
+
+        return True
+    
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(
             f"Failed to remove GPU profiles from instance '{instance_name}': {e}"
         )
+        return False
 
 def remove_gpu_profile(instance_name, remote='local', project='default'):
-    """Remove a GPU profile from an instance."""
+    """Remove a GPU profile from an instance.
+    
+    Returns: True if the GPU profile was removed successfully, False otherwise.
+    """
     try:
         full_instance_name = f"{remote}:{project}.{instance_name}"
         logger.info(f"Removing GPU profile from instance '{full_instance_name}'...")
@@ -1966,7 +1978,7 @@ def remove_gpu_profile(instance_name, remote='local', project='default'):
         instance = client.instances.get(instance_name)
         if instance.status.lower() != "stopped":
             logger.error(f"Instance '{instance_name}' is running or in error state.")
-            return
+            return False
 
         instance_profiles = instance.profiles
         gpu_profiles_for_instance = [
@@ -1975,20 +1987,21 @@ def remove_gpu_profile(instance_name, remote='local', project='default'):
 
         if not gpu_profiles_for_instance:
             logger.error(f"Instance '{instance_name}' has no GPU profiles to remove.")
-            return
+            return False
 
         profile_to_remove = gpu_profiles_for_instance[0]
         instance_profiles.remove(profile_to_remove)
         instance.profiles = instance_profiles
         instance.save(wait=True)
 
-        logger.info(
-            f"Removed GPU profile '{profile_to_remove}' from instance '{instance_name}'."
-        )
+        logger.info(f"Removed GPU profile '{profile_to_remove}' from instance '{instance_name}'.")
+
+        return True
+    
     except pylxd.exceptions.LXDAPIException as e:
-        logger.error(
-            f"Failed to remove GPU profile from instance '{instance_name}': {e}"
-        )
+        logger.error(f"Failed to remove GPU profile from instance '{instance_name}': {e}")
+        return False
+
 
 #############################################
 ###### figo profile command functions #######
@@ -4503,7 +4516,7 @@ def create_gpu_parser(subparsers):
         help="Specify the user to infer the project from."
     )
     remove_gpu_parser.add_argument(
-        "--all", action="store_true", help="Remove all GPU profiles from the instance."
+        "-a", "--all", action="store_true", help="Remove all GPU profiles from the instance."
     )
 
     # Aliases for main parser
