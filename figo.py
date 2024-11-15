@@ -2057,20 +2057,20 @@ def remove_gpu_profile(instance_name, remote='local', project='default'):
         logger.error(f"Failed to remove GPU profile from instance '{instance_name}': {e}")
         return False
 
-def get_gpu_pci_addresses(remote='local'):
-    """Show the PCI addresses of the GPUs on the remote node."""
+def show_gpu_pci_addresses(remote='local'):
+    """Return the PCI addresses of the GPUs on the remote node."""
     try:
         logger.info(f"Getting PCI addresses of GPUs on remote '{remote}'...")
 
-        result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
-        gpu_pci_addresses = result.stdout.strip().split('\n')
-
-        logger.info(f"PCI addresses of GPUs on remote '{remote}': {gpu_pci_addresses}")
-
+        print (get_pci_addresses(remote))
+        
         return True
     
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to get PCI addresses of GPUs on remote '{remote}': {e.stderr.strip()}")
+        return False
+    except Exception as e:
+        logger.error(f"An unexpected error occurred while getting PCI addresses of GPUs on remote '{remote}': {e}")
         return False
 
 
@@ -4799,11 +4799,9 @@ def handle_gpu_command(args, parser_dict):
                 return
 
             # Retrieve PCI addresses for GPUs available on the remote
-            pci_addresses = get_gpu_pci_addresses(remote)
+            my_result = show_gpu_pci_addresses(remote)
 
-            if pci_addresses:
-                logger.info(f"PCI addresses of GPUs on remote '{remote}':\n{pci_addresses}")
-            else:
+            if not my_result:
                 logger.error(f"Failed to retrieve PCI addresses for GPUs on remote '{remote}'.")
 
 

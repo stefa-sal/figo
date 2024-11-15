@@ -322,6 +322,21 @@ Each command has its own set of subcommands and options.
     figo gpu remove my_instance -u user_name
     ```
 
+- #### figo gpu pci_addr
+
+  - **Description**: Display PCI addresses of GPUs available on a specific remote.
+  - **Syntax**:
+    ```bash
+    figo gpu pci_addr [remote]
+    ```
+  - **Options**:
+    - `remote`: Specify the remote name for displaying GPU PCI addresses. Defaults to `local` if omitted.
+  - **Examples**:
+    ```bash
+    figo gpu pci_addr
+    figo gpu pci_addr my_remote
+    ```
+
 ### figo profile
 
 - **Aliases:** `pr`, `p`
@@ -636,7 +651,7 @@ Each command has its own set of subcommands and options.
     # Add a VPN route to a Linux router with specified target and device interface
     figo vpn add route 10.202.128.0/24 via 10.202.9.2 type linux target target-name -d vlan403
     ```
-    
+
 ## Autocompletion
 
 The CLI supports autocompletion using the `argcomplete` library,
