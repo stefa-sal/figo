@@ -2236,8 +2236,6 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
     """
     global profiles_instances_dict
 
-    print(f"remote: {remote}, project: {project}, profile_name: {profile_name}, inherited: {inherited}, recurse_instances: {recurse_instances}")  # debug
-
     COLS = [('PROFILE', 25), ('CONTEXT', 25), ('INSTANCES', 80)]
     add_header_line_to_output(COLS)
 
@@ -2371,7 +2369,7 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
     
     flush_output(extend=extend)
     if set_of_errored_remotes:
-        logger.error(f"Error: Failed to retrieve projects from remote(s): {', '.join(set_of_errored_remotes)}")
+        logger.error(f"Error: Failed connection to remote(s): {', '.join(set_of_errored_remotes)}")
 
 def copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile):
     """Copy a profile from one location to another with error handling, including the description.
