@@ -713,23 +713,31 @@ def iterator_over_instances(remote, project=None):
     """
     Iterates over all instances on a given Incus remote, covering all projects or a specific project.
 
-    Returns:    A generator that yields a tuple of project name and instance object for each instance.
+    Returns:    A generator that yields a couple of project name and instance object for each instance.
 
     """
     # Connect to the remote Incus server
     client = get_remote_client(remote)  
 
-    # Iterate over all projects
-    for project in client.projects.all():
-        project_name = project.name
+    if project is None:
+        # Iterate over all projects
+        for my_project in client.projects.all():
+            project_name = my_project.name
 
-        # Create a project-specific client and switch to the current project
-        project_client = get_remote_client(remote, project_name=project_name)
-        project_client.project = project_name
+            # Create a project-specific client and switch to the current project
+            project_client = get_remote_client(remote, project_name=project_name)
+            project_client.project = project_name
 
-        # Iterate over all instances within the current project
+            # Iterate over all instances within the current project
+            for instance in project_client.instances.all():
+                yield project_name, instance  # Yield both project name and instance object for each instance
+    else:
+        project_client = get_remote_client(remote, project_name=project)
+        project_client.project = project
         for instance in project_client.instances.all():
             yield project_name, instance  # Yield both project name and instance object for each instance
+
+
 
 #############################################
 ###### figo instance command functions #####
@@ -844,9 +852,52 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
     if set_of_errored_remotes:
         logger.error(f"Error: Failed to retrieve projects from remote(s): {', '.join(set_of_errored_remotes)}")
 
+def get_pci_addresses (remote):
+    """Get the PCI addresses of the GPUs available on the remote node.
+    
+    Returns:    A list of PCI addresses if successful, None otherwise.
+    """
+    # Determine the command for retrieving available PCI addresses
+    if remote == 'local':
+        try:
+            result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+            result.check_returncode()
+            available_pci_addresses = [line.split()[0] for line in result.stdout.splitlines()]
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error running lspci locally: {e.stderr.strip()}")
+            return None
+    else:
+        # Retrieve SSH connection details from REMOTE_TO_IP_INFO_MAP
+        remote_info = REMOTE_TO_IP_INFO_MAP.get(remote)
+        if not remote_info:
+            logger.error(f"No SSH information found for remote '{remote}'.")
+            return None
+
+        ssh_user = remote_info.get("ssh_user", "ubuntu")
+        ssh_host = remote_info.get("ssh_host")
+        ssh_port = remote_info.get("ssh_port", 22)
+        if not ssh_host:
+            logger.error(f"No SSH host specified for remote '{remote}'.")
+            return None
+
+        # Build SSH command
+        ssh_command = f"ssh -p {ssh_port} {ssh_user}@{ssh_host} 'lspci | grep NVIDIA'"
+        try:
+            result = subprocess.run(ssh_command, capture_output=True, text=True, shell=True)
+            result.check_returncode()
+            available_pci_addresses = [line.split()[0] for line in result.stdout.splitlines()]
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error running lspci on remote '{remote}': {e.stderr.strip()}")
+            return None
+    return available_pci_addresses
+
+
 def return_available_gpu(remote, instance_type):
     """
-    Return a list of available PCI addresses for GPUs on a given remote based on the specified type.
+    Return a list of PCI addresses for GPUs on a given remote based on the specified type.
+
+    These are the GPUs available on the remote for the instance type:
+    intersection of the visible GPUs with the GPUs in the profiles
     
     Parameters:
         remote (str): Name of the remote to check for available GPUs.
@@ -879,39 +930,11 @@ def return_available_gpu(remote, instance_type):
                     if pci_address:
                         profile_pci_addresses.append(pci_address)
 
-    # Determine the command for retrieving available PCI addresses
-    if remote == 'local':
-        try:
-            result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
-            result.check_returncode()
-            available_pci_addresses = [line.split()[0] for line in result.stdout.splitlines()]
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error running lspci locally: {e.stderr.strip()}")
-            return []
-    else:
-        # Retrieve SSH connection details from REMOTE_TO_IP_INFO_MAP
-        remote_info = REMOTE_TO_IP_INFO_MAP.get(remote)
-        if not remote_info:
-            logger.error(f"No SSH information found for remote '{remote}'.")
-            return []
-
-        ssh_user = remote_info.get("ssh_user", "ubuntu")
-        ssh_host = remote_info.get("ssh_host")
-        ssh_port = remote_info.get("ssh_port", 22)
-        if not ssh_host:
-            logger.error(f"No SSH host specified for remote '{remote}'.")
-            return []
-
-        # Build SSH command
-        ssh_command = f"ssh -p {ssh_port} {ssh_user}@{ssh_host} 'lspci | grep NVIDIA'"
-        try:
-            result = subprocess.run(ssh_command, capture_output=True, text=True, shell=True)
-            result.check_returncode()
-            available_pci_addresses = [line.split()[0] for line in result.stdout.splitlines()]
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error running lspci on remote '{remote}': {e.stderr.strip()}")
-            return []
-
+    available_pci_addresses = get_pci_addresses(remote)
+    if available_pci_addresses is None:
+        logger.error(f"Failed to retrieve available PCI addresses from remote '{remote}'.")
+        return []
+    
     # Find intersection of PCI addresses from profiles and available PCI addresses
     available_gpus = list(set(profile_pci_addresses) & set(available_pci_addresses))
     return available_gpus
@@ -962,11 +985,12 @@ def start_instance(instance_name, remote, project):
         if gpu_profiles_for_instance: # there is at least one GPU profile associated with the instance
 
             gpu_list = return_available_gpu(remote, instance_type)
-
+            # this is the total maximum number of GPUs available on the remote for the instance type
+            # intersection of the visible GPUs and the GPUs in the profiles
             total_gpus = len(gpu_list)
 
             running_instances_couple = [
-                i for i in iterator_over_instances(remote, project=project) if i[1].status == "Running"
+                i for i in iterator_over_instances(remote) if i[1].status == "Running"
             ]
             active_gpu_profiles = [
                 profile for my_profile, my_instance in running_instances_couple for profile in my_instance.profiles
@@ -1824,27 +1848,29 @@ def exec_instance_bash(instance_name, remote, project, force=False, timeout=BASH
 ###### figo gpu command functions ###########
 #############################################
 
-def show_gpu_status(client, extend=False):
-    """Show the status of GPUs on the remote node implicitly associated with the client.
+def show_gpu_status(client, remote, extend=False):
+    """Show the status of GPUs on the remote node. 
+    
+    (the remote node is also implicitly associated with the client).
     
     It uses lspci to count NVIDIA GPUs
-    I checks the total number of GPUs, the number of available GPUs, and the active GPU profiles.
+    It checks the total number of GPUs, the number of available GPUs, and the active GPU profiles.
 
     """
-    try:
-        result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error in lspci: {e.stderr.strip()}")
-        return
-    total_gpus = len(result.stdout.strip().split('\n'))
-
-    #TODO BUG: the following code only considers the instances in the project associated with the client
     
-    running_instances = [
-        i for i in client.instances.all() if i.status == "Running"
+    available_pci_addresses = get_pci_addresses(remote)
+    if available_pci_addresses is None:
+        logger.error(f"Failed to retrieve available PCI addresses from remote '{remote}'.")
+        return []
+    total_gpus = len(available_pci_addresses)
+
+    # The following code correctly considers all the instances in all projects on the remote
+
+    running_instances_couple = [
+        i for i in iterator_over_instances(remote) if i[1].status == "Running"
     ]
     active_gpu_profiles = [
-        profile for instance in running_instances for profile in instance.profiles
+        profile for my_profile, my_instance in running_instances_couple for profile in my_instance.profiles
         if profile.startswith("gpu-")
     ]
 
@@ -1897,17 +1923,18 @@ def add_gpu_profile(instance_name, remote='local', project='default'):
             return False
 
         instance_profiles = instance.profiles
+        
+        # we list the profiles of the instance and we keep only the gpu profiles
         gpu_profiles_for_instance = [
             profile for profile in instance_profiles if profile.startswith("gpu-")
         ]
         
-        try:
-            result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error in lspci: {e.stderr.strip()}")
+        available_pci_addresses = get_pci_addresses(remote)
+        if available_pci_addresses is None:
+            logger.error(f"Failed to retrieve available PCI addresses from remote '{remote}'.")
             return False
         
-        total_gpus = len(result.stdout.strip().split('\n'))
+        total_gpus = len(available_pci_addresses)
 
         if len(gpu_profiles_for_instance) >= total_gpus:
             logger.error(f"Instance '{full_instance_name}' already has the maximum number of GPU profiles.")
@@ -1919,6 +1946,8 @@ def add_gpu_profile(instance_name, remote='local', project='default'):
             start_prefix = "gpu-cnt-"
             
         all_profiles = get_all_profiles(client)
+        # we take all GPU profiles on the remote for the specific instance type
+        # we keep only the gpu profiles that are not already assigned to the instance
         available_gpu_profiles = [
             profile for profile in all_profiles if profile.startswith(start_prefix)
             and profile not in instance_profiles
@@ -2026,6 +2055,22 @@ def remove_gpu_profile(instance_name, remote='local', project='default'):
     
     except pylxd.exceptions.LXDAPIException as e:
         logger.error(f"Failed to remove GPU profile from instance '{instance_name}': {e}")
+        return False
+
+def get_gpu_pci_addresses(remote='local'):
+    """Show the PCI addresses of the GPUs on the remote node."""
+    try:
+        logger.info(f"Getting PCI addresses of GPUs on remote '{remote}'...")
+
+        result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
+        gpu_pci_addresses = result.stdout.strip().split('\n')
+
+        logger.info(f"PCI addresses of GPUs on remote '{remote}': {gpu_pci_addresses}")
+
+        return True
+    
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Failed to get PCI addresses of GPUs on remote '{remote}': {e.stderr.strip()}")
         return False
 
 
@@ -3970,6 +4015,28 @@ def check_instance_name(instance_name):
         return False
     return True
 
+def check_remote_name(remote_name):
+    """
+    Check validity of a remote name according to Incus naming conventions.
+
+    Args:
+        remote_name (str): The name of the remote to validate.
+
+    Returns:
+        bool: True if the remote name is valid, False otherwise.
+    """
+    if remote_name is None:
+        return False
+
+    # Remote name may contain lowercase letters, numbers, hyphens, and underscores.
+    # Cannot start or end with a hyphen or underscore.
+    if not re.match(r'^[a-z0-9]+([-_][a-z0-9]+)*$', remote_name):
+        logger.error(f"Error: Invalid remote name '{remote_name}'. Remote names must contain only lowercase letters, "
+                     "numbers, hyphens, and underscores, and cannot start or end with a hyphen or underscore.")
+        return False
+
+    return True
+
 def parse_instance_scope(instance_name, provided_remote, provided_project):
     """Parse the instance name to extract remote, project, and instance.
     
@@ -4612,11 +4679,31 @@ def create_gpu_parser(subparsers):
         "-a", "--all", action="store_true", help="Remove all GPU profiles from the instance."
     )
 
+    # PCI Address command
+    pci_addr_parser = gpu_subparsers.add_parser(
+        "pci_addr",
+        help="Display PCI addresses of GPUs available on a specific remote.",
+        description="Display PCI addresses of GPUs available on a specified remote.\n"
+                    "If no remote is specified, it defaults to 'local'.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo gpu pci_addr my_remote\n"
+               "  figo gpu pci_addr\n"
+    )
+    pci_addr_parser.add_argument(
+        "remote",
+        nargs="?",
+        default="local",
+        help="Specify the remote name for displaying GPU PCI addresses. Defaults to 'local'."
+    )
+
     # Aliases for main parser
     subparsers._name_parser_map["gp"] = gpu_parser
     subparsers._name_parser_map["g"] = gpu_parser
 
     return gpu_parser
+
+
 
 def handle_gpu_command(args, parser_dict):
     """
@@ -4635,7 +4722,7 @@ def handle_gpu_command(args, parser_dict):
 
         client = get_remote_client(remote)
         if client:
-            show_gpu_status(client, extend=args.extend)
+            show_gpu_status(client, remote, extend=args.extend)
         else:
             logger.error(f"Failed to retrieve GPU status for remote '{remote}'.")
     elif args.gpu_command in ["list", "l"]:
@@ -4698,6 +4785,26 @@ def handle_gpu_command(args, parser_dict):
                 logger.info(f"Successfully removed GPU profile(s) from instance '{instance}'.")
             else:
                 logger.error(f"Failed to remove GPU profile(s) from instance '{instance}'.")
+
+        elif args.gpu_command == "pci_addr":
+            # Handle the remote argument and normalize input
+            remote = args.remote
+            if remote and remote.endswith(":"):
+                remote = remote[:-1]  # Remove trailing colon for consistency
+            remote = remote or "local"  # Default to 'local' if not specified
+
+            # Validate the remote name
+            if not check_remote_name(remote):
+                logger.error(f"Error: Invalid remote name '{remote}'.")
+                return
+
+            # Retrieve PCI addresses for GPUs available on the remote
+            pci_addresses = get_gpu_pci_addresses(remote)
+
+            if pci_addresses:
+                logger.info(f"PCI addresses of GPUs on remote '{remote}':\n{pci_addresses}")
+            else:
+                logger.error(f"Failed to retrieve PCI addresses for GPUs on remote '{remote}'.")
 
 
 
