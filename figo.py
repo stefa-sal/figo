@@ -567,13 +567,19 @@ def get_incus_remotes():
     except json.JSONDecodeError:
         raise ValueError("Failed to parse JSON. The output may not be in the expected format.")
 
-def get_projects(remote_name="local"): 
+def get_projects(remote_name="local", timeout=None): 
     """Fetches and returns the list of projects as a JSON object.
     
     Returns:    A list of projects as JSON objects if successful. Otherwise, returns None.
     """
     try:
-        result = subprocess.run(['incus', 'project', 'list', f"{remote_name}:", '--format', 'json'], capture_output=True, text=True)
+        if timeout:
+            result = subprocess.run(['timeout', str(timeout),
+                                     'incus', 'project', 'list', f"{remote_name}:", '--format', 'json'],
+                                     capture_output=True, text=True)
+        else:
+            result = subprocess.run(['incus', 'project', 'list', f"{remote_name}:", '--format', 'json'],
+                                    capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
         #logger.error(f"Error: {e.stderr.strip()}")
         return None
@@ -906,7 +912,6 @@ def return_available_gpu(remote, instance_type):
             logger.error(f"Error running lspci on remote '{remote}': {e.stderr.strip()}")
             return []
 
-    print(available_pci_addresses) # debug
     # Find intersection of PCI addresses from profiles and available PCI addresses
     available_gpus = list(set(profile_pci_addresses) & set(available_pci_addresses))
     return available_gpus
@@ -954,26 +959,11 @@ def start_instance(instance_name, remote, project):
             profile for profile in instance_profiles if profile.startswith("gpu-")
         ]
         
-        if gpu_profiles_for_instance or True: # there is at least one GPU profile # debug
-
-            # # Check GPU availability
-            # try:
-            #     result = subprocess.run('lspci | grep NVIDIA', capture_output=True, text=True, shell=True)
-            # except subprocess.CalledProcessError as e:
-            #     logger.error(f"Error in lspci: {e.stderr.strip()}")
-            #     return False
-            
-            # total_gpus = len(result.stdout.strip().split('\n'))
+        if gpu_profiles_for_instance: # there is at least one GPU profile associated with the instance
 
             gpu_list = return_available_gpu(remote, instance_type)
-            print(gpu_list) # debug
+
             total_gpus = len(gpu_list)
-
-            # return False # debug
-
-            #DONE BUG
-            # it does not consider as running instances the instances in the same project of the instance to be started
-            # so it does not consider GPUs that are taken by instances in different projects
 
             running_instances_couple = [
                 i for i in iterator_over_instances(remote, project=project) if i[1].status == "Running"
@@ -982,9 +972,6 @@ def start_instance(instance_name, remote, project):
                 profile for my_profile, my_instance in running_instances_couple for profile in my_instance.profiles
                 if profile.startswith("gpu-")
             ]
-
-            print(f"Total GPUs: {total_gpus}") # debug
-            print(f"Active GPU profiles: {active_gpu_profiles}") # debug
 
             available_gpus = total_gpus - len(active_gpu_profiles)
             if len(gpu_profiles_for_instance) > available_gpus:
@@ -2249,6 +2236,8 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
     """
     global profiles_instances_dict
 
+    print(f"remote: {remote}, project: {project}, profile_name: {profile_name}, inherited: {inherited}, recurse_instances: {recurse_instances}")  # debug
+
     COLS = [('PROFILE', 25), ('CONTEXT', 25), ('INSTANCES', 80)]
     add_header_line_to_output(COLS)
 
@@ -2282,6 +2271,20 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
                             profiles_instances_dict[(my_remote, profile)] = []
                         profiles_instances_dict[(my_remote, profile)].append((my_project["name"], instance.name))
 
+    if remote:
+        # check if remote exists in the incus remotes
+        if remote not in get_incus_remotes():
+            logger.error(f"Remote '{remote}' not found.")
+            return False
+        # check if the remote is reachable
+        test_projects = get_projects(remote, timeout=4)
+        if not test_projects:
+            logger.error(f"Remote '{remote}' is not reachable.")
+            return False
+
+    # use a set to store the remote nodes that failed to retrieve the projects
+    set_of_errored_remotes = set()
+
     if remote and project:
         remote_client = wrap_get_remote_client(remote, project_name=project, 
                                                raise_project_not_found=True, show_info=False)
@@ -2299,7 +2302,8 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
         list_profiles_specific(remote, project, profile_name, COLS, remote_client=remote_client,
                                recurse_instances=recurse_instances)
 
-    elif remote:  # list all profiles on the remote
+    elif remote:  # list all profiles on the remote as project is not specified
+
         for project in iterator_over_projects(remote):
             remote_client = wrap_get_remote_client(remote, project_name=project["name"], 
                                                    raise_project_not_found=True, show_info=False)
@@ -2344,7 +2348,12 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
                 list_profiles_specific(my_remote_node, project, profile_name, COLS, remote_client=remote_client,
                                        recurse_instances=recurse_instances)
             else: # all the projects
-                for my_project in iterator_over_projects(my_remote_node):
+                all_projects = get_projects(my_remote_node, timeout=4)
+                if not all_projects:
+                    set_of_errored_remotes.add(my_remote_node)
+                    continue
+
+                for my_project in all_projects:
                     remote_client = wrap_get_remote_client(my_remote_node, project_name=my_project["name"], 
                                                            raise_project_not_found=True, show_info=False)
                     if not remote_client:
@@ -2361,6 +2370,8 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
                                            remote_client=remote_client, recurse_instances=recurse_instances)
     
     flush_output(extend=extend)
+    if set_of_errored_remotes:
+        logger.error(f"Error: Failed to retrieve projects from remote(s): {', '.join(set_of_errored_remotes)}")
 
 def copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile):
     """Copy a profile from one location to another with error handling, including the description.
