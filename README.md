@@ -437,214 +437,206 @@ Each command has its own set of subcommands and options.
 
 - **Aliases:** `us`, `u`
 - **Description:** Manage users.
-- **Subcommands:**
-  - **list**  
-    - **Description:** List installed certificates, with options to show detailed information and extend column width for better readability.  
-    - **Syntax:**
 
-      ```bash
-      figo user list [-f | --full] [-e | --extend]
-      ```
+#### Subcommands
 
-    - **Options:**  
-      - `-f, --full`: Show full details of installed certificates.
-      - `-e, --extend`: Extend column width to fit the content.
+- #### figo user list
 
-  - **add**  
-    - **Description:** Add a new user to the system.  
-    - **Syntax:**
+  - **Description:** List installed certificates, with options to show detailed information and extend column width for better readability.
+  - **Syntax:**
+    ```bash
+    figo user list [-f | --full] [-e | --extend]
+    ```
+  - **Options:**
+    - `-f, --full`: Show full details of installed certificates.
+    - `-e, --extend`: Extend column width to fit the content.
 
-      ```bash
-      figo user add username [-c | --cert cert_filename] [-a | --admin] [-w | --wireguard] [-s | --set_vpn] [-p | --project project_name] [-e | --email email] [-n | --name full_name] [-o | --org organization] [-k | --keys]
-      ```
+- #### figo user add
 
-    - **Options:**  
-      - `username`: Username of the new user.
-      - `-c, --cert`: Path to the user's certificate file. If not provided, a new key pair will be generated.
-      - `-a, --admin`: Add user with admin privileges.
-      - `-w, --wireguard`: Generate WireGuard configuration for the user in a `.conf` file.
-      - `-s, --set_vpn`: Set the user's VPN profile into the WireGuard access node.
-      - `-p, --project`: Associate the user with an existing project.
-      - `-e, --email`: User's email address.
-      - `-n, --name`: User's full name.
-      - `-o, --org`: User's organization.
-      - `-k, --keys`: Generate a key pair for SSH access to instances.
+  - **Description:** Add a new user to the system.
+  - **Syntax:**
+    ```bash
+    figo user add username [-c | --cert cert_filename] [-a | --admin] [-w | --wireguard] [-s | --set_vpn] [-p | --project project_name] [-e | --email email] [-n | --name full_name] [-o | --org organization] [-k | --keys]
+    ```
+  - **Options:**
+    - `username`: Username of the new user.
+    - `-c, --cert`: Path to the user's certificate file. If not provided, a new key pair will be generated.
+    - `-a, --admin`: Add user with admin privileges.
+    - `-w, --wireguard`: Generate WireGuard configuration for the user in a `.conf` file.
+    - `-s, --set_vpn`: Set the user's VPN profile into the WireGuard access node.
+    - `-p, --project`: Associate the user with an existing project.
+    - `-e, --email`: User's email address.
+    - `-n, --name`: User's full name.
+    - `-o, --org`: User's organization.
+    - `-k, --keys`: Generate a key pair for SSH access to instances.
 
-  - **grant**  
-    - **Description:** Grant a user access to a specific project.  
-    - **Syntax:**
+- #### figo user grant
 
-      ```bash
-      figo user grant username projectname
-      ```
+  - **Description:** Grant a user access to a specific project.
+  - **Syntax:**
+    ```bash
+    figo user grant username projectname
+    ```
+  - **Options:**
+    - `username`: Username to grant access.
+    - `projectname`: Project name to grant access to.
 
-    - **Options:**  
-      - `username`: Username to grant access.
-      - `projectname`: Project name to grant access to.
+- #### figo user edit
 
-  - **edit**  
-    - **Description:** Edit an existing user's details.  
-    - **Syntax:**
+  - **Description:** Edit an existing user's details.
+  - **Syntax:**
+    ```bash
+    figo user edit username [-e | --email new_email] [-n | --name new_full_name] [-o | --org new_organization]
+    ```
+  - **Options:**
+    - `username`: Username to edit.
+    - `-e, --email`: New email for the user.
+    - `-n, --name`: New full name for the user.
+    - `-o, --org`: New organization for the user.
 
-      ```bash
-      figo user edit username [-e | --email new_email] [-n | --name new_full_name] [-o | --org new_organization]
-      ```
+- #### figo user delete
 
-    - **Options:**  
-      - `username`: Username to edit.
-      - `-e, --email`: New email for the user.
-      - `-n, --name`: New full name for the user.
-      - `-o, --org`: New organization for the user.
-
-  - **delete**  
-    - **Description:** Delete an existing user from the system.  
-    - **Syntax:**
-
-      ```bash
-      figo user delete username [-p | --purge] [-k | --keepfiles]
-      ```
-
-    - **Options:**  
-      - `username`: Username of the user to delete.
-      - `-p, --purge`: Delete associated projects and user files, even if the user does not exist.
-      - `-k, --keepfiles`: Keep the associated files of the user in the users folder.
+  - **Description:** Delete an existing user from the system.
+  - **Syntax:**
+    ```bash
+    figo user delete username [-p | --purge] [-k | --keepfiles]
+    ```
+  - **Options:**
+    - `username`: Username of the user to delete.
+    - `-p, --purge`: Delete associated projects and user files, even if the user does not exist.
+    - `-k, --keepfiles`: Keep the associated files of the user in the users folder.
 
 ### figo remote
 
 - **Aliases:** `re`, `r`
 - **Description:** Manage remotes for the FIGO system, including listing, enrolling, and deleting remote servers.
-- **Subcommands:**
 
-  - **list**
-    - **Description:** List available remotes, with options to show detailed information and adjust column width for better readability.
-    - **Syntax:**
+#### Subcommands
 
-      ```bash
-      figo remote list [-f | --full] [-e | --extend]
-      ```
+- #### figo remote list
 
-    - **Options:**
-      - `-f, --full`: Show full details of available remotes.
-      - `-e, --extend`: Extend column width to fit the content.
+  - **Description:** List available remotes, with options to show detailed information and adjust column width for better readability.
+  - **Syntax:**
+    ```bash
+    figo remote list [-f | --full] [-e | --extend]
+    ```
+  - **Options:**
+    - `-f, --full`: Show full details of available remotes.
+    - `-e, --extend`: Extend column width to fit the content.
+  - **Examples:**
+    ```bash
+    figo remote list
+    figo remote list -f
+    figo remote list --extend
+    ```
 
-    - **Examples:**
-      ```bash
-      figo remote list
-      figo remote list -f
-      figo remote list --extend
-      ```
+- #### figo remote enroll
 
-  - **enroll**
-    - **Description:** Enroll a remote Incus server to set up a connection for managing instances and resources.
-    - **Syntax:**
+  - **Description:** Enroll a remote Incus server to set up a connection for managing instances and resources.
+  - **Syntax:**
+    ```bash
+    figo remote enroll remote_server ip_address [port] [user] [cert_filename] [remote_cert_filename] [--loc_name loc_name]
+    ```
+  - **Options:**
+    - `remote_server`: Name to assign to the remote server.
+    - `ip_address`: IP address or domain name of the remote server.
+    - `port`: Port of the remote server (default: 8443).
+    - `user`: Username for SSH into the remote server (default: `ubuntu`).
+    - `cert_filename`: Path to the client certificate file on the main node (default: `~/.config/incus/client.crt`).
+    - `remote_cert_filename`: Path to the server certificate file on the remote server (default: `/var/lib/incus/server.crt`).
+    - `--loc_name`: Name for saving the client certificate on the remote server (default: `main`).
+  - **Examples:**
+    ```bash
+    figo remote enroll my_remote 192.168.1.100
+    figo remote enroll my_remote 192.168.1.100 8443 ubuntu ~/.config/incus/client.crt /var/lib/incus/server.crt --loc_name main
+    ```
 
-      ```bash
-      figo remote enroll remote_server ip_address [port] [user] [cert_filename] [remote_cert_filename] [--loc_name loc_name]
-      ```
+- #### figo remote delete
 
-    - **Options:**
-      - `remote_server`: Name to assign to the remote server.
-      - `ip_address`: IP address or domain name of the remote server.
-      - `port`: Port of the remote server (default: 8443).
-      - `user`: Username for SSH into the remote server (default: `ubuntu`).
-      - `cert_filename`: Path to the client certificate file on the main node (default: `~/.config/incus/client.crt`).
-      - `remote_cert_filename`: Path to the server certificate file on the remote server (default: `/var/lib/incus/server.crt`).
-      - `--loc_name`: Name for saving the client certificate on the remote server (default: `main`).
-    - **Examples:**
-      ```bash
-      figo remote enroll my_remote 192.168.1.100
-      figo remote enroll my_remote 192.168.1.100 8443 ubuntu ~/.config/incus/client.crt /var/lib/incus/server.crt --loc_name main
-      ```
-
-  - **delete**
-    - **Description:** Delete a specified remote from the system, removing its configuration.
-    - **Syntax:**
-
-      ```bash
-      figo remote delete remote_name
-      ```
-
-    - **Options:**
-      - `remote_name`: The name of the remote to delete.
-
-    - **Examples:**
-      ```bash
-      figo remote delete my_remote
-      figo remote delete test_remote
-      ```
+  - **Description:** Delete a specified remote from the system, removing its configuration.
+  - **Syntax:**
+    ```bash
+    figo remote delete remote_name
+    ```
+  - **Options:**
+    - `remote_name`: The name of the remote to delete.
+  - **Examples:**
+    ```bash
+    figo remote delete my_remote
+    figo remote delete test_remote
+    ```
 
 ### figo project
 
 - **Description:** Manage projects within the federated testbed.
-- **Subcommands:**
-  - **list**
-    - **Description:** List available projects, optionally specifying a remote or user.
-    - **Syntax:**
 
-      ```bash
-      figo project list [scope] [--remote remote_name] [--user user_name] [-e | --extend]
-      ```
+#### Subcommands
 
-    - **Options:**  
-      - `scope`: Scope in the format `remote:project`, `remote:`, or `project.` to limit the listing.
-      - `--remote`: Specify the remote server name.
-      - `--user`: Specify a user to filter the projects by ownership.
-      - `-e, --extend`: Extends column width to fit the content.
+- #### figo project list
 
-  - **create**
-    - **Description:** Create a new project, specifying scope, project name, and user ownership.
-    - **Syntax:**
+  - **Description:** List available projects, optionally specifying a remote or user.
+  - **Syntax:**
+    ```bash
+    figo project list [scope] [--remote remote_name] [--user user_name] [-e | --extend]
+    ```
+  - **Options:**
+    - `scope`: Scope in the format `remote:project`, `remote:`, or `project.` to limit the listing.
+    - `--remote`: Specify the remote server name.
+    - `--user`: Specify a user to filter the projects by ownership.
+    - `-e, --extend`: Extends column width to fit the content.
 
-      ```bash
-      figo project create scope [--project project_name] [--user user_name]
-      ```
+- #### figo project create
 
-    - **Options:**  
-      - `scope`: Scope in the format `remote:project` or `remote:`.
-      - `--project`: Project name, if not provided directly in the scope.
-      - `--user`: Specify the user who will own the project.
+  - **Description:** Create a new project, specifying scope, project name, and user ownership.
+  - **Syntax:**
+    ```bash
+    figo project create scope [--project project_name] [--user user_name]
+    ```
+  - **Options:**
+    - `scope`: Scope in the format `remote:project` or `remote:`.
+    - `--project`: Project name, if not provided directly in the scope.
+    - `--user`: Specify the user who will own the project.
 
-  - **delete**
-    - **Description:** Delete an existing project.
-    - **Syntax:**
+- #### figo project delete
 
-      ```bash
-      figo project delete project_name
-      ```
-
-    - **Options:**  
-      - `project_name`: Name of the project to delete, in the format `remote:project` or `project`.
+  - **Description:** Delete an existing project.
+  - **Syntax:**
+    ```bash
+    figo project delete project_name
+    ```
+  - **Options:**
+    - `project_name`: Name of the project to delete, in the format `remote:project` or `project`.
 
 ### figo vpn
 
 - **Description:** Manage VPN configuration for secure communication and routing.
-- **Subcommands:**
-  - **add route**
-    - **Description:** Add a new route to an existing VPN configuration.
-    - **Syntax:**
 
-      ```bash
-      figo vpn add route dst_address via gateway type vpn_type [target|host] target_or_host [-d dev] [-u user] [-p port]
-      ```
+#### Subcommands
 
-    - **Options:**  
-      - `dst_address`: Destination address in CIDR format (e.g., `10.202.128.0/24`).
-      - `via`: The keyword `via` followed by the gateway IP.
-      - `gateway`: Gateway address (e.g., `10.202.9.2`) without a prefix.
-      - `type`: The keyword `type` followed by the VPN device type, such as `mikrotik` or `linux`.
-      - `target`: The keyword `target` followed by the target identifier (if applicable).
-      - `host`: The keyword `host` followed by the host address.
-      - `target_or_host`: The actual target or host for the VPN configuration.
-      - `-d, --dev`: Device interface (e.g., `vlan403`). Required for Linux routers.
-      - `-u, --user`: SSH username for logging into the node (default: configured SSH user).
-      - `-p, --port`: SSH port for connecting to the VPN host (default: configured SSH port).
+- #### figo vpn add route
 
-    - **Example:** Add a VPN route to a Linux router:
-
-      ```bash
-      figo vpn add route 10.202.128.0/24 via 10.202.9.2 type linux target target-name -d vlan403
-      ```
-
+  - **Description:** Add a new route to an existing VPN configuration.
+  - **Syntax:**
+    ```bash
+    figo vpn add route dst_address via gateway type vpn_type [target|host] target_or_host [-d dev] [-u user] [-p port]
+    ```
+  - **Options:**
+    - `dst_address`: Destination address in CIDR format (e.g., `10.202.128.0/24`).
+    - `via`: The keyword `via` followed by the gateway IP.
+    - `gateway`: Gateway address (e.g., `10.202.9.2`) without a prefix.
+    - `type`: The keyword `type` followed by the VPN device type, such as `mikrotik` or `linux`.
+    - `target`: The keyword `target` followed by the target identifier (if applicable).
+    - `host`: The keyword `host` followed by the host address.
+    - `target_or_host`: The actual target or host for the VPN configuration.
+    - `-d, --dev`: Device interface (e.g., `vlan403`). Required for Linux routers.
+    - `-u, --user`: SSH username for logging into the node (default: configured SSH user).
+    - `-p, --port`: SSH port for connecting to the VPN host (default: configured SSH port).
+  - **Examples:**
+    ```bash
+    # Add a VPN route to a Linux router with specified target and device interface
+    figo vpn add route 10.202.128.0/24 via 10.202.9.2 type linux target target-name -d vlan403
+    ```
+    
 ## Autocompletion
 
 The CLI supports autocompletion using the `argcomplete` library,
