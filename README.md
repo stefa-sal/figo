@@ -327,117 +327,111 @@ Each command has its own set of subcommands and options.
 - **Aliases:** `pr`, `p`
 - **Description:** Manage profiles.
 
-- **Subcommands:**
+#### Subcommands
 
-  - **show**
-    - **Description:** Display detailed information about a specific profile.
-    - **Syntax:**
+- #### figo profile show
 
-      ```bash
-      figo profile show profile_name
-      ```
+  - **Description:** Display detailed information about a specific profile.
+  - **Syntax:**
+    ```bash
+    figo profile show profile_name
+    ```
+  - **Options:**
+    - `profile_name`: The name of the profile to display.
 
-    - **Options:**
-      - `profile_name`: The name of the profile to display.
+  - **Examples:**
+    ```bash
+    # Display details of a specific profile
+    figo profile show my_profile
+    ```
 
-    - **Examples:**
-      ```bash
-      # Display details of a specific profile
-      figo profile show my_profile
-      ```
+- #### figo profile dump
 
-  - **dump**
-    - **Description:** Dump profile(s) to `.yaml` files for backup or inspection.
-    - **Syntax:**
-      
-      ```bash
-      figo profile dump [profile_name] [-a | --all]
-      ```
+  - **Description:** Dump profile(s) to `.yaml` files for backup or inspection.
+  - **Syntax:**
+    ```bash
+    figo profile dump [profile_name] [-a | --all]
+    ```
+  - **Options:**
+    - `profile_name`: Name of the profile to dump. If omitted, use the `--all` option to dump all profiles.
+    - `-a, --all`: Dump all profiles to `.yaml` files in the `./profiles` directory.
+  - **Details:**
+    - The profile data includes only the name, description, config, and devices.
+    - Each dumped profile is saved in the `./profiles` directory with the filename matching the profile name, e.g., `./profiles/my_profile.yaml`.
+    - The directory `./profiles` is created if it does not exist.
+    - Note: This currently only works for local profiles and not for remote profiles.
 
-    - **Options:**
-      - `profile_name`: Name of the profile to dump. If omitted, use the `--all` option to dump all profiles.
-      - `-a, --all`: Dump all profiles to `.yaml` files in the `./profiles` directory.
+  - **Examples:**
+    ```bash
+    # Dump a specific profile to a .yaml file
+    figo profile dump my_profile
 
-    - **Details:**
-      - The profile data includes only the name, description, config, and devices.
-      - Each dumped profile is saved in the `./profiles` directory with the filename matching the profile name, e.g., `./profiles/my_profile.yaml`.
-      - The directory `./profiles` is created if it does not exist.
-      - Note: This currently only works for local profiles and not for remote profiles.
+    # Dump all available local profiles to individual .yaml files in the './profiles' directory
+    figo profile dump --all
+    ```
 
-    - **Examples:**
-      ```bash
-      # Dump a specific profile to a .yaml file
-      figo profile dump my_profile
+- #### figo profile list
 
-      # Dump all available local profiles to individual .yaml files in the './profiles' directory
-      figo profile dump --all
-      ```
-      
-  - **list**
-    - **Description:** List profiles and their associated instances, with options to include inherited profiles, extend column width, and recursively list instances associated with inherited profiles.
-    - **Syntax:**
+  - **Description:** List profiles and their associated instances, with options to include inherited profiles, extend column width, and recursively list instances associated with inherited profiles.
+  - **Syntax:**
+    ```bash
+    figo profile list [scope] [-i | --inherited] [-e | --extend] [-r | --recurse_instances]
+    ```
+  - **Options:**
+    - `scope`: Scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or defaults to `local:default`.
+    - `-i, --inherited`: Include inherited profiles in the listing.
+    - `-e, --extend`: Extend column width to fit the content.
+    - `-r, --recurse_instances`: Recursively list instances associated with inherited profiles.
 
-      ```bash
-      figo profile list [scope] [-i | --inherited] [-e | --extend] [-r | --recurse_instances]
-      ```
+  - **Examples:**
+    ```bash
+    # List profiles with default options
+    figo profile list
+    
+    # List a specific profile with a given scope
+    figo profile list remote:project.profile_name
+    
+    # List profiles, including inherited profiles, with extended column width
+    figo profile list -i --extend
 
-    - **Options:**
-      - `scope`: Scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or defaults to `local:default`.
-      - `-i, --inherited`: Include inherited profiles in the listing.
-      - `-e, --extend`: Extend column width to fit the content.
-      - `-r, --recurse_instances`: Recursively list instances associated with inherited profiles.
+    # List profiles and recursively show instances associated with inherited profiles
+    figo profile list --recurse_instances
+    ```
 
-    - **Examples:**
-      ```bash
-      # List profiles with default options
-      figo profile list
-      
-      # List a specific profile with a given scope
-      figo profile list remote:project.profile_name
-      
-      # List profiles, including inherited profiles, with extended column width
-      figo profile list -i --extend
+- #### figo profile copy
 
-      # List profiles and recursively show instances associated with inherited profiles
-      figo profile list --recurse_instances
-      ```
-      
-  - **copy**
-    - **Description:** Copy a profile to a new profile name or remote/project.
-    - **Syntax:**
+  - **Description:** Copy a profile to a new profile name or remote/project.
+  - **Syntax:**
+    ```bash
+    figo profile copy source_profile [target_profile]
+    ```
+  - **Options:**
+    - `source_profile`: Source profile in the format `remote:project.profile_name` or `project.profile_name` or `profile_name`.
+    - `target_profile`: Target profile in the format `remote:project.profile_name` or `project.profile_name` or `profile_name`.
 
-      ```bash
-      figo profile copy source_profile [target_profile]
-      ```
+  - **Examples:**
+    ```bash
+    figo profile copy remote:project.profile1 remote:project.profile2
+    figo profile copy remote:project.profile1 remote:project
+    figo profile copy profile1 profile2
+    ```
 
-    - **Options:**
-      - `source_profile`: Source profile in the format `remote:project.profile_name` or `project.profile_name` or `profile_name`.
-      - `target_profile`: Target profile in the format `remote:project.profile_name` or `project.profile_name` or `profile_name`.
+- #### figo profile delete
 
-    - **Examples:**
-      ```bash
-      figo profile copy remote:project.profile1 remote:project.profile2
-      figo profile copy remote:project.profile1 remote:project
-      figo profile copy profile1 profile2
-      ```
+  - **Description:** Delete a specific profile from the system.
+  - **Syntax:**
+    ```bash
+    figo profile delete profile_scope
+    ```
+  - **Options:**
+    - `profile_scope`: Profile scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or `profile_name`.
 
-  - **delete**
-    - **Description:** Delete a specific profile from the system.
-    - **Syntax:**
-
-      ```bash
-      figo profile delete profile_scope
-      ```
-
-    - **Options:**
-      - `profile_scope`: Profile scope in the format `remote:project.profile_name`, `remote:project`, `project.profile_name`, or `profile_name`.
-
-    - **Examples:**
-      ```bash
-      figo profile delete remote:project.profile_name
-      figo profile delete project.profile_name
-      figo profile delete profile_name
-      ``` 
+  - **Examples:**
+    ```bash
+    figo profile delete remote:project.profile_name
+    figo profile delete project.profile_name
+    figo profile delete profile_name
+    ```
 
 ### figo user
 
