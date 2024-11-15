@@ -447,6 +447,30 @@ Each command has its own set of subcommands and options.
     figo profile delete project.profile_name
     figo profile delete profile_name
     ```
+- #### figo profile init
+
+  - **Description:** Initialize profiles on a remote by transferring a set of required profiles from `local:default` to `remote:default`. Optionally, specify a custom list of profiles to transfer.
+  - **Syntax:**
+      ```bash
+      figo profile init remote [-f | --profile profiles]
+      ```
+  - **Options:**
+      - `remote`: Name of the remote to initialize. Can be specified as `my_remote` or `my_remote:`.
+      - `-f, --profile`: Comma-separated list of profiles to transfer. Overrides the default list of profiles, which is hard-coded in the figo code.
+  - **Details:**
+      - If the remote already has a profile with the same name, it will not be overwritten.
+      - If no custom list of profiles is provided, the default list of profiles is used.
+  - **Examples:**
+      ```bash
+      # Initialize remote with the default set of profiles
+      figo profile init my_remote
+
+      # Initialize remote with a custom list of profiles
+      figo profile init my_remote -f profile1,profile2,profile3
+
+      # Initialize a remote with the default set, specifying the remote with a colon
+      figo profile init my_remote:
+      ```
 
 ### figo user
 

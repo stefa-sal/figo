@@ -95,6 +95,11 @@ DEFAULT_PREFIX_LEN = 25 # Default prefix length for IP addresses of instances
 DEFAULT_VM_NIC = "enp5s0"  # Default NIC for VM instances
 DEFAULT_CNT_NIC = "eth0"  # Default NIC for container instances
 
+# Default list of profiles to transfer if not provided
+DEFAULT_PROFILES_TO_TRANSFER = ["compute-large", "compute-medium", "compute-small",
+                                "disk-128GB", "disk-64GB",
+                                "ssh-deploy"]
+
 REMOTE_TO_IP_INFO_MAP = {
     "local": {
         "gw": "10.202.8.129",
@@ -2523,6 +2528,51 @@ def delete_profile(remote, project, profile_name):
         logger.error(f"An unexpected error occurred while deleting profile: {e}")
         return False
 
+def initialize_remote_profiles(remote, profiles_to_transfer=None):
+    """
+    Initialize a remote by transferring profiles from local:default to remote:default.
+
+    Parameters:
+        remote (str): Name of the remote to initialize. Can be specified as 'my_remote' or 'my_remote:'.
+        profiles_to_transfer (list, optional): List of profiles to transfer. If None, use the default hard-coded list.
+
+    Returns:
+        bool: True if initialization is successful, False otherwise.
+    """
+    # Use global default profiles if custom profiles are not provided
+    global DEFAULT_PROFILES_TO_TRANSFER
+    profiles_to_transfer = profiles_to_transfer or DEFAULT_PROFILES_TO_TRANSFER
+
+    # Ensure remote name is valid
+    remote = remote.rstrip(":")
+    if not check_remote_name(remote):
+        logger.error(f"Invalid remote name: {remote}")
+        return False
+
+    try:
+        for profile_name in profiles_to_transfer:
+            # Copy the profile from local to the specified remote
+            logger.info(f"Transferring profile '{profile_name}' to remote '{remote}'...")
+            success = copy_profile(
+                source_remote="local",
+                source_project="default",
+                source_profile=profile_name,
+                target_remote=remote,
+                target_project="default",
+                target_profile=profile_name
+            )
+
+            if success:
+                logger.info(f"Profile '{profile_name}' successfully transferred to remote '{remote}'.")
+            else:
+                logger.warning(f"Failed to transfer profile '{profile_name}' to remote '{remote}'.")
+    except Exception as e:
+        logger.error(f"Error during remote profile initialization: {str(e)}")
+        return False
+
+    logger.info(f"Remote '{remote}' successfully initialized with profiles.")
+    return True
+
 
 #############################################
 ###### figo user command functions ##########
@@ -4814,7 +4864,7 @@ def create_profile_parser(subparsers):
     profile_parser = subparsers.add_parser(
         "profile",
         help="Manage profiles",
-        description="Manage and manipulate profiles for instances, including listing, copying, deleting, dumping, and displaying profiles.",
+        description="Manage and manipulate profiles for instances, including listing, copying, deleting, dumping, displaying, and initializing profiles on remotes.",
         epilog="Use 'figo profile <command> -h' for more detailed help on a specific command.",
         formatter_class=argparse.RawTextHelpFormatter
     )
@@ -4835,7 +4885,7 @@ def create_profile_parser(subparsers):
         help="Name of the profile to display. Can include remote and project scope."
     )
 
-    # Profile dump command with options to dump all profiles or a specific profile
+    # Profile dump command
     dump_profiles_parser = profile_subparsers.add_parser(
         "dump",
         help="Dump profiles to .yaml files for backup or inspection.",
@@ -4859,11 +4909,11 @@ def create_profile_parser(subparsers):
         help="Name of the profile to dump. If omitted, use the --all option to dump all profiles."
     )
 
-    # List command with extend option and recursive instance option
+    # List command
     list_parser = profile_subparsers.add_parser(
         "list",
         aliases=["l"],
-        help="List profiles and associated instances.",
+        help="List profiles and their associated instances.",
         description="List profiles and their associated instances.\n"
                     "You can specify a scope to filter by remote, project, or profile.\n"
                     "Use --recurse_instances to recursively list instances associated with inherited profiles.",
@@ -4922,11 +4972,35 @@ def create_profile_parser(subparsers):
         help="Profile scope in the format 'remote:project.profile_name', 'remote:project', 'project.profile_name', or 'profile_name'."
     )
 
+    # Init command
+    init_parser = profile_subparsers.add_parser(
+        "init",
+        help="Initialize profiles on a remote from local:default.",
+        description="Initialize a remote by transferring a set of required profiles from 'local:default' to 'remote:default'.\n"
+                    "Optionally, specify a custom list of profiles to be transferred using the -f/--profile option.\n"
+                    "The custom list of profiles overrides the default list of profiles, which is hard-coded in the figo code.\n"
+                    "If the remote already has a profile with the same name, it will not be overwritten.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo profile init my_remote\n"
+               "  figo profile init my_remote:\n"
+               "  figo profile init my_remote -f profile1,profile2,profile3"
+    )
+    init_parser.add_argument(
+        "remote",
+        help="Name of the remote to initialize. Can be specified as 'my_remote' or 'my_remote:'."
+    )
+    init_parser.add_argument(
+        "-f", "--profile",
+        help="Comma-separated list of profiles to transfer. Overrides the default list of profiles."
+    )
+
     # Aliases for main parser
     subparsers._name_parser_map["pr"] = profile_parser
     subparsers._name_parser_map["p"] = profile_parser
 
     return profile_parser
+
 
 def parse_profile_scope(profile_scope, assign_defaults=True):
     """Parse a profile scope string and return remote, project, and profile names.
@@ -5043,6 +5117,29 @@ def handle_profile_command(args, parser_dict):
             return
 
         delete_profile(remote, project, profile)
+
+    elif args.profile_command == "init":
+        # Validate and parse the remote
+        remote = args.remote
+        if ":" in remote:
+            remote = remote.rstrip(":")
+
+        if not check_remote_name(remote):
+            logger.error(f"Invalid remote name: '{remote}'.")
+            return
+
+        # Parse the list of profiles
+        profiles_to_transfer = args.profile.split(",") if args.profile else None
+
+        # Proceed with initialization
+        try:
+            result = initialize_remote_profiles(remote, profiles_to_transfer)
+            if result:
+                logger.info(f"Successfully initialized profiles on remote '{remote}'.")
+            else:
+                logger.error(f"Failed to initialize profiles on remote '{remote}'.")
+        except Exception as e:
+            logger.error(f"Error during initialization of profiles on remote '{remote}': {str(e)}")
 
 
 #############################################
