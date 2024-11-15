@@ -1439,7 +1439,7 @@ def get_all_profiles(client):
     """Get all available profiles."""
     return [profile.name for profile in client.profiles.all()]
 
-def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote):
+def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote, mode="next"):
     """
     Determine the IP address and gateway for an instance based on inputs and defaults.
 
@@ -1447,6 +1447,7 @@ def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote):
     - ip_address_and_prefix_len: A string containing the IP address and prefix length (e.g., "192.168.1.10/24").
     - gw_address: The gateway address, if provided.
     - remote: The remote from which the IP address and gateway are to be assigned.
+    - mode: The mode for assigning the IP address (can be "next" or "hole").
 
     Returns:
     A tuple containing (ip_address_with_prefix, gw_address)
@@ -1468,7 +1469,7 @@ def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote):
     # If IP address is not provided, assign one
     if ip_address_and_prefix_len is None:
 
-        ip_address = assign_ip_address(remap_remote, mode="next")
+        ip_address = assign_ip_address(remap_remote, mode=mode)
         prefix_len = get_prefix_len(remap_remote)
     else:
         ip_address, prefix_len = ip_address_and_prefix_len.split('/')
@@ -1503,7 +1504,7 @@ def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote):
 
 def create_instance(instance_name, image, remote_name, project, instance_type, 
                     ip_address_and_prefix_len=None, gw_address=None, nic_device_name=None,
-                    profiles=[], create_project_flag=False):
+                    profiles=[], create_project_flag=False, hole=False):
     """Create a new instance from a local or remote image with specified configurations.
 
     It assigns a static IP address and gateway to the instance.
@@ -1518,6 +1519,9 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
     - gw_address: Gateway address for the instance.
     - nic_device_name: Optional NIC device name for the instance.
     - instance_size: Optional size profile for the instance.
+    - create_project_flag: If True, create the project if it does not exist.
+    - hole: If True, assign the first available hole starting from the base IP address 
+      otherwise assign the next IP address after the highest assigned.
 
     Returns:
     True if the instance was created successfully, False otherwise.
@@ -1610,9 +1614,11 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
             device_name = DEFAULT_VM_NIC if instance_type == "vm" else DEFAULT_CNT_NIC
         else:
             device_name = nic_device_name  # Use the specified NIC device name
-
+        
+        my_mode = "hole" if hole else "next"
         try:
-            ip_address_and_prefix_len, gw_address = get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote_name)
+            ip_address_and_prefix_len, gw_address = get_ip_and_gw(ip_address_and_prefix_len, 
+                                                                  gw_address, remote_name, mode=my_mode)
         except ValueError as e:
             logger.error(f"Failed to assign IP address and gateway: {e}")
             return False
@@ -4204,7 +4210,7 @@ def create_instance_parser(subparsers):
         action="store_true",
         help="Assign the first available IP address hole in the range, rather than the next sequential IP."
     )
-    
+
     add_common_arguments(create_parser)
 
     # Delete command
@@ -4449,6 +4455,11 @@ def handle_instance_command(args, parser_dict):
                 set_ip(instance, remote, project, 
                     ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic, hole=args.hole)
             elif args.instance_command in ["create", "c"]:
+                # if args.hole and args.ip return error
+                if args.hole and args.ip:
+                    logger.error("Error: Cannot use both --hole and --ip options together.")
+                    return
+
                 image = parse_image(args.image)
                 if image is None:
                     return  # Error already printed by parse_image
@@ -4463,11 +4474,12 @@ def handle_instance_command(args, parser_dict):
                 # Pass the --make_project option as create_project to create_instance
                 create_instance(instance, image, remote, project, instance_type,
                                 ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic,
-                                profiles=profiles, create_project_flag=args.make_project)
+                                profiles=profiles, create_project_flag=args.make_project, hole=args.hole)
             elif args.instance_command in ["delete", "del", "d"]:
                 delete_instance(instance, remote, project, force=args.force)
             elif args.instance_command in ["bash", "b"]:
-                exec_instance_bash(instance, remote, project, force=args.force, timeout=args.timeout, max_attempts=args.attempts)
+                exec_instance_bash(instance, remote, project, force=args.force, timeout=args.timeout,
+                                   max_attempts=args.attempts)
             else:
                 logger.error(f"Unknown instance subcommand: {args.instance_command}")
 
