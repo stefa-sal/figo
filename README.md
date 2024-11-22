@@ -31,13 +31,13 @@ figo [command] [subcommand] [options]
 
 **Commands:**
 
-- `figo instance`
-- `figo gpu`
-- `figo profile`
-- `figo user`
-- `figo remote`
-- `figo project`
-- `figo vpn`
+- [`figo instance`](#figo-instance)
+- [`figo gpu`](#figo-gpu)
+- [`figo profile`](#figo-profile)
+- [`figo user`](#figo-user)
+- [`figo remote`](#figo-remote)
+- [`figo project`](#figo-project)
+- [`figo vpn`](#figo-vpn)
 
 Each command has its own set of subcommands and options.
 
@@ -48,9 +48,19 @@ Each command has its own set of subcommands and options.
 - **Aliases:** `in`, `i`
 - **Description:** Manage instances, including creating, listing, starting, stopping, setting IP addresses, setting keys, and executing bash commands.
 
-#### Subcommands
+#### Subcommands:
+- [`figo instance list`](#figo-instance-list)
+- [`figo instance start`](#figo-instance-start)
+- [`figo instance stop`](#figo-instance-stop)
+- [`figo instance set_key`](#figo-instance-set_key)
+- [`figo instance set_ip`](#figo-instance-set_ip)
+- [`figo instance create`](#figo-instance-create)
+- [`figo instance delete`](#figo-instance-delete)
+- [`figo instance bash`](#figo-instance-bash)
 
-- #### figo instance list
+#### Subcommands details
+
+- #### `figo instance list`
 
   - **Description:** List instances, with options to specify a scope, remote, and project. Use the `--full` option to display detailed information.
   - **Syntax:**
@@ -72,7 +82,7 @@ Each command has its own set of subcommands and options.
     figo instance list -f --extend
     ```
 
-- #### figo instance start
+- #### `figo instance start`
 
   - **Description:** Start a specific instance, with options to specify remote and project scope.
   - **Syntax:**
@@ -91,7 +101,7 @@ Each command has its own set of subcommands and options.
     figo instance start instance_name -r remote_name -p project_name
     ```
 
-- #### figo instance stop
+- #### `figo instance stop`
 
   - **Description:** Stop a specific instance or all instances in a specified scope.
   - **Syntax:**
@@ -112,7 +122,7 @@ Each command has its own set of subcommands and options.
     figo instance stop project. -a
     ```
 
-- #### figo instance set_key
+- #### `figo instance set_key`
 
   - **Description:** Set a public key for a user in a specific instance.
   - **Syntax:**
@@ -135,7 +145,7 @@ Each command has its own set of subcommands and options.
     figo instance set_key instance_name key_filename -r remote_name -p project_name
     ```
 
-- #### figo instance set_ip
+- #### `figo instance set_ip`
 
   - **Description:** Set a static IP address and gateway for a stopped instance. If an IP address is not provided, an available IP address is assigned. By default, assigns the next IP address after the highest assigned IP; with `--hole`, assigns the first available gap in the IP range.
   - **Syntax:**
@@ -159,7 +169,7 @@ Each command has its own set of subcommands and options.
     figo instance set_ip remote:project.instance_name
     ```
 
-- #### figo instance create
+- #### `figo instance create`
 
   - **Description:** Create a new instance with optional specifications for image, type, profiles, and IP settings. If the IP address is not provided, an available IP address is automatically assigned. By default, assigns the next IP after the highest assigned IP; with `--hole`, assigns the first available gap in the IP range.
   - **Syntax:**
@@ -190,7 +200,7 @@ Each command has its own set of subcommands and options.
     figo instance create instance_name images:alpine/3.15 -m --hole
     ```
 
-- #### figo instance delete
+- #### `figo instance delete`
 
   - **Description:** Delete a specific instance, with an option to force delete if the instance is running.
   - **Syntax:**
@@ -210,13 +220,15 @@ Each command has its own set of subcommands and options.
     figo instance delete instance_name -r remote_name -p project_name
     ```
 
-- #### figo instance bash
+- #### `figo instance bash`
 
   - **Description:** Execute bash in a specific instance, with an option to start the instance if it is not running.
   - **Syntax:**
 
     ```bash
-    figo instance bash instance_name [-f | --force] [-t timeout] [-a attempts] [-r remote] [-p project]
+    figo instance bash instance
+
+_name [-f | --force] [-t timeout] [-a attempts] [-r remote] [-p project]
     ```
 
   - **Options:**
@@ -231,15 +243,22 @@ Each command has its own set of subcommands and options.
     figo instance bash remote:project.instance_name
     figo instance bash instance_name -f -r remote_name -p project_name
     ```
-      
+
 ### figo gpu
 
 - **Aliases:** `gp`, `g`
 - **Description:** Manage GPUs in instances within the federated testbed.
 
-#### Subcommands
+#### Subcommands:
+- [`figo gpu status`](#figo-gpu-status)
+- [`figo gpu list`](#figo-gpu-list)
+- [`figo gpu add`](#figo-gpu-add)
+- [`figo gpu remove`](#figo-gpu-remove)
+- [`figo gpu pci_addr`](#figo-gpu-pci_addr)
 
-- #### figo gpu status
+#### Subcommands details
+
+- #### `figo gpu status`
 
   - **Description**: Display the status of GPUs on the specified remote or local system.
   - **Syntax**:
@@ -256,7 +275,7 @@ Each command has its own set of subcommands and options.
       figo gpu status --extend
       ```
 
-- #### figo gpu list
+- #### `figo gpu list`
 
   - **Description**: List all GPU profiles configured on a specified remote or locally.
   - **Syntax**:
@@ -272,22 +291,19 @@ Each command has its own set of subcommands and options.
       figo gpu list my_remote:
       figo gpu list --extend
       ```
-    
-- #### figo gpu add
+
+- #### `figo gpu add`
 
   - **Description:** Add a GPU profile to a specific instance. The instance name can include remote and project scope in the format `remote:project.instance_name`. If not provided, use the `-r/--remote` and `-p/--project` options.
   - **Syntax:**
-
     ```bash
     figo gpu add instance_name [-p | --project project_name] [-r | --remote remote_name] [-u | --user user_name]
     ```
-
   - **Options:**
     - `instance_name`: The name of the instance to which the GPU profile will be added. Can include remote and project scope.
     - `-p, --project`: Specify the project name for the instance.
     - `-r, --remote`: Specify the remote Incus server name.
     - `-u, --user`: Specify the user to infer the project from.
-
   - **Examples:**
     ```bash
     figo gpu add my_instance
@@ -297,22 +313,19 @@ Each command has its own set of subcommands and options.
     figo gpu add my_instance -u user_name
     ```
 
-- #### figo gpu remove
+- #### `figo gpu remove`
 
   - **Description:** Remove GPU profiles from a specific instance. Optionally, remove all profiles. The instance name can include remote and project scope in the format `remote:project.instance_name`. If not provided, use the `-r/--remote` and `-p/--project` options.
   - **Syntax:**
-
     ```bash
     figo gpu remove instance_name [-p | --project project_name] [-r | --remote remote_name] [-u | --user user_name] [--all]
     ```
-
   - **Options:**
     - `instance_name`: The name of the instance from which the GPU profile will be removed. Can include remote and project scope.
     - `-p, --project`: Specify the project name for the instance.
     - `-r, --remote`: Specify the remote Incus server name.
     - `-u, --user`: Specify the user to infer the project from.
     - `--all`: Remove all GPU profiles from the specified instance.
-
   - **Examples:**
     ```bash
     figo gpu remove my_instance
@@ -322,7 +335,7 @@ Each command has its own set of subcommands and options.
     figo gpu remove my_instance -u user_name
     ```
 
-- #### figo gpu pci_addr
+- #### `figo gpu pci_addr`
 
   - **Description**: Display PCI addresses of GPUs available on a specific remote.
   - **Syntax**:
@@ -482,14 +495,22 @@ Each command has its own set of subcommands and options.
       # Initialize a remote with the default set, specifying the remote with a colon
       figo profile init my_remote:
       ```
+
 ### figo user
 
 - **Aliases:** `us`, `u`
 - **Description:** Manage users.
 
-#### Subcommands
+#### Subcommands:
+- [`figo user list`](#figo-user-list)
+- [`figo user add`](#figo-user-add)
+- [`figo user grant`](#figo-user-grant)
+- [`figo user edit`](#figo-user-edit)
+- [`figo user delete`](#figo-user-delete)
 
-- #### figo user list
+#### Subcommands details
+
+- #### `figo user list`
 
   - **Description:** List installed certificates, with options to show detailed information and extend column width for better readability.
   - **Syntax:**
@@ -499,8 +520,14 @@ Each command has its own set of subcommands and options.
   - **Options:**
     - `-f, --full`: Show full details of installed certificates.
     - `-e, --extend`: Extend column width to fit the content.
+  - **Examples:**
+    ```bash
+    figo user list
+    figo user list --full
+    figo user list --extend
+    ```
 
-- #### figo user add
+- #### `figo user add`
 
   - **Description:** Add a new user to the system.
   - **Syntax:**
@@ -518,8 +545,14 @@ Each command has its own set of subcommands and options.
     - `-n, --name`: User's full name.
     - `-o, --org`: User's organization.
     - `-k, --keys`: Generate a key pair for SSH access to instances.
+  - **Examples:**
+    ```bash
+    figo user add john_doe -e john@example.com -n "John Doe" -o "Example Corp"
+    figo user add alice -p project1 -a
+    figo user add jane --wireguard
+    ```
 
-- #### figo user grant
+- #### `figo user grant`
 
   - **Description:** Grant a user access to a specific project.
   - **Syntax:**
@@ -529,8 +562,13 @@ Each command has its own set of subcommands and options.
   - **Options:**
     - `username`: Username to grant access.
     - `projectname`: Project name to grant access to.
+  - **Examples:**
+    ```bash
+    figo user grant john_doe project1
+    figo user grant alice project2
+    ```
 
-- #### figo user edit
+- #### `figo user edit`
 
   - **Description:** Edit an existing user's details.
   - **Syntax:**
@@ -542,8 +580,13 @@ Each command has its own set of subcommands and options.
     - `-e, --email`: New email for the user.
     - `-n, --name`: New full name for the user.
     - `-o, --org`: New organization for the user.
+  - **Examples:**
+    ```bash
+    figo user edit john_doe -e john.doe@example.com -n "Johnathan Doe" -o "Example Corp"
+    figo user edit alice --org "New Organization"
+    ```
 
-- #### figo user delete
+- #### `figo user delete`
 
   - **Description:** Delete an existing user from the system.
   - **Syntax:**
@@ -554,15 +597,26 @@ Each command has its own set of subcommands and options.
     - `username`: Username of the user to delete.
     - `-p, --purge`: Delete associated projects and user files, even if the user does not exist.
     - `-k, --keepfiles`: Keep the associated files of the user in the users folder.
+  - **Examples:**
+    ```bash
+    figo user delete john_doe
+    figo user delete alice --purge
+    figo user delete jane -k
+    ```
 
 ### figo remote
 
 - **Aliases:** `re`, `r`
 - **Description:** Manage remotes for the FIGO system, including listing, enrolling, and deleting remote servers.
 
-#### Subcommands
+#### Subcommands:
+- [`figo remote list`](#figo-remote-list)
+- [`figo remote enroll`](#figo-remote-enroll)
+- [`figo remote delete`](#figo-remote-delete)
 
-- #### figo remote list
+#### Subcommands details
+
+- #### `figo remote list`
 
   - **Description:** List available remotes, with options to show detailed information and adjust column width for better readability.
   - **Syntax:**
@@ -575,11 +629,11 @@ Each command has its own set of subcommands and options.
   - **Examples:**
     ```bash
     figo remote list
-    figo remote list -f
+    figo remote list --full
     figo remote list --extend
     ```
 
-- #### figo remote enroll
+- #### `figo remote enroll`
 
   - **Description:** Enroll a remote Incus server to set up a connection for managing instances and resources.
   - **Syntax:**
@@ -600,7 +654,7 @@ Each command has its own set of subcommands and options.
     figo remote enroll my_remote 192.168.1.100 8443 ubuntu ~/.config/incus/client.crt /var/lib/incus/server.crt --loc_name main
     ```
 
-- #### figo remote delete
+- #### `figo remote delete`
 
   - **Description:** Delete a specified remote from the system, removing its configuration.
   - **Syntax:**
@@ -619,9 +673,14 @@ Each command has its own set of subcommands and options.
 
 - **Description:** Manage projects within the federated testbed.
 
-#### Subcommands
+#### Subcommands:
+- [`figo project list`](#figo-project-list)
+- [`figo project create`](#figo-project-create)
+- [`figo project delete`](#figo-project-delete)
 
-- #### figo project list
+#### Subcommands details
+
+- #### `figo project list`
 
   - **Description:** List available projects, optionally specifying a remote or user.
   - **Syntax:**
@@ -632,9 +691,16 @@ Each command has its own set of subcommands and options.
     - `scope`: Scope in the format `remote:project`, `remote:`, or `project.` to limit the listing.
     - `--remote`: Specify the remote server name.
     - `--user`: Specify a user to filter the projects by ownership.
-    - `-e, --extend`: Extends column width to fit the content.
+    - `-e, --extend`: Extend column width to fit the content.
+  - **Examples:**
+    ```bash
+    figo project list
+    figo project list remote:project
+    figo project list --remote my_remote
+    figo project list --user my_user --extend
+    ```
 
-- #### figo project create
+- #### `figo project create`
 
   - **Description:** Create a new project, specifying scope, project name, and user ownership.
   - **Syntax:**
@@ -645,8 +711,13 @@ Each command has its own set of subcommands and options.
     - `scope`: Scope in the format `remote:project` or `remote:`.
     - `--project`: Project name, if not provided directly in the scope.
     - `--user`: Specify the user who will own the project.
+  - **Examples:**
+    ```bash
+    figo project create my_remote:my_project --user my_user
+    figo project create my_remote: --project new_project
+    ```
 
-- #### figo project delete
+- #### `figo project delete`
 
   - **Description:** Delete an existing project.
   - **Syntax:**
@@ -655,14 +726,24 @@ Each command has its own set of subcommands and options.
     ```
   - **Options:**
     - `project_name`: Name of the project to delete, in the format `remote:project` or `project`.
+  - **Examples:**
+    ```bash
+    figo project delete my_remote:my_project
+    figo project delete project_name
+    ```
+
+---
 
 ### figo vpn
 
 - **Description:** Manage VPN configuration for secure communication and routing.
 
-#### Subcommands
+#### Subcommands:
+- [`figo vpn add route`](#figo-vpn-add-route)
 
-- #### figo vpn add route
+#### Subcommands details
+
+- #### `figo vpn add route`
 
   - **Description:** Add a new route to an existing VPN configuration.
   - **Syntax:**
@@ -682,10 +763,9 @@ Each command has its own set of subcommands and options.
     - `-p, --port`: SSH port for connecting to the VPN host (default: configured SSH port).
   - **Examples:**
     ```bash
-    # Add a VPN route to a Linux router with specified target and device interface
     figo vpn add route 10.202.128.0/24 via 10.202.9.2 type linux target target-name -d vlan403
+    figo vpn add route 192.168.0.0/16 via 192.168.1.1 type mikrotik host my-vpn-host
     ```
-
 ## Autocompletion
 
 The CLI supports autocompletion using the `argcomplete` library,
