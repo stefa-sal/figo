@@ -342,9 +342,17 @@ Each command has its own set of subcommands and options.
 - **Aliases:** `pr`, `p`
 - **Description:** Manage profiles.
 
-#### Subcommands
+#### Subcommands:
+- [`figo profile show`](#figo-profile-show)
+- [`figo profile dump`](#figo-profile-dump)
+- [`figo profile list`](#figo-profile-list)
+- [`figo profile copy`](#figo-profile-copy)
+- [`figo profile delete`](#figo-profile-delete)
+- [`figo profile init`](#figo-profile-init)
 
-- #### figo profile show
+#### Subcommands details
+
+- #### `figo profile show`
 
   - **Description:** Display detailed information about a specific profile.
   - **Syntax:**
@@ -360,7 +368,7 @@ Each command has its own set of subcommands and options.
     figo profile show my_profile
     ```
 
-- #### figo profile dump
+- #### `figo profile dump`
 
   - **Description:** Dump profile(s) to `.yaml` files for backup or inspection.
   - **Syntax:**
@@ -370,6 +378,7 @@ Each command has its own set of subcommands and options.
   - **Options:**
     - `profile_name`: Name of the profile to dump. If omitted, use the `--all` option to dump all profiles.
     - `-a, --all`: Dump all profiles to `.yaml` files in the `./profiles` directory.
+
   - **Details:**
     - The profile data includes only the name, description, config, and devices.
     - Each dumped profile is saved in the `./profiles` directory with the filename matching the profile name, e.g., `./profiles/my_profile.yaml`.
@@ -385,7 +394,7 @@ Each command has its own set of subcommands and options.
     figo profile dump --all
     ```
 
-- #### figo profile list
+- #### `figo profile list`
 
   - **Description:** List profiles and their associated instances, with options to include inherited profiles, extend column width, and recursively list instances associated with inherited profiles.
   - **Syntax:**
@@ -413,7 +422,7 @@ Each command has its own set of subcommands and options.
     figo profile list --recurse_instances
     ```
 
-- #### figo profile copy
+- #### `figo profile copy`
 
   - **Description:** Copy a profile to a new profile name or remote/project.
   - **Syntax:**
@@ -431,7 +440,7 @@ Each command has its own set of subcommands and options.
     figo profile copy profile1 profile2
     ```
 
-- #### figo profile delete
+- #### `figo profile delete`
 
   - **Description:** Delete a specific profile from the system.
   - **Syntax:**
@@ -447,7 +456,8 @@ Each command has its own set of subcommands and options.
     figo profile delete project.profile_name
     figo profile delete profile_name
     ```
-- #### figo profile init
+
+- #### `figo profile init`
 
   - **Description:** Initialize profiles on a remote by transferring a set of required profiles from `local:default` to `remote:default`. Optionally, specify a custom list of profiles to transfer.
   - **Syntax:**
@@ -460,6 +470,7 @@ Each command has its own set of subcommands and options.
   - **Details:**
       - If the remote already has a profile with the same name, it will not be overwritten.
       - If no custom list of profiles is provided, the default list of profiles is used.
+
   - **Examples:**
       ```bash
       # Initialize remote with the default set of profiles
@@ -471,7 +482,6 @@ Each command has its own set of subcommands and options.
       # Initialize a remote with the default set, specifying the remote with a colon
       figo profile init my_remote:
       ```
-
 ### figo user
 
 - **Aliases:** `us`, `u`
