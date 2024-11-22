@@ -742,7 +742,30 @@ def iterator_over_instances(remote, project=None):
         for instance in project_client.instances.all():
             yield project_name, instance  # Yield both project name and instance object for each instance
 
+def exec_command(instance, command):
+    """
+    Execute a command in an instance and handle the output and errors.
 
+    Args:
+        instance: The instance object where the command will be executed.
+        command: List of command arguments to execute (e.g., ['ls', '-la']).
+
+    Returns:
+        tuple: (exit_code, stdout, stderr)
+            - exit_code: Integer, 0 if the command was successful, non-zero otherwise.
+            - stdout: Decoded string containing the command's standard output.
+            - stderr: Decoded string containing the command's standard error.
+
+    Raises:
+        Exception: If there is an issue executing the command or accessing the instance.
+    """
+    try:
+        result = instance.execute(command)
+        stdout = result.stdout.decode("utf-8").strip()
+        stderr = result.stderr.decode("utf-8").strip()
+        return result.exit_code, stdout, stderr
+    except Exception as e:
+        raise Exception(f"Error executing command '{' '.join(command)}': {e}")
 
 #############################################
 ###### figo instance command functions #####
@@ -1137,35 +1160,21 @@ def stop_all_instances(remote_node, project_name):
 
 
 def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', folder='.users', force=False):
-    """Set a public key in the specified instance in the authorized_keys file of the specified user.
-    
-    Args:
-    - instance_name: Name of the instance.
-    - remote: Remote server name.
-    - project: Project name.
-    - key_filename: Filename of the public key on the host.
-    - login: Login name of the user (default: 'ubuntu') for which we set the key.
-    - folder: Folder path where the key file is located (default: '.users').
-    - force: If True, start the instance if it's not running and stop it after setting the key.
-
-    Returns: True if the key was set successfully, False otherwise.
     """
+    Set a public key in the specified instance in the authorized_keys file of the specified user.
 
-    def exec_command(instance, command):
-        """Execute a command in the instance.
-        
-        Returns: True if the command was successful, False otherwise.
-        """
-        try:
-            exec_result = instance.execute(command)
-            if exec_result.exit_code != 0:
-                logger.error(f"Error executing command '{' '.join(command)}': {exec_result.stderr}")
-                return False
-            return True
-        except Exception as e:
-            logger.error(f"Exception while executing command '{' '.join(command)}': {e}")
-            return False
+    Args:
+        instance_name: Name of the instance.
+        remote: Remote server name.
+        project: Project name.
+        key_filename: Filename of the public key on the host.
+        login: Login name of the user (default: 'ubuntu') for which we set the key.
+        folder: Folder path where the key file is located (default: '.users').
+        force: If True, start the instance if it's not running and stop it after setting the key.
 
+    Returns:
+        True if the key was set successfully, False otherwise.
+    """
     try:
         # Full path to the key file
         key_filepath = f"{folder}/{key_filename}"
@@ -1174,78 +1183,141 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
         with open(key_filepath, 'r') as key_file:
             public_key = key_file.read().strip()
 
-        # Get the specified instance in project and remote  
+        # Get the specified instance in project and remote
         remote_client = get_remote_client(remote, project_name=project)
         if not remote_client:
             logger.error(f"Failed to connect to remote '{remote}' and project '{project}'.")
             return False
         instance = remote_client.instances.get(instance_name)
 
-        # Check if the key already exists in authorized_keys
-        try:
-            existing_keys = instance.files.get(f'/home/{login}/.ssh/authorized_keys').decode('utf-8')
-            logger.info(f"Fetched existing authorized_keys from /home/{login}/.ssh/authorized_keys in instance '{instance_name}'.")
-            
-            if public_key in existing_keys:
-                logger.info(f"Public key from '{key_filepath}' is already present in /home/{login}/.ssh/authorized_keys.")
-                return True  # Key already exists, no need to proceed further
-
-        except pylxd.exceptions.NotFound:
-            # No authorized_keys file exists, we can proceed
-            logger.info(f"No authorized_keys file found for {login}, proceeding with adding the key.")
-
         was_started = False
-    
+
         # Check if the instance is running
         if instance.status.lower() != "running":
             if force:
-                # Start the instance if it is not running
                 was_started = start_instance(instance.name, remote, project)
                 if not was_started:
-                    logger.error(f"Error: Instance '{instance_name}' failed to start")
+                    logger.error(f"Error: Instance '{instance_name}' failed to start.")
                     return False
             else:
                 logger.error(f"Error: Instance '{instance_name}' is not running.")
                 return False
 
+        # Check if the key already exists in authorized_keys
+        exit_code, stdout, _ = exec_command(instance, ['cat', f'/home/{login}/.ssh/authorized_keys'])
+        if exit_code == 0:
+            existing_keys = stdout.splitlines()
+            if public_key in existing_keys:
+                logger.info(f"Public key from '{key_filepath}' is already present in /home/{login}/.ssh/authorized_keys.")
+                return True
+        else:
+            logger.info(f"No authorized_keys file found for {login}, proceeding with adding the key.")
+
         # Create .ssh directory
-        if not exec_command(instance, ['mkdir', '-p', f'/home/{login}/.ssh']):
+        exit_code, _, _ = exec_command(instance, ['mkdir', '-p', f'/home/{login}/.ssh'])
+        if exit_code != 0:
             return False
 
         # Create authorized_keys file if not present
-        if not exec_command(instance, ['touch', f'/home/{login}/.ssh/authorized_keys']):
+        exit_code, _, _ = exec_command(instance, ['touch', f'/home/{login}/.ssh/authorized_keys'])
+        if exit_code != 0:
             return False
 
         # Set permissions
-        if not exec_command(instance, ['chmod', '600', f'/home/{login}/.ssh/authorized_keys']):
+        exit_code, _, _ = exec_command(instance, ['chmod', '600', f'/home/{login}/.ssh/authorized_keys'])
+        if exit_code != 0:
             return False
-        if not exec_command(instance, ['chown', f'{login}:{login}', f'/home/{login}/.ssh/authorized_keys']):
+
+        exit_code, _, _ = exec_command(instance, ['chown', f'{login}:{login}', f'/home/{login}/.ssh/authorized_keys'])
+        if exit_code != 0:
             return False
 
         # Add the public key to authorized_keys
-        if not exec_command(instance, ['sh', '-c', f'echo "{public_key}" >> /home/{login}/.ssh/authorized_keys']):
+        exit_code, _, _ = exec_command(
+            instance, ['sh', '-c', f'echo "{public_key}" >> /home/{login}/.ssh/authorized_keys']
+        )
+        if exit_code != 0:
             return False
 
         logger.info(f"Public key from '{key_filepath}' added to /home/{login}/.ssh/authorized_keys in instance '{instance_name}'.")
 
         if force and was_started:
-            # Stop the instance if we started it earlier
-            result = stop_instance(instance.name, remote, project)
-            if not result:
-                logger.error(f"Error: Failed to stop instance '{instance_name}'")
-                return False
+            stop_instance(instance.name, remote, project)
 
         return True
-        
-    except pylxd.exceptions.LXDAPIException as e:
-        logger.error(f"Failed to set user key for instance '{instance_name}': {e}")
-        return False
+
+
     except FileNotFoundError:
         logger.error(f"File '{key_filepath}' not found.")
         return False
-    except Exception as e:
-        logger.error(f"An error occurred: {e}")
+    except pylxd.exceptions.LXDAPIException as e:
+        logger.error(f"Failed to set user key for instance '{instance_name}': {e}")
         return False
+    except Exception as e:
+        logger.error(f"An error occurred while setting user key: {e}")
+        return False
+
+def get_instance_keys(instance_name, login='ubuntu', remote=None, project=None, force=False):
+    """
+    Fetch and display the keys associated with a specific instance and user login.
+
+    Args:
+        instance_name: Name of the instance.
+        login: Login name of the user (default: 'ubuntu').
+        remote: Remote server name.
+        project: Project name.
+        force: If True, start the instance if it's not running and stop it after fetching keys.
+
+    Returns:
+        None: Outputs the keys information directly to the CLI.
+    """
+    try:
+        # Get the specified instance in the project and remote
+        remote_client = get_remote_client(remote, project_name=project)
+        if not remote_client:
+            logger.error(f"Failed to connect to remote '{remote}' and project '{project}'.")
+            return
+
+        instance = remote_client.instances.get(instance_name)
+
+        was_started = False
+
+        # Check if the instance is running
+        if instance.status.lower() != "running":
+            if force:
+                was_started = start_instance(instance.name, remote, project)
+                if not was_started:
+                    logger.error(f"Error: Instance '{instance_name}' failed to start.")
+                    return
+            else:
+                logger.error(f"Error: Instance '{instance_name}' is not running.")
+                return
+
+        # Fetch the contents of the authorized_keys file
+        exit_code, stdout, _ = exec_command(instance, ['cat', f'/home/{login}/.ssh/authorized_keys'])
+        if exit_code != 0:
+            logger.info(f"No authorized_keys file found for user '{login}' in instance '{instance_name}'.")
+        else:
+            keys = []
+            for line in stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 3:
+                    key_type, email = parts[0], parts[2]
+                    keys.append((key_type, email))
+
+            if keys:
+                logger.info(f"Keys for instance '{instance_name}' (user: {login}):")
+                for key_type, email in keys:
+                    print(f"Key Type: {key_type}, Email: {email}")
+            else:
+                logger.info(f"No valid keys found in authorized_keys for user '{login}' in instance '{instance_name}'.")
+
+        if force and was_started:
+            stop_instance(instance.name, remote, project)
+
+    except Exception as e:
+        logger.error(f"An error occurred while retrieving keys for instance '{instance_name}': {e}")
+
 
 def assign_ip_address(remote, mode="next"):
     """Assign a new IP address based on the highest assigned IP address or the first available hole.
@@ -4264,6 +4336,36 @@ def create_instance_parser(subparsers):
                                 help="Start the instance if not running, then stop after setting the key")
     add_common_arguments(set_key_parser)
 
+    # Show Keys command
+    show_keys_parser = instance_subparsers.add_parser(
+        "show_keys",
+        help="List the keys associated with an instance.",
+        description="List the keys associated with a specific instance.\n"
+                    "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
+                    "If the scope is not provided in the instance name, the -r/--remote and -p/--project options can be used.\n"
+                    "Use the -l/--login option to specify the user login, and the -f/--force option to start the instance if it is not running.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+            "  figo instance show_keys instance_name\n"
+            "  figo instance show_keys remote:project.instance_name -l user_login\n"
+            "  figo instance show_keys instance_name -f -r remote_name -p project_name"
+    )
+    show_keys_parser.add_argument(
+        "instance_name",
+        help="Name of the instance to list keys for. Can include remote and project scope."
+    )
+    show_keys_parser.add_argument(
+        "-l", "--login",
+        default="ubuntu",
+        help="Specify the user login name (default: ubuntu)."
+    )
+    show_keys_parser.add_argument(
+        "-f", "--force",
+        action="store_true",
+        help="Start the instance if not running (and then stops it)."
+    )
+    add_common_arguments(show_keys_parser)
+
     # Set IP command
     set_ip_parser = instance_subparsers.add_parser(
         "set_ip",
@@ -4572,6 +4674,21 @@ def handle_instance_command(args, parser_dict):
                 folder = args.dir
                 force = args.force
                 set_user_key(instance, remote, project, args.key_filename, login=login, folder=folder, force=force)
+
+            elif args.instance_command == "show_keys":
+                # Extract the parameters with defaults applied
+                login = args.login
+                force = args.force
+
+                # Call the function to display keys, relying on its internal error handling
+                get_instance_keys(
+                    instance_name=args.instance_name,
+                    login=login,
+                    remote=args.remote,
+                    project=args.project,
+                    force=force
+                )
+
             elif args.instance_command == "set_ip":
                 # if args.hole and args.ip return error
                 if args.hole and args.ip:

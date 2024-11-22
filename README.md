@@ -53,6 +53,7 @@ Each command has its own set of subcommands and options.
 - [`figo instance start`](#figo-instance-start)
 - [`figo instance stop`](#figo-instance-stop)
 - [`figo instance set_key`](#figo-instance-set_key)
+- [`figo instance show_keys`](#figo-instance-show_keys)
 - [`figo instance set_ip`](#figo-instance-set_ip)
 - [`figo instance create`](#figo-instance-create)
 - [`figo instance delete`](#figo-instance-delete)
@@ -143,6 +144,28 @@ Each command has its own set of subcommands and options.
     figo instance set_key instance_name key_filename
     figo instance set_key remote:project.instance_name key_filename
     figo instance set_key instance_name key_filename -r remote_name -p project_name
+    ```
+
+- #### [`figo instance show_keys`](#figo-instance-show_keys)
+
+  - **Description:** Display the keys associated with a specific instance, including the key type and the user email. Optionally specify the remote and project. If the instance is not running, you can force-start it using the `-f/--force` option.
+  - **Syntax:**
+    ```bash
+    figo instance show_keys instance_name [-r remote] [-p project] [-l login] [-f | --force]
+    ```
+  - **Options:**
+    - `instance_name`: The name of the instance. Can include remote and project scope in the format `remote:project.instance_name`.
+    - `-r, --remote`: Specify the remote server name.
+    - `-p, --project`: Specify the project name.
+    - `-l, --login`: Specify the user login name to check keys for (default: `ubuntu`).
+    - `-f, --force`: Start the instance if not running, then stop it after fetching the keys.
+
+  - **Examples:**
+    ```bash
+    figo instance show_keys instance_name
+    figo instance show_keys remote:project.instance_name
+    figo instance show_keys instance_name -r remote_name -p project_name
+    figo instance show_keys instance_name -l custom_user -f
     ```
 
 - #### `figo instance set_ip`
