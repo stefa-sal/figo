@@ -146,19 +146,23 @@ Each command has its own set of subcommands and options.
     figo instance set_key instance_name key_filename -r remote_name -p project_name
     ```
 
-- #### [`figo instance show_keys`](#figo-instance-show_keys)
+- #### [`figo instance show_keys`]
 
-  - **Description:** Display the keys associated with a specific instance, including the key type and the user email. Optionally specify the remote and project. If the instance is not running, you can force-start it using the `-f/--force` option.
+  - **Description:** Display the keys associated with a specific instance, including the key type and the key ID. Optionally, display the full key content using the `-k/--keys` option. Specify the remote, project, and login parameters as needed. If the instance is not running, you can force-start it using the `-f/--force` option. Use `-e/--extend` to adjust column widths for better readability.
+
   - **Syntax:**
     ```bash
-    figo instance show_keys instance_name [-r remote] [-p project] [-l login] [-f | --force]
+    figo instance show_keys instance_name [-r remote] [-p project] [-l login] [-f | --force] [-k | --keys] [-e | --extend]
     ```
+
   - **Options:**
     - `instance_name`: The name of the instance. Can include remote and project scope in the format `remote:project.instance_name`.
     - `-r, --remote`: Specify the remote server name.
     - `-p, --project`: Specify the project name.
     - `-l, --login`: Specify the user login name to check keys for (default: `ubuntu`).
     - `-f, --force`: Start the instance if not running, then stop it after fetching the keys.
+    - `-k, --keys`: Display the full key content in the output.
+    - `-e, --extend`: Adjust column widths to fit content for better readability.
 
   - **Examples:**
     ```bash
@@ -166,6 +170,7 @@ Each command has its own set of subcommands and options.
     figo instance show_keys remote:project.instance_name
     figo instance show_keys instance_name -r remote_name -p project_name
     figo instance show_keys instance_name -l custom_user -f
+    figo instance show_keys instance_name -k --extend
     ```
 
 - #### `figo instance set_ip`
@@ -217,7 +222,9 @@ Each command has its own set of subcommands and options.
   - **Examples:**
     ```bash
     figo instance create my_instance images:ubuntu/20.04
-    figo instance create remote:project.instance_name images:debian/11 -t vm
+    figo instance create remote:project.instance_name images
+
+:debian/11 -t vm
     figo instance create instance_name images:centos/8 -r remote_name -p project_name
     figo instance create instance_name images:ubuntu/22.04 -f profile1,profile2
     figo instance create instance_name images:alpine/3.15 -m --hole
@@ -249,9 +256,7 @@ Each command has its own set of subcommands and options.
   - **Syntax:**
 
     ```bash
-    figo instance bash instance
-
-_name [-f | --force] [-t timeout] [-a attempts] [-r remote] [-p project]
+    figo instance bash instance_name [-f | --force] [-t timeout] [-a attempts] [-r remote] [-p project]
     ```
 
   - **Options:**

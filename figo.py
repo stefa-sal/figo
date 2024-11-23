@@ -753,19 +753,21 @@ def exec_command(instance, command):
     Returns:
         tuple: (exit_code, stdout, stderr)
             - exit_code: Integer, 0 if the command was successful, non-zero otherwise.
-            - stdout: Decoded string containing the command's standard output.
-            - stderr: Decoded string containing the command's standard error.
+            - stdout: String containing the command's standard output.
+            - stderr: String containing the command's standard error.
 
     Raises:
         Exception: If there is an issue executing the command or accessing the instance.
     """
     try:
         result = instance.execute(command)
-        stdout = result.stdout.decode("utf-8").strip()
-        stderr = result.stderr.decode("utf-8").strip()
+        # Handle decoding if stdout or stderr are bytes
+        stdout = result.stdout.decode("utf-8").strip() if isinstance(result.stdout, bytes) else result.stdout.strip()
+        stderr = result.stderr.decode("utf-8").strip() if isinstance(result.stderr, bytes) else result.stderr.strip()
         return result.exit_code, stdout, stderr
     except Exception as e:
         raise Exception(f"Error executing command '{' '.join(command)}': {e}")
+
 
 #############################################
 ###### figo instance command functions #####
@@ -1257,16 +1259,18 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
         logger.error(f"An error occurred while setting user key: {e}")
         return False
 
-def get_instance_keys(instance_name, login='ubuntu', remote=None, project=None, force=False):
+def get_instance_keys(instance_name, remote, project, login='ubuntu', force=False, full=False, extend=False):
     """
     Fetch and display the keys associated with a specific instance and user login.
 
     Args:
         instance_name: Name of the instance.
-        login: Login name of the user (default: 'ubuntu').
         remote: Remote server name.
         project: Project name.
+        login: Login name of the user (default: 'ubuntu').
         force: If True, start the instance if it's not running and stop it after fetching keys.
+        full: If True, includes the full key as an additional column.
+        extend: If True, adapts the output column width to the content.
 
     Returns:
         None: Outputs the keys information directly to the CLI.
@@ -1297,20 +1301,32 @@ def get_instance_keys(instance_name, login='ubuntu', remote=None, project=None, 
         exit_code, stdout, _ = exec_command(instance, ['cat', f'/home/{login}/.ssh/authorized_keys'])
         if exit_code != 0:
             logger.info(f"No authorized_keys file found for user '{login}' in instance '{instance_name}'.")
-        else:
-            keys = []
-            for line in stdout.splitlines():
-                parts = line.split()
-                if len(parts) >= 3:
-                    key_type, email = parts[0], parts[2]
-                    keys.append((key_type, email))
+            return
 
-            if keys:
-                logger.info(f"Keys for instance '{instance_name}' (user: {login}):")
-                for key_type, email in keys:
-                    print(f"Key Type: {key_type}, Email: {email}")
-            else:
-                logger.info(f"No valid keys found in authorized_keys for user '{login}' in instance '{instance_name}'.")
+        # Define columns for output
+        if full:
+            COLS = [('KEY TYPE', 12), ('KEY ID', 30), ('KEY', 70)]
+        else:
+            COLS = [('KEY TYPE', 12), ('KEY ID', 30)]
+
+        add_header_line_to_output(COLS)
+
+        keys = []
+        for line in stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                key_type, key_id = parts[0], parts[2]
+                key = parts[1] if full and len(parts) > 1 else None
+                keys.append((key_type, key_id, key))
+
+        if keys:
+            for key_data in keys:
+                row = list(key_data) if full else key_data[:2]
+                add_row_to_output(COLS, row)
+        else:
+            logger.info(f"No valid keys found in authorized_keys for user '{login}' in instance '{instance_name}'.")
+
+        flush_output(extend=extend)
 
         if force and was_started:
             stop_instance(instance.name, remote, project)
@@ -4224,7 +4240,7 @@ def create_instance_parser(subparsers):
     )
     instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
 
-    # Add common options for remote, project, user, IP, gateway, and NIC
+    # Add common options for remote, project, and user
     def add_common_arguments(parser):
         parser.add_argument("-r", "--remote", help="Specify the remote server name")
         parser.add_argument("-p", "--project", help="Specify the project name")
@@ -4232,6 +4248,9 @@ def create_instance_parser(subparsers):
             "-u", "--user",
             help="Used to infer the project (for list, start, stop, set_key, set_ip, bash)"
         )
+
+    # Add common options for IP, gateway, and NIC
+    def add_common_ip_gw_nic_arguments(parser):
         parser.add_argument("-i", "--ip", help="Specify a static IP address for the instance")
         parser.add_argument(
             "-g", "--gw", help="Specify the gateway address for the instance"
@@ -4328,9 +4347,9 @@ def create_instance_parser(subparsers):
     )
     set_key_parser.add_argument("instance_name", help="Name of the instance. Can include remote and project scope.")
     set_key_parser.add_argument("key_filename", help="Filename of the public key on the host (by default in the ./users folder)")
-    set_key_parser.add_argument("-l", "--login", default=DEFAULT_LOGIN_FOR_INSTANCES, 
+    set_key_parser.add_argument("-l", "--login", default="ubuntu", 
                                 help="Specify the user login name (default: ubuntu) for which we are setting the key")
-    set_key_parser.add_argument("-d", "--dir", default=USER_DIR, 
+    set_key_parser.add_argument("-d", "--dir", default="./users", 
                                 help="Specify the directory path where the key file is located (default: ./users)")
     set_key_parser.add_argument("-f", "--force", action="store_true", 
                                 help="Start the instance if not running, then stop after setting the key")
@@ -4343,12 +4362,13 @@ def create_instance_parser(subparsers):
         description="List the keys associated with a specific instance.\n"
                     "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
                     "If the scope is not provided in the instance name, the -r/--remote and -p/--project options can be used.\n"
-                    "Use the -l/--login option to specify the user login, and the -f/--force option to start the instance if it is not running.",
+                    "Use the -l/--login option to specify the user login, the -f/--force option to start the instance if it is not running, and the -k/--keys option to show the full key details.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
             "  figo instance show_keys instance_name\n"
             "  figo instance show_keys remote:project.instance_name -l user_login\n"
-            "  figo instance show_keys instance_name -f -r remote_name -p project_name"
+            "  figo instance show_keys instance_name -f -r remote_name -p project_name\n"
+            "  figo instance show_keys instance_name -k --extend"
     )
     show_keys_parser.add_argument(
         "instance_name",
@@ -4363,6 +4383,16 @@ def create_instance_parser(subparsers):
         "-f", "--force",
         action="store_true",
         help="Start the instance if not running (and then stops it)."
+    )
+    show_keys_parser.add_argument(
+        "-k", "--keys",
+        action="store_true",
+        help="Show full key details, including the full key content."
+    )
+    show_keys_parser.add_argument(
+        "-e", "--extend",
+        action="store_true",
+        help="Extend column widths to fit content for better readability."
     )
     add_common_arguments(show_keys_parser)
 
@@ -4392,7 +4422,7 @@ def create_instance_parser(subparsers):
         help="Assign the first available IP address hole in the range, rather than the next sequential IP."
     )
     add_common_arguments(set_ip_parser)
-
+    add_common_ip_gw_nic_arguments(set_ip_parser)
 
     # Create command
     create_parser = instance_subparsers.add_parser(
@@ -4438,8 +4468,8 @@ def create_instance_parser(subparsers):
         action="store_true",
         help="Assign the first available IP address hole in the range, rather than the next sequential IP."
     )
-
     add_common_arguments(create_parser)
+    add_common_ip_gw_nic_arguments(create_parser)
 
     # Delete command
     delete_parser = instance_subparsers.add_parser(
@@ -4475,8 +4505,8 @@ def create_instance_parser(subparsers):
     )
     bash_parser.add_argument("instance_name", help="Name of the instance to execute bash. Can include remote and project scope.")
     bash_parser.add_argument("-f", "--force", action="store_true", help="Start the instance if not running and exec bash (stop on exit if not running)")
-    bash_parser.add_argument("-t", "--timeout", type=int, default=BASH_CONNECT_TIMEOUT, help="Total timeout in seconds for retries (default: {BASH_CONNECT_TIMEOUT})")
-    bash_parser.add_argument("-a", "--attempts", type=int, default=BASH_CONNECT_ATTEMPTS, help="Number of retry attempts to connect (default: {BASH_CONNECT_ATTEMPTS})")
+    bash_parser.add_argument("-t", "--timeout", type=int, default=30, help="Total timeout in seconds for retries (default: 30)")
+    bash_parser.add_argument("-a", "--attempts", type=int, default=3, help="Number of retry attempts to connect (default: 3)")
     add_common_arguments(bash_parser)
 
     # Aliases for the main parser
@@ -4484,6 +4514,7 @@ def create_instance_parser(subparsers):
     subparsers._name_parser_map["i"] = instance_parser
 
     return instance_parser
+
 
 def handle_instance_list(args):
     """Handle the 'list' command for instances."""
@@ -4607,12 +4638,14 @@ def handle_instance_command(args, parser_dict):
             return f"images:{image_name}"
 
     # Validate the IP address and prefix length
-    if args.ip and not is_valid_ip_prefix_len(args.ip):
+    # check before if the ip attribute exists in args to avoid error
+    if hasattr(args, 'ip') and args.ip and not is_valid_ip_prefix_len(args.ip):
         logger.error(f"Error: Invalid IP address or prefix length '{args.ip}'.")
         return
 
     # Validate the gateway address if provided
-    if args.gw and not is_valid_ip(args.gw):
+    # check before if the gw attribute exists in args to avoid error
+    if hasattr(args, 'gw') and args.gw and not is_valid_ip(args.gw):
         logger.error(f"Error: Invalid gateway address '{args.gw}'.")
         return
 
@@ -4682,11 +4715,13 @@ def handle_instance_command(args, parser_dict):
 
                 # Call the function to display keys, relying on its internal error handling
                 get_instance_keys(
-                    instance_name=args.instance_name,
+                    instance,
+                    remote,
+                    project,
                     login=login,
-                    remote=args.remote,
-                    project=args.project,
-                    force=force
+                    force=force,
+                    full=args.keys,  # Corresponds to -k/--keys
+                    extend=args.extend  # Corresponds to -e/--extend
                 )
 
             elif args.instance_command == "set_ip":
