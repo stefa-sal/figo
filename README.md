@@ -67,20 +67,25 @@ Each command has its own set of subcommands and options.
   - **Syntax:**
 
     ```bash
-    figo instance list [scope] [-f | --full] [-e | --extend]
+    figo instance list [scope] [-f | --full] [-e | --extend] [-r remote] [-p project] [-u user]
     ```
 
   - **Options:**
     - `scope`: Limits the listing to the specified scope in the format `remote:project.`, `project.`, or `remote:`.
     - `-f, --full`: Show full details of instance profiles.
     - `-e, --extend`: Extend column width to fit content.
+    - `-r, --remote`: Specify the remote server name.
+    - `-p, --project`: Specify the project name.
+    - `-u, --user`: Specify the username to infer the project.
 
   - **Examples:**
+
     ```bash
     figo instance list
     figo instance list remote:project.
     figo instance list project. -r remote_name
     figo instance list -f --extend
+    figo instance list project. -u custom_user
     ```
 
 - #### `figo instance start`
@@ -89,17 +94,22 @@ Each command has its own set of subcommands and options.
   - **Syntax:**
 
     ```bash
-    figo instance start instance_name [-r remote] [-p project]
+    figo instance start instance_name [-r remote] [-p project] [-u user]
     ```
-
+  
   - **Options:**
     - `instance_name`: The name of the instance to start, which can include remote and project scope.
+    - `-r, --remote`: Specify the remote server name.
+    - `-p, --project`: Specify the project name.
+    - `-u, --user`: Specify the username to infer the project.
 
   - **Examples:**
+
     ```bash
     figo instance start instance_name
     figo instance start remote:project.instance_name
     figo instance start instance_name -r remote_name -p project_name
+    figo instance start instance_name -u custom_user
     ```
 
 - #### `figo instance stop`
@@ -108,51 +118,61 @@ Each command has its own set of subcommands and options.
   - **Syntax:**
 
     ```bash
-    figo instance stop [instance_name] [-a | --all] [-r remote] [-p project]
+    figo instance stop [instance_name] [-a | --all] [-r remote] [-p project] [-u user]
     ```
 
   - **Options:**
     - `instance_name`: The name of the instance to stop, which can include remote and project scope. If `--all` is provided, a specific instance name should not be given.
     - `-a, --all`: Stop all instances in the specified scope.
+    - `-r, --remote`: Specify the remote server name.
+    - `-p, --project`: Specify the project name.
+    - `-u, --user`: Specify the username to infer the project.
 
   - **Examples:**
+
     ```bash
     figo instance stop instance_name
     figo instance stop remote:project.instance_name
     figo instance stop -a -r remote_name
     figo instance stop project. -a
+    figo instance stop instance_name -u custom_user
     ```
 
 - #### `figo instance set_key`
 
-  - **Description:** Set a public key for a user in a specific instance.
+  - **Description:** Set a public key for a user in a specific instance. If the `key_filename` is not provided, the system uses a default key derived from the `-u/--user` parameter.
   - **Syntax:**
 
     ```bash
-    figo instance set_key instance_name key_filename [-l login] [-d dir] [-f | --force] [-r remote] [-p project]
+    figo instance set_key instance_name [key_filename] [-l login] [-d dir] [-f | --force] [-r remote] [-p project] [-u user]
     ```
 
   - **Options:**
     - `instance_name`: The name of the instance, which can include remote and project scope.
-    - `key_filename`: Filename of the public key on the host (default location: `./users`).
+    - `key_filename`: Optional filename of the public key on the host. If not provided, the system derives it based on the `-u/--user` parameter.
     - `-l, --login`: Specify the user login name (default: `ubuntu`).
     - `-d, --dir`: Specify the directory path where the key file is located (default: `./users`).
-    - `-f, --force`: Start the instance if not running, then stop after setting the key.
+    - `-f, --force`: Start the instance if not running, then stop it after setting the key.
+    - `-r, --remote`: Specify the remote server name.
+    - `-p, --project`: Specify the project name.
+    - `-u, --user`: Specify the username to derive the default key filename if `key_filename` is not provided.
 
   - **Examples:**
+
     ```bash
     figo instance set_key instance_name key_filename
-    figo instance set_key remote:project.instance_name key_filename
-    figo instance set_key instance_name key_filename -r remote_name -p project_name
+    figo instance set_key remote:project.instance_name key_filename -r remote_name -p project_name
+    figo instance set_key instance_name -u user_name -f
+    figo instance set_key remote:project.instance_name -u custom_user -r remote_name
     ```
 
-- #### [`figo instance show_keys`]
+- #### `figo instance show_keys`
 
-  - **Description:** Display the keys associated with a specific instance, including the key type and the key ID. Optionally, display the full key content using the `-k/--keys` option. Specify the remote, project, and login parameters as needed. If the instance is not running, you can force-start it using the `-f/--force` option. Use `-e/--extend` to adjust column widths for better readability.
-
+  - **Description:** Display the keys associated with a specific instance, including the key type and the key ID. Optionally specify the remote and project. If the instance is not running, you can force-start it using the `-f/--force` option.
   - **Syntax:**
+
     ```bash
-    figo instance show_keys instance_name [-r remote] [-p project] [-l login] [-f | --force] [-k | --keys] [-e | --extend]
+    figo instance show_keys instance_name [-r remote] [-p project] [-l login] [-f | --force] [-k | --keys] [-e | --extend] [-u user]
     ```
 
   - **Options:**
@@ -161,16 +181,18 @@ Each command has its own set of subcommands and options.
     - `-p, --project`: Specify the project name.
     - `-l, --login`: Specify the user login name to check keys for (default: `ubuntu`).
     - `-f, --force`: Start the instance if not running, then stop it after fetching the keys.
-    - `-k, --keys`: Display the full key content in the output.
-    - `-e, --extend`: Adjust column widths to fit content for better readability.
+    - `-k, --keys`: Show full key details, including the full key content.
+    - `-e, --extend`: Extend column widths to fit content for better readability.
+    - `-u, --user`: Specify the username to infer the project.
 
   - **Examples:**
+
     ```bash
     figo instance show_keys instance_name
     figo instance show_keys remote:project.instance_name
     figo instance show_keys instance_name -r remote_name -p project_name
-    figo instance show_keys instance_name -l custom_user -f
-    figo instance show_keys instance_name -k --extend
+    figo instance show_keys instance_name -l custom_user -f -k --extend
+    figo instance show_keys instance_name -u user_name -r remote_name
     ```
 
 - #### `figo instance set_ip`
@@ -179,7 +201,7 @@ Each command has its own set of subcommands and options.
   - **Syntax:**
 
     ```bash
-    figo instance set_ip instance_name [-i ip_address] [-g gw_address] [-n nic] [-r remote] [-p project] [-o | --hole]
+    figo instance set_ip instance_name [-i ip_address] [-g gw_address] [-n nic] [-r remote] [-p project] [-u user] [-o | --hole]
     ```
 
   - **Options:**
@@ -187,14 +209,19 @@ Each command has its own set of subcommands and options.
     - `-i, --ip`: Specify a static IP address with prefix length (e.g., `192.168.1.10/24`). If omitted, an available IP address is assigned based on the highest IP in use, or the first available gap if `--hole` is used.
     - `-g, --gw`: Specify the gateway address. If omitted, the default gateway for the remote is used.
     - `-n, --nic`: Specify the NIC name (default: `eth0` for containers, `enp5s0` for VMs).
+    - `-r, --remote`: Specify the remote server name.
+    - `-p, --project`: Specify the project name.
+    - `-u, --user`: Specify the username to infer the project.
     - `-o, --hole`: Assigns the first available IP address hole in the range rather than the next sequential IP.
 
   - **Examples:**
+
     ```bash
     figo instance set_ip instance_name -i 192.168.1.10/24 -g 192.168.1.1
     figo instance set_ip remote:project.instance_name -i 10.0.0.5/24 -g 10.0.0.1
     figo instance set_ip my_remote:my_project.instance_name --hole
     figo instance set_ip remote:project.instance_name
+    figo instance set_ip instance_name -u custom_user -n eth1 -r remote_name
     ```
 
 - #### `figo instance create`
@@ -203,7 +230,7 @@ Each command has its own set of subcommands and options.
   - **Syntax:**
 
     ```bash
-    figo instance create instance_name image [-t type] [-p project] [-r remote] [-i ip_address] [-g gw_address] [-n nic] [-f profiles] [-o | --hole] [-m | --make_project]
+    figo instance create instance_name image [-t type] [-p project] [-r remote] [-i ip_address] [-g gw_address] [-n nic] [-f profiles] [-o | --hole] [-m | --make_project] [-u user]
     ```
 
   - **Options:**
@@ -218,16 +245,17 @@ Each command has its own set of subcommands and options.
     - `-f, --profile`: Comma-separated list of profiles to apply to the instance.
     - `-m, --make_project`: Create the project if it does not exist on the specified remote.
     - `-o, --hole`: Assigns the first available IP address hole in the range rather than the next sequential IP.
+    - `-u, --user`: Specify the username to infer the project.
 
   - **Examples:**
+
     ```bash
     figo instance create my_instance images:ubuntu/20.04
-    figo instance create remote:project.instance_name images
-
-:debian/11 -t vm
+    figo instance create remote:project.instance_name images:debian/11 -t vm
     figo instance create instance_name images:centos/8 -r remote_name -p project_name
     figo instance create instance_name images:ubuntu/22.04 -f profile1,profile2
     figo instance create instance_name images:alpine/3.15 -m --hole
+    figo instance create instance_name images:fedora/35 -u custom_user -n eth1 -r remote_name
     ```
 
 - #### `figo instance delete`
@@ -236,19 +264,26 @@ Each command has its own set of subcommands and options.
   - **Syntax:**
 
     ```bash
-    figo instance delete instance_name [-f | --force] [-r remote] [-p project]
+    figo instance delete instance_name [-f | --force] [-r remote] [-p project] [-u user]
     ```
 
   - **Options:**
     - `instance_name`: The name of the instance to delete, which can include remote and project scope.
     - `-f, --force`: Force delete the instance even if it is running.
+    - `-r, --remote`: Specify the remote server name.
+    - `-p, --project`: Specify the project name.
+    - `-u, --user`: Specify the username to infer the project.
 
   - **Examples:**
+
     ```bash
     figo instance delete instance_name
     figo instance delete remote:project.instance_name -f
     figo instance delete instance_name -r remote_name -p project_name
+    figo instance delete instance_name -u custom_user -r remote_name
     ```
+
+---
 
 - #### `figo instance bash`
 
@@ -256,20 +291,25 @@ Each command has its own set of subcommands and options.
   - **Syntax:**
 
     ```bash
-    figo instance bash instance_name [-f | --force] [-t timeout] [-a attempts] [-r remote] [-p project]
+    figo instance bash instance_name [-f | --force] [-t timeout] [-a attempts] [-r remote] [-p project] [-u user]
     ```
 
   - **Options:**
     - `instance_name`: The name of the instance to execute bash, which can include remote and project scope.
     - `-f, --force`: Start the instance if not running and execute bash. Stop the instance on exit if it was initially stopped.
-    - `-t, --timeout`: Total timeout in seconds for retries (default: `BASH_CONNECT_TIMEOUT`).
-    - `-a, --attempts`: Number of retry attempts to connect (default: `BASH_CONNECT_ATTEMPTS`).
+    - `-t, --timeout`: Total timeout in seconds for retries (default: `30`).
+    - `-a, --attempts`: Number of retry attempts to connect (default: `3`).
+    - `-r, --remote`: Specify the remote server name.
+    - `-p, --project`: Specify the project name.
+    - `-u, --user`: Specify the username to infer the project.
 
   - **Examples:**
+
     ```bash
     figo instance bash instance_name
     figo instance bash remote:project.instance_name
     figo instance bash instance_name -f -r remote_name -p project_name
+    figo instance bash instance_name -u custom_user -r remote_name -a 5
     ```
 
 ### figo gpu

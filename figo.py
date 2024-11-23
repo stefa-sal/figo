@@ -1169,7 +1169,7 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
         instance_name: Name of the instance.
         remote: Remote server name.
         project: Project name.
-        key_filename: Filename of the public key on the host.
+        key_filename: Filename of the public key on the host (to be combined with folder).
         login: Login name of the user (default: 'ubuntu') for which we set the key.
         folder: Folder path where the key file is located (default: '.users').
         force: If True, start the instance if it's not running and stop it after setting the key.
@@ -1177,6 +1177,11 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
     Returns:
         True if the key was set successfully, False otherwise.
     """
+
+    def check_to_stop(instance, force, was_started):
+        if force and was_started:
+            stop_instance(instance.name, remote, project)
+
     try:
         # Full path to the key file
         key_filepath = f"{folder}/{key_filename}"
@@ -1211,6 +1216,7 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
             existing_keys = stdout.splitlines()
             if public_key in existing_keys:
                 logger.info(f"Public key from '{key_filepath}' is already present in /home/{login}/.ssh/authorized_keys.")
+                check_to_stop(instance, force, was_started)
                 return True
         else:
             logger.info(f"No authorized_keys file found for {login}, proceeding with adding the key.")
@@ -1218,20 +1224,24 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
         # Create .ssh directory
         exit_code, _, _ = exec_command(instance, ['mkdir', '-p', f'/home/{login}/.ssh'])
         if exit_code != 0:
+            check_to_stop(instance, force, was_started)
             return False
 
         # Create authorized_keys file if not present
         exit_code, _, _ = exec_command(instance, ['touch', f'/home/{login}/.ssh/authorized_keys'])
         if exit_code != 0:
+            check_to_stop(instance, force, was_started)
             return False
 
         # Set permissions
         exit_code, _, _ = exec_command(instance, ['chmod', '600', f'/home/{login}/.ssh/authorized_keys'])
         if exit_code != 0:
+            check_to_stop(instance, force, was_started)
             return False
 
         exit_code, _, _ = exec_command(instance, ['chown', f'{login}:{login}', f'/home/{login}/.ssh/authorized_keys'])
         if exit_code != 0:
+            check_to_stop(instance, force, was_started)
             return False
 
         # Add the public key to authorized_keys
@@ -1239,12 +1249,12 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
             instance, ['sh', '-c', f'echo "{public_key}" >> /home/{login}/.ssh/authorized_keys']
         )
         if exit_code != 0:
+            check_to_stop(instance, force, was_started)
             return False
 
         logger.info(f"Public key from '{key_filepath}' added to /home/{login}/.ssh/authorized_keys in instance '{instance_name}'.")
 
-        if force and was_started:
-            stop_instance(instance.name, remote, project)
+        check_to_stop(instance, force, was_started)
 
         return True
 
@@ -4341,19 +4351,31 @@ def create_instance_parser(subparsers):
                     "If the scope is not provided in the instance name, the -r/--remote and -p/--project options can be used.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
-               "  figo instance set_key instance_name key_filename\n"
-               "  figo instance set_key remote:project.instance_name key_filename\n"
-               "  figo instance set_key instance_name key_filename -r remote_name -p project_name"
+            "  figo instance set_key instance_name\n"
+            "  figo instance set_key instance_name key_filename\n"
+            "  figo instance set_key remote:project.instance_name key_filename -r remote_name -p project_name"
     )
     set_key_parser.add_argument("instance_name", help="Name of the instance. Can include remote and project scope.")
-    set_key_parser.add_argument("key_filename", help="Filename of the public key on the host (by default in the ./users folder)")
-    set_key_parser.add_argument("-l", "--login", default="ubuntu", 
-                                help="Specify the user login name (default: ubuntu) for which we are setting the key")
-    set_key_parser.add_argument("-d", "--dir", default="./users", 
-                                help="Specify the directory path where the key file is located (default: ./users)")
-    set_key_parser.add_argument("-f", "--force", action="store_true", 
-                                help="Start the instance if not running, then stop after setting the key")
+    set_key_parser.add_argument(
+        "key_filename",
+        nargs="?",
+        default=None,
+        help="Optional filename of the public key on the host. If not provided, the system uses a default based on -u/--user parameter."
+    )
+    set_key_parser.add_argument(
+        "-l", "--login", default="ubuntu",
+        help="Specify the user login name (default: ubuntu) for which we are setting the key."
+    )
+    set_key_parser.add_argument(
+        "-d", "--dir", default="./users",
+        help="Specify the directory path where the key file is located (default: ./users)."
+    )
+    set_key_parser.add_argument(
+        "-f", "--force", action="store_true",
+        help="Start the instance if not running, then stop after setting the key."
+    )
     add_common_arguments(set_key_parser)
+
 
     # Show Keys command
     show_keys_parser = instance_subparsers.add_parser(
@@ -4637,6 +4659,20 @@ def handle_instance_command(args, parser_dict):
         else:
             return f"images:{image_name}"
 
+    def derive_pub_key_from_user(user, folder):
+        """Derive the public key filename from the user."""
+
+        #list all files that starts with 'user.' and ends with '.pub' in the folder
+        files = [f for f in os.listdir(folder) if f.startswith(f"{user}.") and f.endswith(".pub")]
+        if len(files) == 0:
+            logger.error(f"Error: No public key file found for user '{user}'.")
+            return None
+        elif len(files) > 1:
+            logger.error(f"Error: Multiple public key files found for user '{user}'.")
+            return None
+        else:
+            return files[0]
+    
     # Validate the IP address and prefix length
     # check before if the ip attribute exists in args to avoid error
     if hasattr(args, 'ip') and args.ip and not is_valid_ip_prefix_len(args.ip):
@@ -4652,10 +4688,15 @@ def handle_instance_command(args, parser_dict):
     if args.instance_command in ["list", "l"]:
         handle_instance_list(args)
     else:
-        # Handle project based on user if provided
+        provided_user = None
+        
         user_project = None
+        
         if 'user' in args and args.user:
+            # Handle project based on user if provided
             user_project = derive_project_from_user(args.user)
+            # Store the provided user for later use
+            provided_user = args.user
 
         # If user_project is set, check for conflicts
         if user_project:
@@ -4706,7 +4747,20 @@ def handle_instance_command(args, parser_dict):
                 login = args.login
                 folder = args.dir
                 force = args.force
-                set_user_key(instance, remote, project, args.key_filename, login=login, folder=folder, force=force)
+
+                if not provided_user and not args.key_filename:
+                    logger.error("Error: Must provide a user or a key filename.")
+                    return
+                
+                if args.key_filename:
+                    my_key_filename = args.key_filename
+                else:
+                    # provided_user is not None
+                    my_key_filename = derive_pub_key_from_user(provided_user, folder) 
+                    if my_key_filename is None:
+                        return
+                    
+                set_user_key(instance, remote, project, my_key_filename, login=login, folder=folder, force=force)
 
             elif args.instance_command == "show_keys":
                 # Extract the parameters with defaults applied
