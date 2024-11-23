@@ -4348,7 +4348,8 @@ def create_instance_parser(subparsers):
         help="Set a public key for a user in a specific instance.",
         description="Set a public key for a user in a specific instance.\n"
                     "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
-                    "If the scope is not provided in the instance name, the -r/--remote and -p/--project options can be used.",
+                    "If the scope is not provided in the instance name, the -r/--remote and -p/--project options can be used.\n"
+                    "If the filename is not provided, the system uses a default based on the -u/--user parameter.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
             "  figo instance set_key instance_name\n"
@@ -5378,7 +5379,7 @@ def create_user_parser(subparsers):
     # Add subcommand
     user_add_parser = user_subparsers.add_parser("add", aliases=["a"], help="Add a new user to the system")
     user_add_parser.add_argument("username", action=NoUnderscoreCheck, help="Username of the new user")
-    user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file (optional, "
+    user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file for access to GUI (in .crt format, "
                                 "if not provided a new key pair will be generated)")  
     user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
     user_add_parser.add_argument("-w", "--wireguard", action="store_true", help="Generate WireGuard config for the user in .conf file") 

@@ -604,7 +604,7 @@ Each command has its own set of subcommands and options.
     ```
   - **Options:**
     - `username`: Username of the new user.
-    - `-c, --cert`: Path to the user's certificate file. If not provided, a new key pair will be generated.
+    - `-c, --cert`: Path to the user's certificate file for GUI access in .crt format. If not provided, a new key pair will be generated.
     - `-a, --admin`: Add user with admin privileges.
     - `-w, --wireguard`: Generate WireGuard configuration for the user in a `.conf` file.
     - `-s, --set_vpn`: Set the user's VPN profile into the WireGuard access node.
