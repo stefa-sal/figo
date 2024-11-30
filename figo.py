@@ -32,7 +32,7 @@ SSH_MIKROTIK_PORT = 22  # Default SSH port
 WG_INTERFACE = "wireguard2"  # Default WireGuard interface
 WG_VPN_KEEPALIVE = "20s"  # Default persistent keepalive interval
 
-SSH_LINUX_USER_NAME = "ubuntu"  # Default SSH username
+SSH_LINUX_USER_NAME = "ubuntu"  # Default SSH username for remote Linux hosts
 SSH_LINUX_HOST = ""  # Default Linux IP or host
 SSH_LINUX_PORT = 22  # Default SSH port
 
@@ -1161,8 +1161,8 @@ def stop_all_instances(remote_node, project_name):
                     stop_instance(name, remote_node, project_name)  # Stop the running instance
 
 
-def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', folder='.users', force=False):
-    """
+def set_user_key(instance_name, remote, project, key_filename, login=DEFAULT_LOGIN_FOR_INSTANCES, folder='.users', force=False):
+    f"""
     Set a public key in the specified instance in the authorized_keys file of the specified user.
 
     Args:
@@ -1170,7 +1170,7 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
         remote: Remote server name.
         project: Project name.
         key_filename: Filename of the public key on the host (to be combined with folder).
-        login: Login name of the user (default: 'ubuntu') for which we set the key.
+        login: Login name of the user (default: {DEFAULT_LOGIN_FOR_INSTANCES}) for which we set the key.
         folder: Folder path where the key file is located (default: '.users').
         force: If True, start the instance if it's not running and stop it after setting the key.
 
@@ -1269,15 +1269,15 @@ def set_user_key(instance_name, remote, project, key_filename, login='ubuntu', f
         logger.error(f"An error occurred while setting user key: {e}")
         return False
 
-def get_instance_keys(instance_name, remote, project, login='ubuntu', force=False, full=False, extend=False):
-    """
+def get_instance_keys(instance_name, remote, project, login=DEFAULT_LOGIN_FOR_INSTANCES, force=False, full=False, extend=False):
+    f"""
     Fetch and display the keys associated with a specific instance and user login.
 
     Args:
         instance_name: Name of the instance.
         remote: Remote server name.
         project: Project name.
-        login: Login name of the user (default: 'ubuntu').
+        login: Login name of the user (default: {DEFAULT_LOGIN_FOR_INSTANCES}).
         force: If True, start the instance if it's not running and stop it after fetching keys.
         full: If True, includes the full key as an additional column.
         extend: If True, adapts the output column width to the content.
@@ -1616,9 +1616,46 @@ def get_ip_and_gw(ip_address_and_prefix_len, gw_address, remote, mode="next"):
 
     return ip_address_with_prefix, gw_address
 
+def add_authorized_keys_to_config(config, key_filename, login):
+    """
+    Adds 'user.user-data' to the config if key_filename is provided.
+
+    Args:
+        config (dict): The configuration dictionary for instance creation.
+        key_filename (str): Path to the public key file.
+        login (str): The username to associate the public key with.
+    
+    Returns:
+        dict: Updated configuration.
+    """
+    if key_filename:
+        try:
+            # Verify that the key file exists
+            if not os.path.isfile(key_filename):
+                raise FileNotFoundError(f"Key file '{key_filename}' does not exist.")
+            
+            # Read the public key content
+            with open(key_filename, 'r') as key_file:
+                public_key_content = key_file.read().strip()
+            
+            # Add user-data to the config
+            config['config']['user.user-data'] = f"""
+            #cloud-config
+            users:
+              - name: {login}
+                ssh-authorized-keys:
+                  - {public_key_content}
+            """
+            print(f"Added public key content from '{key_filename}' to the config for user '{login}'.")
+        except Exception as e:
+            raise ValueError(f"Failed to add public key to config: {e}")
+    
+    return config
+
 def create_instance(instance_name, image, remote_name, project, instance_type, 
                     ip_address_and_prefix_len=None, gw_address=None, nic_device_name=None,
-                    profiles=[], create_project_flag=False, hole=False):
+                    profiles=[], create_project_flag=False, hole=False,
+                    key_filename=None, folder = USER_DIR, login=DEFAULT_LOGIN_FOR_INSTANCES):
     """Create a new instance from a local or remote image with specified configurations.
 
     It assigns a static IP address and gateway to the instance.
@@ -1636,6 +1673,9 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
     - create_project_flag: If True, create the project if it does not exist.
     - hole: If True, assign the first available hole starting from the base IP address 
       otherwise assign the next IP address after the highest assigned.
+    - key_filename: Filename of the public key to set in the instance, None if no public key is to be set.
+    - folder: Folder path where the key file is located (default: USER_DIR).
+    - login: Login name of the user for which the key is set (default: 'ubuntu').
 
     Returns:
     True if the instance was created successfully, False otherwise.
@@ -1764,6 +1804,12 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
 
         if instance_type == "vm":
             config['type'] = "virtual-machine"
+
+        # Add the public key to the configuration
+        if key_filename:
+            # create the file path
+            key_filepath = os.path.join(folder, key_filename)
+            config = add_authorized_keys_to_config(config, key_filepath, login)
 
         # Create the instance
         instance = remote_client.instances.create(config, wait=True)
@@ -4047,14 +4093,14 @@ def add_route_on_mikrotik(dst_address, gateway, username=SSH_MIKROTIK_USER_NAME,
 
 def add_route_on_linux(dst_address, gateway, dev, username=SSH_LINUX_USER_NAME, 
                        host=SSH_LINUX_HOST, port=SSH_LINUX_PORT):
-    """
+    f"""
     Adds a route on a Linux VPN access node using the ip route command.
 
     Args:
     - dst_address (str): The destination address in CIDR format (e.g., '10.202.128.0/24').
     - gateway (str): The gateway address for the route (e.g., '10.202.9.2').
     - dev (str): The interface (e.g., 'vlan403') to use for the route.
-    - username (str, optional): The SSH username to connect to the Linux router. Default is 'ubuntu'.
+    - username (str, optional): The SSH username to connect to the Linux router. Default is {DEFAULT_LOGIN_FOR_INSTANCES}.
     - host (str, optional): The IP address or hostname of the Linux router. Default is 'localhost'.
     - port (int, optional): The SSH port for the Linux router. Default is 22.
 
@@ -4364,12 +4410,12 @@ def create_instance_parser(subparsers):
         help="Optional filename of the public key on the host. If not provided, the system uses a default based on -u/--user parameter."
     )
     set_key_parser.add_argument(
-        "-l", "--login", default="ubuntu",
-        help="Specify the user login name (default: ubuntu) for which we are setting the key."
+        "-l", "--login", default=DEFAULT_LOGIN_FOR_INSTANCES,
+        help=f"Specify the user login name (default: {DEFAULT_LOGIN_FOR_INSTANCES}) for which we are setting the key."
     )
     set_key_parser.add_argument(
-        "-d", "--dir", default="./users",
-        help="Specify the directory path where the key file is located (default: ./users)."
+        "-d", "--dir", default=USER_DIR,
+        help=f"Specify the directory path where the key file is located (default: {USER_DIR})."
     )
     set_key_parser.add_argument(
         "-f", "--force", action="store_true",
@@ -4399,8 +4445,8 @@ def create_instance_parser(subparsers):
     )
     show_keys_parser.add_argument(
         "-l", "--login",
-        default="ubuntu",
-        help="Specify the user login name (default: ubuntu)."
+        default=DEFAULT_LOGIN_FOR_INSTANCES,
+        help=f"Specify the user login name (default: {DEFAULT_LOGIN_FOR_INSTANCES})."
     )
     show_keys_parser.add_argument(
         "-f", "--force",
@@ -4456,19 +4502,22 @@ def create_instance_parser(subparsers):
                     "The instance name can include remote and project scope in the format 'remote:project.instance_name'.\n"
                     "Specify the image, instance type, optional profiles, and the option to create the project if it does not exist.\n"
                     "If the IP address is not provided, an available IP address is automatically assigned with the default prefix length for the remote.\n"
-                    "By default, the next IP address after the highest assigned IP is chosen, but using --hole assigns the first available gap in the IP range.",
+                    "By default, the next IP address after the highest assigned IP is chosen, but using --hole assigns the first available gap in the IP range.\n"
+                    "The -k/--key option allows adding a public key to the instance's authorized_keys for a user specified with -u/--user.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
             "  figo instance create instance_name image_name\n"
             "  figo instance create remote:project.instance_name image_name -t vm\n"
             "  figo instance create instance_name image_name -r remote_name -p project_name\n"
             "  figo instance create instance_name image_name -f profile1,profile2\n"
-            "  figo instance create instance_name image_name -m --hole"
+            "  figo instance create instance_name image_name -m --hole\n"
+            "  figo instance create instance_name image_name -u user -k\n"
+            "  figo instance create instance_name image_name -u user -k -l newlogin"
     )
     create_parser.add_argument(
         "instance_name",
         help="Name of the new instance.\n"
-            "Can include remote and project scope in the format 'remote:project.instance_name'"
+            "Can include remote and project scope in the format 'remote:project.instance_name'."
     )
     create_parser.add_argument(
         "image",
@@ -4490,6 +4539,17 @@ def create_instance_parser(subparsers):
         "-o", "--hole",
         action="store_true",
         help="Assign the first available IP address hole in the range, rather than the next sequential IP."
+    )
+    create_parser.add_argument(
+        "-k", "--key",
+        action="store_true",
+        help="Add the user's public key to the instance's authorized_keys file. Requires -u/--user."
+    )
+    create_parser.add_argument(
+        "-l", "--login",
+        default=DEFAULT_LOGIN_FOR_INSTANCES,
+        help=f"Specify the user login name on the instance for which the key provides access "
+        "(default: {DEFAULT_LOGIN_FOR_INSTANCES})."
     )
     add_common_arguments(create_parser)
     add_common_ip_gw_nic_arguments(create_parser)
@@ -4793,6 +4853,14 @@ def handle_instance_command(args, parser_dict):
                     logger.error("Error: Cannot use both --hole and --ip options together.")
                     return
 
+                if args.key:
+                    if not args.user:
+                        logger.error("Error: -k/--key requires -u/--user to specify the public key owner.")
+                        return
+                    my_key_filename = derive_pub_key_from_user(args.user, USER_DIR) 
+                    if my_key_filename is None:
+                        return
+
                 image = parse_image(args.image)
                 if image is None:
                     return  # Error already printed by parse_image
@@ -4807,7 +4875,8 @@ def handle_instance_command(args, parser_dict):
                 # Pass the --make_project option as create_project to create_instance
                 create_instance(instance, image, remote, project, instance_type,
                                 ip_address_and_prefix_len=args.ip, gw_address=args.gw, nic_device_name=args.nic,
-                                profiles=profiles, create_project_flag=args.make_project, hole=args.hole)
+                                profiles=profiles, create_project_flag=args.make_project, hole=args.hole,
+                                key_filename=my_key_filename if args.key else None, folder = USER_DIR, login=args.login)
             elif args.instance_command in ["delete", "del", "d"]:
                 delete_instance(instance, remote, project, force=args.force)
             elif args.instance_command in ["bash", "b"]:
@@ -5471,12 +5540,17 @@ def create_remote_parser(subparsers):
     )
     remote_enroll_parser.add_argument("remote_server", help="Name to assign to the remote server")
     remote_enroll_parser.add_argument("ip_address", help="IP address or domain name of the remote server")
-    remote_enroll_parser.add_argument("port", nargs="?", default="8443", help="Port of the remote server (default: 8443)")
-    remote_enroll_parser.add_argument("user", nargs="?", default="ubuntu", help="Username for SSH into the remote (default: ubuntu)")
+    remote_enroll_parser.add_argument("port", nargs="?", 
+                                      default="8443", help="Port of the remote server (default: 8443)")
+    remote_enroll_parser.add_argument("user", nargs="?",
+                                      default=DEFAULT_LOGIN_FOR_INSTANCES,
+                                      help=f"Username for SSH into the remote (default: {DEFAULT_LOGIN_FOR_INSTANCES})")
     remote_enroll_parser.add_argument("cert_filename", nargs="?", default="~/.config/incus/client.crt", 
-                                      help="Client certificate file to transfer (default: ~/.config/incus/client.crt)")
+                                      help="Client certificate file to transfer "
+                                      "(default: ~/.config/incus/client.crt)")
     remote_enroll_parser.add_argument("remote_cert_filename", nargs="?", default="/var/lib/incus/server.crt",
-                                      help="Remote certificate file to transfer locally (default: /var/lib/incus/server.crt)")
+                                      help="Remote certificate file to transfer locally "
+                                      "(default: /var/lib/incus/server.crt)")
     remote_enroll_parser.add_argument("--loc_name", default="main",
                                       help="Name for saving the client certificate on the remote server (default: main)")
 

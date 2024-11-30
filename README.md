@@ -226,11 +226,11 @@ Each command has its own set of subcommands and options.
 
 - #### `figo instance create`
 
-  - **Description:** Create a new instance with optional specifications for image, type, profiles, and IP settings. If the IP address is not provided, an available IP address is automatically assigned. By default, assigns the next IP after the highest assigned IP; with `--hole`, assigns the first available gap in the IP range.
+  - **Description:** Create a new instance with optional specifications for image, type, profiles, IP settings, and adding a public key for access. If the IP address is not provided, an available IP address is automatically assigned. By default, assigns the next IP after the highest assigned IP; with `--hole`, assigns the first available gap in the IP range. If the `-k/--key` option is used, a public key is added to the `authorized_keys` file of the instance.
   - **Syntax:**
 
     ```bash
-    figo instance create instance_name image [-t type] [-p project] [-r remote] [-i ip_address] [-g gw_address] [-n nic] [-f profiles] [-o | --hole] [-m | --make_project] [-u user]
+    figo instance create instance_name image [-t type] [-p project] [-r remote] [-i ip_address] [-g gw_address] [-n nic] [-f profiles] [-o | --hole] [-m | --make_project] [-u user] [-k | --key] [-l login]
     ```
 
   - **Options:**
@@ -245,7 +245,9 @@ Each command has its own set of subcommands and options.
     - `-f, --profile`: Comma-separated list of profiles to apply to the instance.
     - `-m, --make_project`: Create the project if it does not exist on the specified remote.
     - `-o, --hole`: Assigns the first available IP address hole in the range rather than the next sequential IP.
-    - `-u, --user`: Specify the username to infer the project.
+    - `-u, --user`: Specify the username to infer the project and derive the public key for `-k/--key`.
+    - `-k, --key`: Add the user's public key to the instance's `authorized_keys` file. Requires `-u/--user`.
+    - `-l, --login`: Specify the user login name on the instance for which the key provides access (optional, default: `ubuntu`).
 
   - **Examples:**
 
@@ -256,8 +258,9 @@ Each command has its own set of subcommands and options.
     figo instance create instance_name images:ubuntu/22.04 -f profile1,profile2
     figo instance create instance_name images:alpine/3.15 -m --hole
     figo instance create instance_name images:fedora/35 -u custom_user -n eth1 -r remote_name
+    figo instance create instance_name images:ubuntu/22.04 -u custom_user -k
+    figo instance create instance_name images:debian/11 -u custom_user -k -l newlogin
     ```
-
 - #### `figo instance delete`
 
   - **Description:** Delete a specific instance, with an option to force delete if the instance is running.
