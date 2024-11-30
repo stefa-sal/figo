@@ -150,7 +150,7 @@ Each command has its own set of subcommands and options.
   - **Options:**
     - `instance_name`: The name of the instance, which can include remote and project scope.
     - `key_filename`: Optional filename of the public key on the host. If not provided, the system derives it based on the `-u/--user` parameter.
-    - `-l, --login`: Specify the user login name (default: `ubuntu`).
+    - `-l, --login`: Specify the user login name for which we are setting the key (default: `ubuntu`).
     - `-d, --dir`: Specify the directory path where the key file is located (default: `./users`).
     - `-f, --force`: Start the instance if not running, then stop it after setting the key.
     - `-r, --remote`: Specify the remote server name.
@@ -179,7 +179,7 @@ Each command has its own set of subcommands and options.
     - `instance_name`: The name of the instance. Can include remote and project scope in the format `remote:project.instance_name`.
     - `-r, --remote`: Specify the remote server name.
     - `-p, --project`: Specify the project name.
-    - `-l, --login`: Specify the user login name to check keys for (default: `ubuntu`).
+    - `-l, --login`: Specify the user login name for which we are showing the keys (default: `ubuntu`).
     - `-f, --force`: Start the instance if not running, then stop it after fetching the keys.
     - `-k, --keys`: Show full key details, including the full key content.
     - `-e, --extend`: Extend column widths to fit content for better readability.
