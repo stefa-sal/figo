@@ -81,6 +81,9 @@ Endpoint = "gpunet-vpn.netgroup.uniroma2.it:13232"
 
 FIGO_PREFIX="figo-"  
 
+# used for setting user identifier in pub key if email is not provided
+FIGO_FAKE_DOMAIN = "@figo"
+
 # NB: PROJECT_PREFIX cannot contain underscores
 PROJECT_PREFIX = FIGO_PREFIX 
 
@@ -3282,13 +3285,14 @@ def delete_project(remote_node, project_name):
     
     return True
 
-def generate_ssh_key_pair(username, private_key_file):
+def generate_ssh_key_pair(username, private_key_file, email=None):
     """
     Generate an Ed25519 SSH key pair for the user.
 
     Args:
     - username (str): Username for whom the keys are being generated.
     - private_key_file (str): Full path to the private key file.
+    - email (str, optional): Email address to add to the public key as a comment.
     
     The public key is saved to a file with the same name as the private key file,
     but with the .pub extension.
@@ -3297,10 +3301,10 @@ def generate_ssh_key_pair(username, private_key_file):
     True if the key pair was generated successfully, False otherwise.
     """
     try:
-        
+        identifier = f"{FIGO_PREFIX}{email}" if email else f"{FIGO_PREFIX}{username}{FIGO_FAKE_DOMAIN}"
         # Generate the private key using ssh-keygen
         subprocess.run(
-            ["ssh-keygen", "-t", "ed25519", "-f", private_key_file, "-N", ""],
+            ["ssh-keygen", "-t", "ed25519", "-f", private_key_file, "-N", "", "-C", identifier],
             check=True,
         )
         
@@ -3494,7 +3498,7 @@ def add_user(
     if keys:
         # Generate Ed25519 key pair for SSH login
         ssh_key_file = os.path.join(directory, f"{user_name}.key_ssh_ed25519")
-        if not generate_ssh_key_pair(user_name, ssh_key_file):
+        if not generate_ssh_key_pair(user_name, ssh_key_file, email=email):
             logger.error(f"Failed to generate SSH key pair for user: {user_name}")
             return False
 
