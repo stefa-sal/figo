@@ -31,6 +31,7 @@ SSH_MIKROTIK_HOST = "160.80.105.2"  # Default MikroTik IP or host
 SSH_MIKROTIK_PORT = 22  # Default SSH port
 WG_INTERFACE = "wireguard2"  # Default WireGuard interface
 WG_VPN_KEEPALIVE = "20s"  # Default persistent keepalive interval
+WG_SERVER_PUB_KEY = "rdM5suGD/hTHdStf/K1SVc4rviUcUQbKnARnw0AAwT8="  # Default public key of the WireGuard server
 
 SSH_LINUX_USER_NAME = "ubuntu"  # Default SSH username for remote Linux hosts
 SSH_LINUX_HOST = ""  # Default Linux IP or host
@@ -2849,7 +2850,7 @@ PrivateKey = {private_key}
 Address = {ip_address}/24
 
 [Peer]
-PublicKey = {public_key}
+PublicKey = {WG_SERVER_PUB_KEY}
 AllowedIPs = {AllowedIPs}
 Endpoint = {Endpoint}
 """
@@ -4415,7 +4416,8 @@ def create_instance_parser(subparsers):
     )
     set_key_parser.add_argument(
         "-l", "--login", default=DEFAULT_LOGIN_FOR_INSTANCES,
-        help=f"Specify the user login name (default: {DEFAULT_LOGIN_FOR_INSTANCES}) for which we are setting the key."
+        help=f"Specify the user login name for which we are setting the key "
+        "(default: {DEFAULT_LOGIN_FOR_INSTANCES})."
     )
     set_key_parser.add_argument(
         "-d", "--dir", default=USER_DIR,
@@ -4450,7 +4452,8 @@ def create_instance_parser(subparsers):
     show_keys_parser.add_argument(
         "-l", "--login",
         default=DEFAULT_LOGIN_FOR_INSTANCES,
-        help=f"Specify the user login name (default: {DEFAULT_LOGIN_FOR_INSTANCES})."
+        help=f"Specify the user login name for which we are showing the keys "
+        "(default: {DEFAULT_LOGIN_FOR_INSTANCES})."
     )
     show_keys_parser.add_argument(
         "-f", "--force",
