@@ -2,6 +2,7 @@
 #!/home/gpuserver/figo/venv/bin/python
 
 import argparse
+import zipfile
 import argcomplete
 import pylxd
 import subprocess
@@ -965,6 +966,7 @@ def return_available_gpu(remote, instance_type):
                         profile_pci_addresses.append(pci_address)
 
     available_pci_addresses = get_pci_addresses(remote)
+
     if available_pci_addresses is None:
         logger.error(f"Failed to retrieve available PCI addresses from remote '{remote}'.")
         return []
@@ -1731,15 +1733,41 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
         # Handle image selection based on whether it is local or from a remote
         if image.startswith('local:'):
             # Local image (format: local:image)
-            alias = image.split(':')[1]
-            logger.info(f"Creating instance '{instance_name}' from local image '{alias}'.")
+            alias_or_fingerprint = image.split(':')[1]
+            logger.info(f"Creating instance '{instance_name}' from local image '{alias_or_fingerprint}'.")
 
+            image_found = False
             # Retrieve the local image by alias
             try:
-                image = remote_client.images.get_by_alias(alias)
-                logger.info(f"Found local image with alias '{alias}', using fingerprint '{image.fingerprint}'.")
+                print(dir(remote_client.images))
+                    
+                for my_image in remote_client.images.all() :
+                    # print all the fields of the my_image object
+                    #print(dir(my_image))
+                    print(my_image.fingerprint)
+                    
+                image = remote_client.images.get_by_alias(alias_or_fingerprint)
+                logger.info(f"Found local image with alias '{alias_or_fingerprint}', with fingerprint '{image.fingerprint}'.")
+                image_found = True
             except pylxd.exceptions.LXDAPIException:
-                logger.error(f"Local image '{alias}' not found.")
+                pass
+                print("Exception")
+            
+            if not image_found:
+                print("Image not found, try again with fingerprint")
+                try:
+                    # Retrieve the local image by fingerprint
+                    image = remote_client.images.get(alias_or_fingerprint)
+                    #image = remote_client.images.get("8cf9c79b9e476f679617f1e4e37df14936603bd4b4a77080c18c85389da37da3")
+
+                    logger.info(f"Found local image with fingerprint '{alias_or_fingerprint}'.")
+                    image_found = True
+
+                except pylxd.exceptions.LXDAPIException:
+                    pass
+            
+            if not image_found:
+                logger.error(f"Local image '{alias_or_fingerprint}' not found.")
                 return False
 
             # Use the fingerprint instead of the alias
@@ -1750,8 +1778,8 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
 
         else:
             # Remote image (format: remote:image)
-            image_server, alias = image.split(':')
-            logger.info(f"Creating instance '{instance_name}' from remote image '{alias}' on server '{image_server}'.")
+            image_server, alias_or_fingerprint = image.split(':')
+            logger.info(f"Creating instance '{instance_name}' from remote image '{alias_or_fingerprint}' on server '{image_server}'.")
 
             # Get the image server address
             image_server_address, protocol = get_remote_address(image_server, get_protocol=True)
@@ -1765,7 +1793,7 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
                 "mode": "pull",
                 "server": image_server_address,
                 "protocol": "simplestreams",
-                'alias': alias
+                'alias': alias_or_fingerprint
             }
 
         if not nic_device_name:
@@ -2940,8 +2968,8 @@ def add_friendly_name(pfx_file, friendly_name, password=None):
     logger.info(f"PFX file with friendlyName updated: {pfx_file}")
     return True
 
-def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None):
-    """Generate key pair (CRT and PFX files) for the user.
+def generate_key_pair_for_web_access(user_name, crt_file, temp_key_file, pfx_file, pfx_password=None):
+    """Generate key pair (CRT and PFX files) for the user to be used for web access.
 
     Parameters:
     - user_name: Name of the user
@@ -2982,14 +3010,14 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
 
         # Write the private key to a file
         try:
-            with open(key_file, "wb") as key_out:
+            with open(temp_key_file, "wb") as key_out:
                 key_out.write(private_key.private_bytes(
                     cryptography.hazmat.primitives.serialization.Encoding.PEM,
                     cryptography.hazmat.primitives.serialization.PrivateFormat.TraditionalOpenSSL,
                     cryptography.hazmat.primitives.serialization.NoEncryption()
                 ))
         except IOError as e:
-            logger.error(f"Failed to write private key to {key_file}: {e}")
+            logger.error(f"Failed to write private key to {temp_key_file}: {e}")
             return False
 
         # Write the certificate to a file
@@ -3004,7 +3032,7 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
         openssl_cmd = [
             "openssl", "pkcs12", "-export",
             "-out", pfx_file,
-            "-inkey", key_file,
+            "-inkey", temp_key_file,
             "-in", crt_file,
             "-certpbe", "PBE-SHA1-3DES",  # Use SHA1 and 3DES for encryption
             "-keypbe", "PBE-SHA1-3DES",   # Use SHA1 and 3DES for the key
@@ -3026,9 +3054,9 @@ def generate_key_pair(user_name, crt_file, key_file, pfx_file, pfx_password=None
 
         # Delete the key file because it is no longer needed (the PFX file contains the key)
         try:
-            subprocess.run(["rm", key_file], check=True, text=True, capture_output=True)
+            subprocess.run(["rm", temp_key_file], check=True, text=True, capture_output=True)
         except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to delete key file {key_file}: {e.stderr.strip()}")
+            logger.error(f"Failed to delete key file {temp_key_file}: {e.stderr.strip()}")
             return False
 
         # Add a friendly name to the PFX file
@@ -3419,6 +3447,17 @@ def add_user(
     - org (str, optional): Organization of the user.
     - keys (bool, optional): If True, generate an additional Ed25519 SSH key pair for the user.
 
+    This function performs the following steps:
+    1. Check if the user already exists in the certificates.
+    2. Check if the project exists on the remote server.
+    3. Generate a new key pair and certificate if cert_file is not provided.
+    4. Optionally generate an additional SSH key pair.
+    5. Create a project for the user if not an admin and project is not provided.
+    6. Add the user certificate to Incus.
+    7. Generate WireGuard configuration if wireguard is True.
+    8. Add the user to the WireGuard VPN on the MikroTik switch if set_vpn is True.
+    
+    
     Returns:
     True if the user is added successfully, False otherwise.
     """
@@ -3489,8 +3528,8 @@ def add_user(
         # Generate key pair and certificate
         crt_file = os.path.join(directory, f"{user_name}.crt")
         pfx_file = os.path.join(directory, f"{user_name}.pfx")
-        key_file = os.path.join(directory, f"{user_name}.key")
-        if not generate_key_pair(user_name, crt_file, key_file, pfx_file):
+        temp_key_file = os.path.join(directory, f"{user_name}.temp_key")
+        if not generate_key_pair_for_web_access(user_name, crt_file, temp_key_file, pfx_file):
             logger.error(f"Failed to generate key pair and certificate for user: {user_name}")
             return False
         logger.info(f"Generated certificate and key pair for user: {user_name}")
@@ -3530,6 +3569,23 @@ def add_user(
             logger.error("Failed to generate WireGuard configuration.")
             return False
     
+    # Create a .zip file with all the generated files in the directory
+    zip_file = os.path.join(directory, f"{user_name}.zip")  # Create a .zip file with all the generated files
+    with zipfile.ZipFile(zip_file, 'w') as zipf:
+        zipf.write(crt_file, os.path.basename(crt_file))
+        zipf.write(pfx_file, os.path.basename(pfx_file))
+        if keys:
+            zipf.write(ssh_key_file, os.path.basename(ssh_key_file))
+            zipf.write(f"{ssh_key_file}.pub", os.path.basename(f"{ssh_key_file}.pub"))
+            
+
+        if wireguard:
+            zipf.write(os.path.join(directory, f"{user_name}.conf"), f"{user_name}.conf")
+            zipf.write(os.path.join(directory, f"{user_name}.wgpub"), f"{user_name}.wgpub") # Add the public key file to the .zip
+            
+
+    # Add the user to the WireGuard VPN on the MikroTik switch
+
     if set_vpn:
         if not wireguard:
             logger.error("Error: Cannot set VPN without generating WireGuard configuration.")
