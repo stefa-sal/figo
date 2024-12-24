@@ -1739,27 +1739,16 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
             image_found = False
             # Retrieve the local image by alias
             try:
-                print(dir(remote_client.images))
-                    
-                for my_image in remote_client.images.all() :
-                    # print all the fields of the my_image object
-                    #print(dir(my_image))
-                    print(my_image.fingerprint)
-                    
                 image = remote_client.images.get_by_alias(alias_or_fingerprint)
                 logger.info(f"Found local image with alias '{alias_or_fingerprint}', with fingerprint '{image.fingerprint}'.")
                 image_found = True
             except pylxd.exceptions.LXDAPIException:
                 pass
-                print("Exception")
             
             if not image_found:
-                print("Image not found, try again with fingerprint")
                 try:
                     # Retrieve the local image by fingerprint
                     image = remote_client.images.get(alias_or_fingerprint)
-                    #image = remote_client.images.get("8cf9c79b9e476f679617f1e4e37df14936603bd4b4a77080c18c85389da37da3")
-
                     logger.info(f"Found local image with fingerprint '{alias_or_fingerprint}'.")
                     image_found = True
 
