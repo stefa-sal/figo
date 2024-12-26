@@ -3374,17 +3374,17 @@ def add_wireguard_vpn_user_on_mikrotik(public_key, ip_address, vpnuser, username
                                  keepalive=WG_VPN_KEEPALIVE):
     """
     Configures a MikroTik switch with a new WireGuard VPN user.
-    It is optinally executed in the add_user function, if the command line argument -s, --set_vpn is provided.
+    It is optionally executed in the add_user function, if the command line argument -s, --set_vpn is provided.
 
     Args:
     - public_key (str): The WireGuard public key of the new VPN user.
     - ip_address (str): The allowed IP address (without prefix) for the VPN user
     - vpnuser (str): The VPN username, added as a comment for identification.
-    - username (str, optional): The SSH username to connect to the MikroTik switch. Default is 'admin'.
-    - host (str, optional): The IP address or hostname of the MikroTik switch. Default is '192.168.88.1'.
-    - port (int, optional): The SSH port for the MikroTik switch. Default is 22.
-    - interface (str, optional): The WireGuard interface on the MikroTik switch. Default is 'wireguard2'.
-    - keepalive (str, optional): The persistent keepalive interval. Default is '20s'.
+    - username (str, optional): The SSH username to connect to the MikroTik switch. Default is SSH_MIKROTIK_USER_NAME.
+    - host (str, optional): The IP address or hostname of the MikroTik switch. Default is SSH_MIKROTIK_HOST.
+    - port (int, optional): The SSH port for the MikroTik switch. Default is SSH_MIKROTIK_PORT.
+    - interface (str, optional): The WireGuard interface on the MikroTik switch. Default is WG_INTERFACE.
+    - keepalive (str, optional): The persistent keepalive interval. Default is WG_VPN_KEEPALIVE.
 
     Returns:
     - bool: True if the configuration is successful, False otherwise.
@@ -3438,6 +3438,97 @@ def add_wireguard_vpn_user_on_mikrotik(public_key, ip_address, vpnuser, username
     finally:
         # Close the SSH connection
         ssh_client.close()
+
+def remove_wireguard_vpn_user_on_mikrotik(vpnuser, username=SSH_MIKROTIK_USER_NAME, 
+                                          host=SSH_MIKROTIK_HOST, port=SSH_MIKROTIK_PORT):
+    """
+    Removes a WireGuard VPN user configuration from a MikroTik switch.
+
+    Args:
+    - vpnuser (str): The VPN username to identify and remove the WireGuard peer.
+    - username (str, optional): The SSH username to connect to the MikroTik switch. Default is SSH_MIKROTIK_USER_NAME.
+    - host (str, optional): The IP address or hostname of the MikroTik switch. Default is SSH_MIKROTIK_HOST.
+    - port (int, optional): The SSH port for the MikroTik switch. Default is SSH_MIKROTIK_PORT.
+
+    Returns:
+    - bool: True if the removal is successful, False otherwise.
+    """
+
+    try:
+        # Set up the SSH client and connect to the MikroTik switch
+        ssh_client = paramiko.SSHClient()
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # Automatically add the host key
+
+        logger.info(f"Connecting to MikroTik switch at {host}...")
+        ssh_client.connect(hostname=host, username=username, port=port)
+
+        # Find the WireGuard peer by comment (vpnuser)
+        find_command = (
+            f'/interface wireguard peers print where comment="{vpnuser}"'
+        )
+
+        logger.info(f"Executing command on MikroTik: {find_command}")
+
+        # Execute the find command
+        stdin, stdout, stderr = ssh_client.exec_command(find_command)
+
+        # Read output and error from the command execution
+        output = stdout.read().decode().strip()
+        error = stderr.read().decode().strip()
+
+        # Check for errors
+        if error:
+            logger.error(f"Error while finding WireGuard peer on MikroTik: {error}")
+            return False
+
+        # Parse the peer ID from the output
+        peer_id = None
+        for line in output.splitlines():
+            if vpnuser in line:
+                peer_id = line.split()[0]  # Assuming the first column is the peer ID
+                break
+
+        if not peer_id:
+            logger.error(f"WireGuard peer with comment '{vpnuser}' not found.")
+            return False
+
+        # Build the WireGuard removal command
+        remove_command = (
+            f'/interface wireguard peers remove [find where comment="{vpnuser}"]'
+        )
+
+
+
+        logger.info(f"Executing command on MikroTik: {remove_command}")
+
+        # Execute the remove command
+        stdin, stdout, stderr = ssh_client.exec_command(remove_command)
+
+        # Read output and error from the command execution
+        output = stdout.read().decode().strip()
+        error = stderr.read().decode().strip()
+
+        # Check for errors
+        if error:
+            logger.error(f"Error while removing WireGuard peer on MikroTik: {error}")
+            return False
+
+        # Log successful removal
+        logger.info(f"WireGuard VPN user '{vpnuser}' removed successfully.")
+        return True
+
+    except paramiko.SSHException as e:
+        logger.error(f"SSH connection error: {e}")
+        return False
+
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+        return False
+
+    finally:
+        # Close the SSH connection
+        ssh_client.close()
+
 
 def add_user(
     user_name,
@@ -3778,7 +3869,7 @@ def list_storage_volumes_in_project(remote_node, project_name):
 
     return storage_volumes_in_project
 
-def delete_user(user_name, client, purge=False, removefiles=False):
+def delete_user(user_name, client, purge=False, removefiles=False, removevpn=False):
     """
     Delete a user from the system.
 
@@ -3787,6 +3878,7 @@ def delete_user(user_name, client, purge=False, removefiles=False):
     - client: pylxd.Client instance
     - purge: If True, delete associated projects even if the user does not exist
     - removefiles: If True, remove files associated with the user in the USER_DIR
+    - removevpn: If True, remove the user from the WireGuard VPN on the MikroTik switch
     """
 
     # Construct the project name associated with the user
@@ -3819,6 +3911,11 @@ def delete_user(user_name, client, purge=False, removefiles=False):
             if os.path.exists(file_path):
                 os.remove(file_path)
                 logger.info(f"File '{os.path.basename(file_path)}' has been removed.")
+
+    # Remove the user from the WireGuard VPN on the MikroTik switch if the flag is set
+    if removevpn:
+        if not remove_wireguard_vpn_user_on_mikrotik(user_name):
+            logger.warning(f"Failed to remove user '{user_name}' from WireGuard VPN on MikroTik.")
 
     # Retrieve the list of remote servers
     remotes = get_incus_remotes()
@@ -5537,18 +5634,24 @@ def create_user_parser(subparsers):
     user_subparsers = user_parser.add_subparsers(dest="user_command")
 
     # List subcommand
-    user_list_parser = user_subparsers.add_parser("list", aliases=["l"], help="List installed certificates (use -f or --full for more details)")
-    user_list_parser.add_argument("-f", "--full", action="store_true", help="Show full details of installed certificates")
-    user_list_parser.add_argument("-e", "--extend", action="store_true", help="Extend column width to fit the content")
+    user_list_parser = user_subparsers.add_parser("list", aliases=["l"],
+                                                  help="List installed certificates (use -f or --full for more details)")
+    user_list_parser.add_argument("-f", "--full", action="store_true",
+                                  help="Show full details of installed certificates")
+    user_list_parser.add_argument("-e", "--extend", action="store_true",
+                                  help="Extend column width to fit the content")
 
     # Add subcommand
     user_add_parser = user_subparsers.add_parser("add", aliases=["a"], help="Add a new user to the system")
     user_add_parser.add_argument("username", action=NoUnderscoreCheck, help="Username of the new user")
-    user_add_parser.add_argument("-c", "--cert", help="Path to the user's certificate file for access to GUI (in .crt format, "
+    user_add_parser.add_argument("-c", "--cert",
+                                 help="Path to the user's certificate file for access to GUI (in .crt format, "
                                 "if not provided a new key pair will be generated)")  
     user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
-    user_add_parser.add_argument("-w", "--wireguard", action="store_true", help="Generate WireGuard config for the user in .conf file") 
-    user_add_parser.add_argument("-s", "--set_vpn", action="store_true", help="Set the user's VPN profile into the WireGuard access node") 
+    user_add_parser.add_argument("-w", "--wireguard", action="store_true",
+                                 help="Generate WireGuard config for the user in .conf file") 
+    user_add_parser.add_argument("-s", "--set_vpn", action="store_true", 
+                                 help="Set the user's VPN profile into the WireGuard access node") 
     user_add_parser.add_argument("-p", "--project", help="Project name to associate the user with an existing project")
     user_add_parser.add_argument("-e", "--email", action=NoCommaCheck, help="User's email address")
     user_add_parser.add_argument("-n", "--name", action=NoCommaCheck, help="User's full name")
@@ -5568,10 +5671,16 @@ def create_user_parser(subparsers):
     user_edit_parser.add_argument("-o", "--org", action=NoCommaCheck, help="New organization for the user")
 
     # Delete subcommand
-    user_delete_parser = user_subparsers.add_parser("delete", aliases=["del", "d"], help="Delete an existing user from the system")
+    user_delete_parser = user_subparsers.add_parser("delete", aliases=["del", "d"], 
+                                                    help="Delete an existing user from the system")
     user_delete_parser.add_argument("username", help="Username of the user to delete")
-    user_delete_parser.add_argument("-p", "--purge", action="store_true", help="Delete associated projects and user files (even if the user does not exist)")
-    user_delete_parser.add_argument("-k", "--keepfiles", action="store_true", help="Keep the associated files of the user in the users folder")
+    user_delete_parser.add_argument("-p", "--purge", action="store_true",
+                                    help="Delete associated projects and user files (even if the user does not exist)")
+    user_delete_parser.add_argument("-k", "--keepfiles", action="store_true",
+                                    help="Keep the associated files of the user in the users folder")
+    user_delete_parser.add_argument("-n", "--no_vpn", action="store_true",
+                                    help="Do not clean wireguard user entry in the access router")
+
 
     # Link parsers back to the main command
     subparsers._name_parser_map["us"] = user_parser
@@ -5595,8 +5704,10 @@ def handle_user_command(args, client, parser_dict, client_name=None):
         edit_user(args.username, client, email=args.email, name=args.name, org=args.org)
     elif args.user_command in ["delete", "del", "d"]:
         # Reverse logic: delete files by default unless --keepfiles is used
+        # Reverse logic: clean wireguard user entry by default unless --no_vpn is used
         removefiles = not args.keepfiles
-        delete_user(args.username, client, purge=args.purge, removefiles=removefiles)
+        removevpn = not args.no_vpn
+        delete_user(args.username, client, purge=args.purge, removefiles=removefiles, removevpn=removevpn)
 
 #############################################
 ###### figo remote command CLI ##############
