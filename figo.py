@@ -778,7 +778,7 @@ def exec_command(instance, command):
 ###### figo instance command functions #####
 #############################################
 
-def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_scope=None, full=False):
+def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_scope=None, full=False, join=False):
     """Get instances from the specified remote node and project and add their details using add_row_to_output.
     
     Returns:    False if fetching the instances failed, True otherwise.
@@ -809,25 +809,50 @@ def get_and_print_instances(COLS, remote_node=None, project_name=None, instance_
         if full:
             # Print all profiles
             profiles_str = ", ".join(instance.get("profiles", []))
-            add_row_to_output(COLS, [name, instance_type, state, context, format_ip_device_pairs(ip_device_pairs), profiles_str])
+            if join:
+                # Join the context and instance name
+                add_row_to_output(COLS, [f"{context}.{name}", instance_type, state,
+                                         format_ip_device_pairs(ip_device_pairs), profiles_str])
+            else:
+                add_row_to_output(COLS, [name, instance_type, state, context,
+                                     format_ip_device_pairs(ip_device_pairs), profiles_str])
         else:
             # Print only GPU profiles with color coding based on state
             gpu_profiles = [profile for profile in instance.get("profiles", []) if profile.startswith("gpu")]
             profiles_str = ", ".join(gpu_profiles)
             colored_profiles_str = f"{RED}{profiles_str}{RESET}" if state == "run" else f"{GREEN}{profiles_str}{RESET}"
-            add_row_to_output(COLS, [name, instance_type, state, context, format_ip_device_pairs(ip_device_pairs), colored_profiles_str],
-                      reset_color=True)
+            if join:
+                add_row_to_output(COLS, [f"{context}.{name}", instance_type, state,
+                                         format_ip_device_pairs(ip_device_pairs), colored_profiles_str], reset_color=True)
+            else:
+                add_row_to_output(COLS, [name, instance_type, state, context,
+                                     format_ip_device_pairs(ip_device_pairs), colored_profiles_str],
+                                     reset_color=True)
     return True
     
 
-def list_instances(remote_node=None, project_name=None, instance_scope=None, full=False, extend=False):
+def list_instances(remote_node=None, project_name=None, instance_scope=None, full=False, extend=False, join=False):
     """Print profiles of all instances, either from the local or a remote Incus node.
+    
     If full is False, prints only GPU profiles with color coding.
+    If full is True, prints all profiles.
+
+    If extend is True, the output of each column is extended to the maximum width of the values in that column.
+    If join is True, the context and intance name are joined into a single string and extend is set to True.
+
     """
-    # Determine the header and profile type based on the 'full' flag
-    if full:
+
+    if join:
+        extend = True
+    
+    # Determine the columns based on the 'full' and 'join' flag
+    if full and join:
+        COLS = [('INSTANCE WITH CONTEXT',35), ('TYPE',4), ('STATE',5), ('IP ADDRESS(ES)',25), ('PROFILES',75)]
+    elif full: # full is True and join is False
         COLS = [('INSTANCE',16), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('PROFILES',75)]
-    else:
+    elif join: # full is False and join is True
+        COLS = [('INSTANCE WITH CONTEXT',35), ('TYPE',4), ('STATE',5), ('IP ADDRESS(ES)',25), ('GPU PROFILES',75)]
+    else: # full is False and join is False
         COLS = [('INSTANCE',16), ('TYPE',4), ('STATE',5), ('CONTEXT',25), ('IP ADDRESS(ES)',25), ('GPU PROFILES',75)]
 
     add_header_line_to_output(COLS)
@@ -852,13 +877,13 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
                     for project in projects:
                         my_project_name = project["name"]
                         result = get_and_print_instances(COLS, remote_node=my_remote_node, project_name=my_project_name,
-                                                         instance_scope=instance_scope, full=full)
+                                                         instance_scope=instance_scope, full=full, join=join)
                         if not result:
                             set_of_errored_remotes.add(my_remote_node)
             else: # project_name is not None
                 # Get instances for the specified project_name
                 result = get_and_print_instances(COLS, remote_node=my_remote_node, project_name=project_name,
-                                                 instance_scope=instance_scope, full=full)
+                                                 instance_scope=instance_scope, full=full, join=join)
                 if not result:
                     set_of_errored_remotes.add(my_remote_node)
     else: # remote_node is not None
@@ -872,13 +897,13 @@ def list_instances(remote_node=None, project_name=None, instance_scope=None, ful
                 for project in projects:
                     my_project_name = project["name"]
                     result = get_and_print_instances(COLS, remote_node=remote_node, project_name=my_project_name,
-                                                     instance_scope=instance_scope, full=full)
+                                                     instance_scope=instance_scope, full=full, join=join)
                     if not result:
                         set_of_errored_remotes.add(remote_node)
         else: # remote_node is not None and project_name is not None
             # Get instances from the specified remote node and project
             result = get_and_print_instances(COLS, remote_node=remote_node, project_name=project_name,
-                                             instance_scope=instance_scope, full=full)
+                                             instance_scope=instance_scope, full=full, join=join)
             if not result:
                 set_of_errored_remotes.add(remote_node)
 
@@ -4385,19 +4410,26 @@ def create_instance_parser(subparsers):
         help="List instances in the system, with options to specify scope, remote, and project.",
         description="List instances, optionally specifying a scope, remote server, or project.\n"
                     "The scope can include 'remote:project.', 'project.', or 'remote:'.\n"
-                    "Use the -f/--full option to display more detailed information.",
+                    "Use the -f/--full option to display more detailed information.\n"
+                    "Use the -e/--extend option to extend column width for better readability.\n"
+                    "Use the -j/--join option to combine the context and instance name into a single field for display.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
-               "  figo instance list\n"
-               "  figo instance list remote:project.\n"
-               "  figo instance list project. -r remote_name\n"
-               "  figo instance list -f --extend"
+            "  figo instance list\n"
+            "  figo instance list remote:project.\n"
+            "  figo instance list project. -r remote_name\n"
+            "  figo instance list -f --extend\n"
+            "  figo instance list -j"
     )
     instance_list_parser.add_argument(
         "-f", "--full", action="store_true", help="Show full details of instance profiles"
     )
     instance_list_parser.add_argument(
         "-e", "--extend", action="store_true", help="Extend column width to fit content"
+    )
+    instance_list_parser.add_argument(
+        "-j", "--join", action="store_true",
+        help="Join the context and instance name into a single field."
     )
     instance_list_parser.add_argument(
         "scope", nargs="?", help="Scope in the format 'remote:project.', 'project.', or 'remote:' to limit the listing"
@@ -4714,7 +4746,8 @@ def handle_instance_list(args):
         # project_name can be None if project_scope is None
 
     # Pass the `extend` flag to list_instances to adjust column width as specified by user
-    list_instances(remote_node, project_name=project_name, instance_scope=instance_scope, full=args.full, extend=args.extend)
+    list_instances(remote_node, project_name=project_name, instance_scope=instance_scope,
+                   full=args.full, extend=args.extend, join=args.join)
 
 def handle_instance_command(args, parser_dict):
     if not args.instance_command:

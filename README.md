@@ -63,17 +63,18 @@ Each command has its own set of subcommands and options.
 
 - #### `figo instance list`
 
-  - **Description:** List instances, with options to specify a scope, remote, and project. Use the `--full` option to display detailed information.
+  - **Description:** List instances, with options to specify a scope, remote, and project. Use the `--full` option to display detailed information. The `--extend` option adjusts column widths for better readability. The `--join` option combines the context and instance name into a single field.
   - **Syntax:**
 
     ```bash
-    figo instance list [scope] [-f | --full] [-e | --extend] [-r remote] [-p project] [-u user]
+    figo instance list [scope] [-f | --full] [-e | --extend] [-j | --join] [-r remote] [-p project] [-u user]
     ```
 
   - **Options:**
     - `scope`: Limits the listing to the specified scope in the format `remote:project.`, `project.`, or `remote:`.
     - `-f, --full`: Show full details of instance profiles.
     - `-e, --extend`: Extend column width to fit content.
+    - `-j, --join`: Combine the context and instance name into a single field for display.
     - `-r, --remote`: Specify the remote server name.
     - `-p, --project`: Specify the project name.
     - `-u, --user`: Specify the username to infer the project.
@@ -86,6 +87,8 @@ Each command has its own set of subcommands and options.
     figo instance list project. -r remote_name
     figo instance list -f --extend
     figo instance list project. -u custom_user
+    figo instance list project. -j
+    figo instance list project. -j -e
     ```
 
 - #### `figo instance start`
