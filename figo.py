@@ -1626,6 +1626,12 @@ def add_authorized_keys_to_config(config, key_filename, login):
     """
     Adds 'user.user-data' to the config if key_filename is provided.
 
+    Note that adding user-data to the config will overwrite any existing user-data.
+    For this reason, this function also sets other fields in the user configuration
+    in addition to the public key, namely the shell, lock_passwd, gecos, groups, and sudo fields.
+    These fields are set to default values for an Ubuntu user and normally they are
+    taken from the cloud-init file: /etc/cloud/cloud.cfg
+
     Args:
         config (dict): The configuration dictionary for instance creation.
         key_filename (str): Path to the public key file.
@@ -1651,6 +1657,11 @@ def add_authorized_keys_to_config(config, key_filename, login):
               - name: {login}
                 ssh-authorized-keys:
                   - {public_key_content}
+                shell: /bin/bash
+                lock_passwd: True
+                gecos: Ubuntu
+                groups: [adm, audio, cdrom, dialout, dip, floppy, lxd, netdev, plugdev, sudo, video]
+                sudo: ["ALL=(ALL) NOPASSWD:ALL"]
             """
             print(f"Added public key content from '{key_filename}' to the config for user '{login}'.")
         except Exception as e:
