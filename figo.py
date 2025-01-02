@@ -196,6 +196,7 @@ def evaluate_output_rows_column_width():
 
     for row in output_rows:
         for i, value in enumerate(row[1]):
+            print(value) # debug
             column_widths[i] = max(column_widths[i], len(value))
 
     return column_widths
@@ -212,6 +213,8 @@ def flush_output(extend=False):
         column_widths = evaluate_output_rows_column_width() # Evaluate the column width based on the output rows
     else:
         column_widths = None
+
+    print(column_widths) # debug
 
     print_header_line(header_row[0], column_widths=column_widths) # Print the header row
 
@@ -2803,9 +2806,9 @@ def list_users(client, full=False, extend=False):
         # Ensure that description_parts has exactly three elements
         description_parts += [''] * (3 - len(description_parts))  # Pad list to avoid index errors
 
-        email = truncate(description_parts[0], 30)
-        real_name = truncate(description_parts[1], 20)
-        org = truncate(description_parts[2], 15)
+        email = description_parts[0]
+        real_name = description_parts[1]
+        org = description_parts[2]
         projects = ", ".join(certificate.projects) if certificate.projects else "None"
         admin_status = 'no' if certificate.restricted else 'yes'
 
@@ -2839,6 +2842,7 @@ def list_users(client, full=False, extend=False):
         else:
             add_row_to_output(COLS, [cert["name"], cert["fingerprint"]])
 
+    print (extend) # debug
     flush_output(extend=extend)
 
 def get_wg_client_ip_address(ip_next=False):
