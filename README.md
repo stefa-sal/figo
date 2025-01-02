@@ -662,20 +662,23 @@ Each command has its own set of subcommands and options.
 
 - #### `figo user delete`
 
-  - **Description:** Delete an existing user from the system.
+  - **Description:** Delete an existing user from the system, with optional control over file retention, project purging, and VPN entry cleanup.
   - **Syntax:**
     ```bash
-    figo user delete username [-p | --purge] [-k | --keepfiles]
+    figo user delete username [-p | --purge] [-k | --keepfiles] [-n | --no_vpn]
     ```
   - **Options:**
     - `username`: Username of the user to delete.
     - `-p, --purge`: Delete associated projects and user files, even if the user does not exist.
     - `-k, --keepfiles`: Keep the associated files of the user in the users folder.
+    - `-n, --no_vpn`: Do not clean the WireGuard user entry in the access router.
   - **Examples:**
     ```bash
     figo user delete john_doe
     figo user delete alice --purge
     figo user delete jane -k
+    figo user delete bob -n
+    figo user delete charlie --purge --no_vpn
     ```
 
 ### figo remote

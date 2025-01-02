@@ -70,7 +70,7 @@ USER_DIR = "./users"
 CERTIFICATE_DIR = "./certs"
 
 # Base IP address to start the IP address generation for WireGuard VPN clients
-BASE_IP = "10.202.1.15"
+BASE_IP_FOR_WG_VPN = "10.202.1.15"
 
 # WireGuard public key of the VPN server 
 PublicKey = "rdM5suGD/hTHdStf/K1SVc4rviUcUQbKnARnw0AAwT8="
@@ -1382,7 +1382,8 @@ def assign_ip_address(remote, mode="next"):
     Used by the 'set_ip' and by the 'get_ip_and_gw' functions
 
     mode: "next" assigns the next available IP address,
-            "hole" assigns the first available hole starting from BASE_IP
+            "hole" assigns the first available hole starting from a base IP address
+            as specified in the REMOTE_TO_IP_INFO_MAP.
 
         Returns: The new IP address as a string or None if an error occurred.
     """
@@ -2840,10 +2841,16 @@ def list_users(client, full=False, extend=False):
 
     flush_output(extend=extend)
 
-def get_next_wg_client_ip_address():
-    """ Get the next available IP address for a WireGuard client.
+def get_wg_client_ip_address(ip_next=False):
+    """ Get an available IP address for a WireGuard client.
     
-    Look for the last IP address assigned to a WireGuard client in the .conf files in the USER_DIR directory.
+    Args: 
+    - ip_next (bool, optional): If True, generate the next available IP address, otherwise
+        use the first available hole in the IP address range. 
+    
+    Look for IP addresses assigned to WireGuard clients in the .conf files in the USER_DIR directory.
+    If no IP addresses are found, start from BASE_IP_FOR_WG_VPN.
+
     """
 
     # List to contain the IP addresses found in .conf files
@@ -2863,19 +2870,30 @@ def get_next_wg_client_ip_address():
                         break
     
     if not ip_addresses:
-        # If no IP addresses are found, start from BASE_IP
-        return BASE_IP
+        # If no IP addresses are found, start from the base IP address
+        return BASE_IP_FOR_WG_VPN
     
     # Convert IP addresses to ip_address objects and sort
     ip_addresses = sorted([ipaddress.ip_address(ip) for ip in ip_addresses])
 
-    # Find the next available IP address
-    last_ip = ip_addresses[-1]
-    next_ip = last_ip + 1
+    if ip_next:
+        # Find the next available IP address
+        last_ip = ip_addresses[-1]
+        next_ip = last_ip + 1
+    else:
+        # Find the first available hole in the IP address range
+        for i, ip in enumerate(ip_addresses):
+            if ip != BASE_IP_FOR_WG_VPN + i:
+                next_ip = BASE_IP_FOR_WG_VPN + i
+                break
+        else:
+            # If no holes are found, use the next IP address after the last one
+            last_ip = ip_addresses[-1]
+            next_ip = last_ip + 1    
     
     return str(next_ip)
 
-def generate_wireguard_config(username, ip_address=None):
+def generate_wireguard_config(username, ip_address=None, ip_next=False):
     """
     Generate WireGuard configuration for a user, saving both the private key in the config file
     and the public key in a separate .wgpub file.
@@ -2883,6 +2901,8 @@ def generate_wireguard_config(username, ip_address=None):
     Args:
     - username (str): Username for which to generate the WireGuard configuration.
     - ip_address (str, optional): IP address to assign to the user. If not provided, a new one is generated.
+    - ip_next (bool, optional): If True, generate the next available IP address, otherwise
+        use the first available hole in the IP address range.
 
     Returns:
     - Tuple containing the public key and IP address assigned to the user if successful, or (None, None) otherwise.
@@ -2890,7 +2910,7 @@ def generate_wireguard_config(username, ip_address=None):
     try:
         # If no IP address is provided, generate a new one
         if not ip_address:
-            ip_address = get_next_wg_client_ip_address()
+            ip_address = get_wg_client_ip_address(ip_next=ip_next)
 
         # Generate the private and public keys using wg
         key_file = f"{username}.tempkey"
@@ -3537,12 +3557,14 @@ def add_user(
     remote_name=None,
     admin=False,
     wireguard=False,
+    ip_next=False,
     set_vpn=False,
     project=None,
     email=None,
     name=None,
     org=None,
     keys=False,
+    
 ):
     """
     Add a user to Incus with a certificate and optionally generate an additional SSH key pair.
@@ -3554,6 +3576,8 @@ def add_user(
     - remote_name (str, optional): Name of the remote node where the user is added.
     - admin (bool, optional): Specifies if the user has admin privileges.
     - wireguard (bool, optional): Specifies if WireGuard config for the user has to be generated.
+    - ip_next (bool, optional): Specifies if the next available IP address should be used for the WireGuard user, 
+      (if wireguard is True) otherwise the first available hole in the IP range will be used.
     - set_vpn (bool, optional): Specifies if the user has to be added to the wireguard access node 
       (e.g. the MikroTik switch).
     - project (str, optional): Name of the project to restrict the certificate to.
@@ -3570,7 +3594,7 @@ def add_user(
     4. Optionally generate an additional SSH key pair.
     5. Create a project for the user if not an admin and project is not provided.
     6. Add the user certificate to Incus.
-    7. Generate WireGuard configuration if wireguard is True.
+    7. Generate WireGuard configuration if wireguard is True, assigning a new IP address.
     8. Add the user to the WireGuard VPN on the MikroTik switch if set_vpn is True.
     
     
@@ -3680,7 +3704,7 @@ def add_user(
         return False
 
     if wireguard:
-        wg_public_key, wg_ip_address = generate_wireguard_config(user_name)
+        wg_public_key, wg_ip_address = generate_wireguard_config(user_name, ip_next=ip_next)
         if not wg_public_key:
             logger.error("Failed to generate WireGuard configuration.")
             return False
@@ -3707,9 +3731,7 @@ def add_user(
             logger.error("Error: Cannot set VPN without generating WireGuard configuration.")
             return False
         
-        if not add_wireguard_vpn_user_on_mikrotik(
-            wg_public_key, wg_ip_address, user_name
-        ):
+        if not add_wireguard_vpn_user_on_mikrotik(wg_public_key, wg_ip_address, user_name):
             logger.error(f"Failed to add user to WireGuard VPN on MikroTik.")
             return False
     
@@ -5642,7 +5664,8 @@ def create_user_parser(subparsers):
                                   help="Extend column width to fit the content")
 
     # Add subcommand
-    user_add_parser = user_subparsers.add_parser("add", aliases=["a"], help="Add a new user to the system")
+    user_add_parser = user_subparsers.add_parser("add", aliases=["a"], help="Add a new user to the system",
+                                                 formatter_class=argparse.RawTextHelpFormatter)
     user_add_parser.add_argument("username", action=NoUnderscoreCheck, help="Username of the new user")
     user_add_parser.add_argument("-c", "--cert",
                                  help="Path to the user's certificate file for access to GUI (in .crt format, "
@@ -5650,6 +5673,11 @@ def create_user_parser(subparsers):
     user_add_parser.add_argument("-a", "--admin", action="store_true", help="Add user with admin privileges (unrestricted)")
     user_add_parser.add_argument("-w", "--wireguard", action="store_true",
                                  help="Generate WireGuard config for the user in .conf file") 
+    user_add_parser.add_argument("-i", "--ip_next", action="store_true",
+                                 
+                                 help="Use the next available IP address for the user in the WireGuard config,\n"
+                                      "instead of using the first available hole in the subnet.\n"
+                                      "This option is only valid with the --wireguard option") 
     user_add_parser.add_argument("-s", "--set_vpn", action="store_true", 
                                  help="Set the user's VPN profile into the WireGuard access node") 
     user_add_parser.add_argument("-p", "--project", help="Project name to associate the user with an existing project")
@@ -5695,8 +5723,11 @@ def handle_user_command(args, client, parser_dict, client_name=None):
         list_users(client, full=args.full, extend=args.extend)
     elif args.user_command == "add":
         # Pass the 'keys' flag to the add_user function
+        if args.ip_next and not args.wireguard:
+            logger.error("Error: --ip_next option is only valid with the --wireguard option.")
+            return
         add_user(args.username, args.cert, client, remote_name=client_name, admin=args.admin, wireguard=args.wireguard, 
-                set_vpn=args.set_vpn, project=args.project, email=args.email, name=args.name,
+                ip_next=args.ip_next, set_vpn=args.set_vpn, project=args.project, email=args.email, name=args.name,
                 org=args.org, keys=args.keys)
     elif args.user_command == "grant":
         grant_user_access(args.username, args.projectname, client)
