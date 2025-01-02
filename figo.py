@@ -196,7 +196,6 @@ def evaluate_output_rows_column_width():
 
     for row in output_rows:
         for i, value in enumerate(row[1]):
-            print(value) # debug
             column_widths[i] = max(column_widths[i], len(value))
 
     return column_widths
@@ -213,8 +212,6 @@ def flush_output(extend=False):
         column_widths = evaluate_output_rows_column_width() # Evaluate the column width based on the output rows
     else:
         column_widths = None
-
-    print(column_widths) # debug
 
     print_header_line(header_row[0], column_widths=column_widths) # Print the header row
 
@@ -2842,7 +2839,6 @@ def list_users(client, full=False, extend=False):
         else:
             add_row_to_output(COLS, [cert["name"], cert["fingerprint"]])
 
-    print (extend) # debug
     flush_output(extend=extend)
 
 def get_wg_client_ip_address(ip_next=False):
