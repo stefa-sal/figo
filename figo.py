@@ -2730,6 +2730,14 @@ def delete_profile(remote, project, profile_name):
         logger.error(f"An unexpected error occurred while deleting profile: {e}")
         return False
 
+def display_default_init_profiles():
+    """Display the default profiles to be transferred during remote initialization."""
+    global DEFAULT_PROFILES_TO_TRANSFER
+    logger.info("Default profiles to be transferred during remote initialization:")
+    for profile in DEFAULT_PROFILES_TO_TRANSFER:
+        logger.info(f" - {profile}")
+
+
 def initialize_remote_profiles(remote, profiles_to_transfer=None):
     """
     Initialize a remote by transferring profiles from local:default to remote:default.
@@ -5469,28 +5477,29 @@ def create_profile_parser(subparsers):
         description="Initialize a remote by transferring a set of required profiles from 'local:default' to 'remote:default'.\n"
                     "Optionally, specify a custom list of profiles to be transferred using the -f/--profile option.\n"
                     "The custom list of profiles overrides the default list of profiles, which is hard-coded in the figo code.\n"
-                    "If the remote already has a profile with the same name, it will not be overwritten.",
+                    "If the remote already has a profile with the same name, it will not be overwritten.\n"
+                    "Use the -l/--list option to display the default profiles that would be transferred.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
                "  figo profile init my_remote\n"
                "  figo profile init my_remote:\n"
-               "  figo profile init my_remote -f profile1,profile2,profile3"
+               "  figo profile init my_remote -f profile1,profile2,profile3\n"
+               "  figo profile init -l"
     )
     init_parser.add_argument(
         "remote",
+        nargs="?",
         help="Name of the remote to initialize. Can be specified as 'my_remote' or 'my_remote:'."
     )
     init_parser.add_argument(
         "-f", "--profile",
         help="Comma-separated list of profiles to transfer. Overrides the default list of profiles."
     )
-
-    # Aliases for main parser
-    subparsers._name_parser_map["pr"] = profile_parser
-    subparsers._name_parser_map["p"] = profile_parser
-
-    return profile_parser
-
+    init_parser.add_argument(
+        "-l", "--list",
+        action="store_true",
+        help="List the default profiles that would be transferred during initialization. If this option is used, the remote cannot be specified."
+    )
 
 def parse_profile_scope(profile_scope, assign_defaults=True):
     """Parse a profile scope string and return remote, project, and profile names.
@@ -5609,6 +5618,14 @@ def handle_profile_command(args, parser_dict):
         delete_profile(remote, project, profile)
 
     elif args.profile_command == "init":
+        # Handle the -l/--list option
+        if args.list:
+            if args.remote:
+                logger.error("Error: The -l/--list option cannot be used with a target remote.")
+                return
+            display_default_init_profiles()
+            return
+                
         # Validate and parse the remote
         remote = args.remote
         if ":" in remote:

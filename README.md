@@ -546,17 +546,22 @@ Each command has its own set of subcommands and options.
 
 - #### `figo profile init`
 
-  - **Description:** Initialize profiles on a remote by transferring a set of required profiles from `local:default` to `remote:default`. Optionally, specify a custom list of profiles to transfer.
+  - **Description:** Initialize profiles on a remote by transferring a set of required profiles from `local:default` to `remote:default`. Optionally, specify a custom list of profiles to transfer or list the default profiles.
   - **Syntax:**
       ```bash
       figo profile init remote [-f | --profile profiles]
+      figo profile init -l | --list
       ```
   - **Options:**
       - `remote`: Name of the remote to initialize. Can be specified as `my_remote` or `my_remote:`.
       - `-f, --profile`: Comma-separated list of profiles to transfer. Overrides the default list of profiles, which is hard-coded in the figo code.
+      - `-l, --list`: Display the default set of profiles that would be transferred during initialization. Cannot be used with a target remote.
+
   - **Details:**
       - If the remote already has a profile with the same name, it will not be overwritten.
       - If no custom list of profiles is provided, the default list of profiles is used.
+      - The `-l/--list` option outputs the default profiles and does not perform the initialization process.
+      - Using `-l/--list` alongside a `remote` argument results in an error.
 
   - **Examples:**
       ```bash
@@ -568,7 +573,10 @@ Each command has its own set of subcommands and options.
 
       # Initialize a remote with the default set, specifying the remote with a colon
       figo profile init my_remote:
-      ```
+
+      # Display the default set of profiles for initialization
+      figo profile init -l
+      ```   ```
 
 ### figo user
 
