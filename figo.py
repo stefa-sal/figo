@@ -2868,7 +2868,7 @@ def get_wg_client_ip_address(ip_next=False):
                         ip_str = line.split('=')[1].strip().split('/')[0]
                         ip_addresses.append(ip_str)
                         break
-    
+
     if not ip_addresses:
         # If no IP addresses are found, start from the base IP address
         return BASE_IP_FOR_WG_VPN
@@ -2882,15 +2882,15 @@ def get_wg_client_ip_address(ip_next=False):
         next_ip = last_ip + 1
     else:
         # Find the first available hole in the IP address range
+        next_ip = None
         for i, ip in enumerate(ip_addresses):
-            if ip != BASE_IP_FOR_WG_VPN + i:
-                next_ip = BASE_IP_FOR_WG_VPN + i
+            if ip != ipaddress.ip_address(BASE_IP_FOR_WG_VPN) + i:
+                next_ip = ipaddress.ip_address(BASE_IP_FOR_WG_VPN) + i
                 break
-        else:
+        if next_ip == None:
             # If no holes are found, use the next IP address after the last one
             last_ip = ip_addresses[-1]
-            next_ip = last_ip + 1    
-    
+            next_ip = last_ip + 1
     return str(next_ip)
 
 def generate_wireguard_config(username, ip_address=None, ip_next=False):
@@ -2927,7 +2927,6 @@ PublicKey = {WG_SERVER_PUB_KEY}
 AllowedIPs = {AllowedIPs}
 Endpoint = {Endpoint}
 """
-
         directory = os.path.expanduser(USER_DIR)
 
         # Ensure the directory exists
