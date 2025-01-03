@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import time
 import paramiko
 import glob
+import shlex
 
 # Configuration for the WireGuard VPN server
 # The following configuration is used to set up a WireGuard VPN server on a MikroTik router.
@@ -4219,6 +4220,160 @@ def list_projects(remote_name, project, extend=False):
     flush_output(extend=extend) # Flush the output buffer
 
 #############################################
+###### figo operation command functions #####
+############################################# 
+
+def get_operations(COLS, remote_node=None, project_name=None, output_format="csv"):
+    """
+    Retrieve operations for the specified remote node and project.
+
+    Parameters:
+    - COLS (list): List of tuples containing column names and widths.
+    - remote_node (str): The name of the remote node.
+    - project_name (str): The name of the project.
+    - output_format (str): Format of the output (table, compact, csv).
+
+    Only the csv format is fully supported for now.
+
+    Returns:
+    - bool: True if operations are retrieved successfully, False otherwise.
+    """
+    try:
+        # Validate remote_node
+        if not remote_node or ":" in remote_node.strip():
+            logger.error(f"Invalid remote_node format: '{remote_node}'. Remote names must not contain ':' characters.")
+            return False
+
+        # Validate project_name
+        if project_name and any(char in project_name for char in [":", "/", " "]):
+            logger.error(f"Invalid project_name format: '{project_name}'. Project names must not contain ':', '/', or spaces.")
+            return False
+
+        # Validate output_format
+        valid_formats = ["table", "compact", "csv"]
+        if output_format not in valid_formats:
+            logger.error(f"Invalid output format: '{output_format}'. Valid options are: {', '.join(valid_formats)}.")
+            return False
+
+        # Construct the command
+        command = f"incus operation list {shlex.quote(remote_node)}:"
+        if project_name:
+            command += f" --project {shlex.quote(project_name)}"
+        command += f" --format {shlex.quote(output_format)}"
+
+        # Execute the command using subprocess
+        result = subprocess.run(shlex.split(command), capture_output=True, text=True)
+
+        # Check for errors in command execution
+        if result.returncode != 0:
+            logger.error(f"Command failed with error: {result.stderr.strip()}")
+            return False
+
+        # Process the output
+        output_lines = result.stdout.strip().splitlines()
+        if not output_lines:
+            return True
+
+
+        # Handle output based on the format
+        if output_format == "csv":
+            for line in output_lines:
+                add_row_to_output(COLS, [f"{remote_node}:{project_name}",line])
+
+        elif output_format == "compact":
+            i = 0
+            for line in output_lines:
+                if i > 0:
+                    add_row_to_output(COLS, [f"{remote_node}:{project_name}",line])                
+                i += 1
+
+        elif output_format == "table":
+            i = 0
+            for line in output_lines:
+                if i >= 3 and i % 2 == 1:
+                    add_row_to_output(COLS, [f"{remote_node}:{project_name}",line])                
+                i += 1
+
+        return True
+
+    except Exception as e:
+        logger.error(f"An error occurred while retrieving operations: {e}")
+        return False
+
+
+def display_operation_status(remote_node, project_name, extend=False):
+    """
+    Display operation status based on the provided scope.
+
+    Parameters:
+    - remote_node (str): Remote name.
+    - project (str): Project name.
+    """
+
+    COLS = [('REMOTE:PROJECT',80),('OPERATION',80)]
+    #ID  TYPE  DESCRIPTION  STATE  CANCELABLE  CREATED 
+    
+    # Add header to output
+    add_header_line_to_output(COLS)
+
+
+    # use a set to store the remote nodes that failed to retrieve the projects
+    set_of_errored_remotes = set()
+    if remote_node is None:
+        #iterate over all remote nodes
+        remotes = get_incus_remotes()
+        for my_remote_node in remotes:
+            # check to skip all the remote node of type images
+            # Skipping remote node with protocol simplestreams
+            if remotes[my_remote_node]["Protocol"] == "simplestreams":
+                continue
+
+            if project_name is None:
+                # iterate over all projects
+                projects = get_projects(remote_name=my_remote_node)
+                if projects is None:
+                    set_of_errored_remotes.add(my_remote_node)
+                else: # projects is not None:
+                    for project in projects:
+                        my_project_name = project["name"]
+
+                        # Get operations for the specified project_name
+                        result = get_operations(COLS, remote_node=my_remote_node, project_name=my_project_name)
+                        if not result:
+                            set_of_errored_remotes.add(my_remote_node)
+                        
+            else: # project_name is not None
+                # Get instances for the specified project_name
+                result = get_operations(COLS, remote_node=my_remote_node, project_name=my_project_name)
+                if not result:
+                    set_of_errored_remotes.add(my_remote_node)
+    else: # remote_node is not None
+        # Get instances from the specified remote node
+        if project_name is None:
+            # iterate over all projects
+            projects = get_projects(remote_name=remote_node)
+            if projects is None:
+                set_of_errored_remotes.add(remote_node)
+            else:  # projects is not None:
+                for project in projects:
+                    my_project_name = project["name"]
+                    result = get_operations(COLS, remote_node=remote_node, project_name=my_project_name)
+                    if not result:
+                        set_of_errored_remotes.add(remote_node)
+        else: # remote_node is not None and project_name is not None
+            # Get instances from the specified remote node and project
+            result = get_operations(COLS, remote_node=my_remote_node, project_name=my_project_name)
+            if not result:
+                set_of_errored_remotes.add(remote_node)
+
+    flush_output(extend=extend)
+
+    if set_of_errored_remotes:
+        logger.error(f"Error: Failed to retrieve projects from remote(s): {', '.join(set_of_errored_remotes)}")
+
+
+
+#############################################
 ###### figo vpn command functions ###########
 ############################################# 
 
@@ -5975,6 +6130,105 @@ def handle_project_command(args, parser_dict):
         delete_project(remote_name, project)
 
 #############################################
+###### figo operation command CLI ###########
+#############################################
+
+def create_operation_parser(subparsers):
+    operation_parser = subparsers.add_parser(
+        "operation",
+        help="Manage ongoing operations",
+        description="Monitor and manage ongoing operations across all remotes, specific remotes, or specific projects.",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
+    operation_subparsers = operation_parser.add_subparsers(dest="operation_command")
+
+    # Status command
+    status_parser = operation_subparsers.add_parser(
+        "status",
+        aliases=["s"],
+        help="Display the status of ongoing operations.",
+        description="Display the status of ongoing operations for all remotes, specific remotes, or specific projects.\n"
+                    "Specify the scope in the format 'remote:', 'remote:project', 'remote:project.', or leave blank for all.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo operation status\n"
+               "  figo operation status my_remote\n"
+               "  figo operation status my_remote:\n"
+               "  figo operation status my_remote:project_name\n"
+               "  figo operation status my_remote:project_name.\n"
+               "  figo operation status my_remote --project project_name"
+    )
+    status_parser.add_argument(
+        "scope",
+        nargs="?",
+        help="Scope in the format 'remote:project', 'remote:', 'remote:project.', or leave blank for all operations."
+    )
+    status_parser.add_argument(
+        "-p", "--project",
+        help="Specify the project name to filter operations. Overrides the project inferred from the scope."
+    )
+
+    return operation_parser
+
+def parse_operation_scope(scope, provided_project=None):
+    """
+    Parse the operation scope string and return remote and project names.
+
+    Parameters:
+    - scope (str): Scope string in the format 'remote:project', 'remote:', 'remote:project.', or None for all.
+    - provided_project (str): Project name provided via the -p/--project option.
+
+    Returns:
+    - Tuple[str, str]: (remote, project) extracted from the scope. Defaults to None if unspecified.
+
+    Raises:
+    - ValueError: If the scope and provided_project are inconsistent.
+    """
+    remote = None
+    project = None
+
+    if scope:
+        if ':' in scope:
+            remote, project = scope.split(':', 1)
+            if remote == '':
+                raise ValueError("Error: Remote name cannot be empty.")
+            if project.endswith('.'):
+                project = project.rstrip('.')
+        else:
+            remote = scope  # Assume remote-only if no colon present
+
+    if provided_project:
+        if project and project != provided_project:
+            raise ValueError(
+                f"Error: Inconsistent project names. Scope specifies project '{project}', "
+                f"but --project specifies '{provided_project}'."
+            )
+        project = provided_project
+
+    return remote, project
+
+def handle_operation_command(args, parser_dict):
+    """
+    Handle subcommands for managing operations
+    """
+    if not args.operation_command:
+        parser_dict['operation_parser'].print_help()
+
+    elif args.operation_command == "status":
+        try:
+            # Parse the provided scope and ensure consistency with -p/--project
+            remote, project = parse_operation_scope(args.scope, provided_project=args.project)
+
+            # Call a function to display operations based on the parsed scope
+            display_operation_status(remote, project)
+
+        except ValueError as e:
+            logger.error(str(e))
+
+        except Exception as e:
+            logger.error(f"Error while retrieving operation status: {str(e)}")
+
+#############################################
 ###### figo vpn command CLI #################
 #############################################
 
@@ -6078,6 +6332,7 @@ def create_parser():
     parser_dict['user_parser'] = create_user_parser(subparsers)
     parser_dict['remote_parser'] = create_remote_parser(subparsers)
     parser_dict['project_parser'] = create_project_parser(subparsers)
+    parser_dict['operation_parser'] = create_operation_parser(subparsers)
     parser_dict['vpn_parser'] = create_vpn_parser(subparsers)
 
     return parser, parser_dict
@@ -6103,6 +6358,8 @@ def handle_command(args, parser, parser_dict):
         handle_remote_command(args, parser_dict)
     elif args.command in ["project"]:
         handle_project_command(args, parser_dict)
+    elif args.command in ["operation"]:
+        handle_operation_command(args, parser_dict)
     elif args.command in ["vpn"]:
         handle_vpn_command(args, parser_dict)
 

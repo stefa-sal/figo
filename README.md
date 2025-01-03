@@ -37,6 +37,7 @@ figo [command] [subcommand] [options]
 - [`figo user`](#figo-user)
 - [`figo remote`](#figo-remote)
 - [`figo project`](#figo-project)
+- [`figo operation`](#figo-operation)
 - [`figo vpn`](#figo-vpn)
 
 Each command has its own set of subcommands and options.
@@ -817,7 +818,51 @@ Each command has its own set of subcommands and options.
     figo project delete project_name
     ```
 
----
+### figo operation
+
+- **Description:** Manage and monitor operations across the federated testbed.
+
+#### Subcommands:
+- [`figo operation status`](#figo-operation-status)
+
+#### Subcommands details
+
+- #### `figo operation status`
+
+  - **Description:** Display the status of ongoing operations on remotes and projects.
+  - **Syntax:**
+    ```bash
+    figo operation status [scope] [-p | --project project_name]
+    ```
+  - **Options:**
+    - `scope`: Scope in the format `remote:project`, `remote:`, or `project.` to filter the operations. Can also include `remote:project.` (with the final dot).
+    - `-p, --project`: Specify the project name to filter operations. If both `scope` and `--project` are provided, they must match; otherwise, an error is returned.
+
+  - **Details:**
+    - When the `scope` specifies a remote and project, only operations in that scope are displayed.
+    - When no scope or `--project` is provided, all ongoing operations on all remotes and projects are displayed.
+    - Consistency between the project specified in `scope` and `--project` is enforced.
+
+  - **Examples:**
+    ```bash
+    # Display status for all ongoing operations
+    figo operation status
+
+    # Display status for a specific remote
+    figo operation status my_remote
+
+    # Display status for a specific remote and project
+    figo operation status my_remote:project_name
+
+    # Display status for a specific remote and project (with final dot)
+    figo operation status my_remote:project_name.
+
+    # Display status for a specific project using the --project option
+    figo operation status -p my_project
+
+    # Display status for a specific remote and project, ensuring consistency
+    figo operation status my_remote:project_name -p project_name
+    ```
 
 ### figo vpn
 
