@@ -824,6 +824,7 @@ Each command has its own set of subcommands and options.
 
 #### Subcommands:
 - [`figo operation status`](#figo-operation-status)
+- [`figo operation progress`](#figo-operation-progress)
 
 #### Subcommands details
 
@@ -832,11 +833,12 @@ Each command has its own set of subcommands and options.
   - **Description:** Display the status of ongoing operations on remotes and projects.
   - **Syntax:**
     ```bash
-    figo operation status [scope] [-p | --project project_name]
+    figo operation status [scope] [-p | --project project_name] [-e | --extend]
     ```
   - **Options:**
     - `scope`: Scope in the format `remote:project`, `remote:`, or `project.` to filter the operations. Can also include `remote:project.` (with the final dot).
     - `-p, --project`: Specify the project name to filter operations. If both `scope` and `--project` are provided, they must match; otherwise, an error is returned.
+    - `-e, --extend`: Extend column width to fit the content for better readability.
 
   - **Details:**
     - When the `scope` specifies a remote and project, only operations in that scope are displayed.
@@ -862,6 +864,44 @@ Each command has its own set of subcommands and options.
 
     # Display status for a specific remote and project, ensuring consistency
     figo operation status my_remote:project_name -p project_name
+    ```
+
+- #### `figo operation progress`
+
+  - **Description:** Display the status of ongoing "create instance" operations on remotes and projects.
+  - **Syntax:**
+    ```bash
+    figo operation progress [scope] [-p | --project project_name] [-e | --extend]
+    ```
+  - **Options:**
+    - `scope`: Scope in the format `remote:project`, `remote:`, or `project.` to filter the operations. Can also include `remote:project.` (with the final dot).
+    - `-p, --project`: Specify the project name to filter operations. If both `scope` and `--project` are provided, they must match; otherwise, an error is returned.
+    - `-e, --extend`: Extend column width to fit the content for better readability.
+
+  - **Details:**
+    - When the `scope` specifies a remote and project, only "create instance" operations in that scope are displayed.
+    - When no scope or `--project` is provided, all ongoing "create instance" operations on all remotes and projects are displayed.
+    - Consistency between the project specified in `scope` and `--project` is enforced.
+
+  - **Examples:**
+    ```bash
+    # Display progress for all "create instance" operations
+    figo operation progress
+
+    # Display progress for a specific remote
+    figo operation progress my_remote
+
+    # Display progress for a specific remote and project
+    figo operation progress my_remote:project_name
+
+    # Display progress for a specific remote and project (with final dot)
+    figo operation progress my_remote:project_name.
+
+    # Display progress for a specific project using the --project option
+    figo operation progress -p my_project
+
+    # Display progress for a specific remote and project, ensuring consistency
+    figo operation progress my_remote:project_name -p project_name
     ```
 
 ### figo vpn

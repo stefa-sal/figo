@@ -206,6 +206,11 @@ def print_header_line(COLS, column_widths=None):
     print(formatted_row)
 
 def flush_output(extend=False):
+    """Print the header row and output rows, clearing the lists afterwards.
+    
+    If extend is True, adapt the output column width to the content
+    """
+
     global header_row
     global output_rows
 
@@ -1310,9 +1315,9 @@ def get_instance_keys(instance_name, remote, project, login=DEFAULT_LOGIN_FOR_IN
         remote: Remote server name.
         project: Project name.
         login: Login name of the user (default: {DEFAULT_LOGIN_FOR_INSTANCES}).
-        force: If True, start the instance if it's not running and stop it after fetching keys.
-        full: If True, includes the full key as an additional column.
-        extend: If True, adapts the output column width to the content.
+        force: If True, start the instance if it is not running and stop it after fetching keys.
+        full: If True, include the full key as an additional column.
+        extend: If True, adapt the output column width to the content.
 
     Returns:
         None: Outputs the keys information directly to the CLI.
@@ -2056,13 +2061,17 @@ def exec_instance_bash(instance_name, remote, project, force=False, timeout=BASH
 ###### figo gpu command functions ###########
 #############################################
 
-def show_gpu_status(client, remote, extend=False):
+def show_gpu_status(remote, extend=False):
     """Show the status of GPUs on the remote node. 
     
     (the remote node is also implicitly associated with the client).
     
     It uses lspci to count NVIDIA GPUs
     It checks the total number of GPUs, the number of available GPUs, and the active GPU profiles.
+
+    Args:
+    - remote: The remote server name.
+    - extend: If True, adapt the output column width to the content.
 
     """
     
@@ -2091,7 +2100,12 @@ def show_gpu_status(client, remote, extend=False):
     flush_output(extend=extend)
 
 def list_gpu_profiles(client, extend=False):
-    """List all GPU profiles on the remote node implicitly associated with the client."""
+    """List all GPU profiles on the remote node implicitly associated with the client.
+    
+    Args:
+    - client: The client object associated with the remote node.
+    - extend: If True, adapt the output column width to the content.
+    """
     gpu_profiles = [
         profile.name for profile in client.profiles.all() if profile.name.startswith("gpu-")
     ]
@@ -3525,8 +3539,6 @@ def remove_wireguard_vpn_user_on_mikrotik(vpnuser, username=SSH_MIKROTIK_USER_NA
             f'/interface wireguard peers remove [find where comment="{vpnuser}"]'
         )
 
-
-
         logger.info(f"Executing command on MikroTik: {remove_command}")
 
         # Execute the remove command
@@ -3604,8 +3616,8 @@ def add_user(
     6. Add the user certificate to Incus.
     7. Generate WireGuard configuration if wireguard is True, assigning a new IP address.
     8. Add the user to the WireGuard VPN on the MikroTik switch if set_vpn is True.
-    
-    
+    9. Create a .zip file with all the generated files.
+       
     Returns:
     True if the user is added successfully, False otherwise.
     """
@@ -4003,7 +4015,12 @@ def delete_user(user_name, client, purge=False, removefiles=False, removevpn=Fal
 #############################################
 
 def list_remotes(full=False, extend=False):
-    """Lists the available Incus remotes and their addresses."""
+    """Lists the available Incus remotes and their addresses.
+    
+    Args:
+    - full (bool): If True, display full information about each remote.
+    - extend (bool): If True, adapt the column width to the content.
+    """
     try:
         remotes = get_incus_remotes()
     except RuntimeError as e:
@@ -4183,7 +4200,14 @@ def delete_remote(remote_server):
 #############################################
 
 def list_projects(remote_name, project, extend=False):
-    """List projects on the specified remote and project scope."""
+    """List projects on the specified remote and project scope.
+    
+    Args:
+    - remote_name (str): Name of the remote node.
+    - project (str): Name of the project.
+    - extend (bool): If True, adapt the output column width to the content.
+    
+    """
 
     COLS = [('PROJECT',20), ('REMOTE',25)]
     add_header_line_to_output(COLS)
@@ -4223,7 +4247,33 @@ def list_projects(remote_name, project, extend=False):
 ###### figo operation command functions #####
 ############################################# 
 
-def get_operations(COLS, remote_node=None, project_name=None, output_format="csv"):
+def get_create_instance_progress(remote_node, project_name, operation_id):
+    """ Retrieve the progress of a create instance operation.
+    
+    Args:
+    - remote_node (str): The name of the remote node.
+    - project_name (str): The name of the project.
+    - operation_id (str): The operation ID.
+    """
+
+    try:
+        #use pylxd to get the operation progress
+        remote_client = get_remote_client(remote_node, project_name=project_name)
+        if not remote_client:
+            logger.error(f"Failed to retrieve client for remote '{remote_node}', project_name '{project_name}'.")
+            return "N/A"
+        
+        operation = remote_client.operations.get(operation_id)
+        if operation is None:
+            logger.error(f"Operation '{operation_id}' not found.")
+            return "N/A"
+        return operation.metadata.get("download_progress", "N/A")
+
+    except Exception as e:
+        logger.error(f"An error occurred while retrieving the progress of the create instance operation: {e}")
+        return "N/A"
+
+def get_operations(COLS, remote_node=None, project_name=None, output_format="csv", filter_progress=False, progress=False):
     """
     Retrieve operations for the specified remote node and project.
 
@@ -4232,6 +4282,8 @@ def get_operations(COLS, remote_node=None, project_name=None, output_format="csv
     - remote_node (str): The name of the remote node.
     - project_name (str): The name of the project.
     - output_format (str): Format of the output (table, compact, csv).
+    - filter_progress (bool): If True, display only create instance operations.
+    - progress (bool): If True, display the progress of create instance operations.
 
     Only the csv format is fully supported for now.
 
@@ -4274,11 +4326,24 @@ def get_operations(COLS, remote_node=None, project_name=None, output_format="csv
         if not output_lines:
             return True
 
-
         # Handle output based on the format
         if output_format == "csv":
             for line in output_lines:
-                add_row_to_output(COLS, [f"{remote_node}:{project_name}",line])
+                # split the line by comma
+                line_tokens = line.split(",")
+                if line_tokens[2] == "Creating instance":
+                    if progress:
+                        # add the progress of the create instance operation
+                        line_tokens.append(get_create_instance_progress(remote_node, project_name,line_tokens[0]))
+                else:
+                    if filter_progress:
+                        continue
+                    if progress:
+                        # add "" for the progress of the operation
+                        line_tokens.append("")
+                # add the remote_node and project_name as first element in line_tokens
+                line_tokens.insert(0, f"{remote_node}:{project_name}")
+                add_row_to_output(COLS, line_tokens)
 
         elif output_format == "compact":
             i = 0
@@ -4301,21 +4366,34 @@ def get_operations(COLS, remote_node=None, project_name=None, output_format="csv
         return False
 
 
-def display_operation_status(remote_node, project_name, extend=False):
+def display_operation_status(remote_node, project_name, filter_progress=False, progress=False, extend=False):
     """
-    Display operation status based on the provided scope.
+    Display the staus of the operations based on the provided scope (remote and project).
+
+    If remote_node is None, then all remotes are considered.
+    If project_name is None, then all projects are considered.
+    If both remote_node and project_name are None, then all operations are considered.
+    
+    The output is displayed in a table format.
+
+    This function is not optimized, because it calls get_operations() for each remote and project combination.
+    In turn, get_operations() calls the incus operation list command for each remote and project combination.
+    This can be optimized by calling the incus operation list command only once for each remote by using the --all-projects flag.
 
     Parameters:
     - remote_node (str): Remote name.
     - project (str): Project name.
+    - filter_progress (bool): If True, display only create instance operations.
+    - progress (bool): If True, display the progress of create instance operations.
+    - extend (bool): If True, adapt the column width to the content.
     """
 
-    COLS = [('REMOTE:PROJECT',80),('OPERATION',80)]
-    #ID  TYPE  DESCRIPTION  STATE  CANCELABLE  CREATED 
-    
+    COLS = [('REMOTE:PROJECT',25),('OP ID',15),('TYPE',10),('DESCRIPTION',18),('STATE',8),('CANC.',6),('CREATED',20)]
+    if progress:
+        COLS.append(('PROGRESS',10))
+   
     # Add header to output
     add_header_line_to_output(COLS)
-
 
     # use a set to store the remote nodes that failed to retrieve the projects
     set_of_errored_remotes = set()
@@ -4338,13 +4416,15 @@ def display_operation_status(remote_node, project_name, extend=False):
                         my_project_name = project["name"]
 
                         # Get operations for the specified project_name
-                        result = get_operations(COLS, remote_node=my_remote_node, project_name=my_project_name)
+                        result = get_operations(COLS, remote_node=my_remote_node, project_name=my_project_name,
+                                                filter_progress=filter_progress, progress=progress)
                         if not result:
                             set_of_errored_remotes.add(my_remote_node)
                         
             else: # project_name is not None
                 # Get instances for the specified project_name
-                result = get_operations(COLS, remote_node=my_remote_node, project_name=my_project_name)
+                result = get_operations(COLS, remote_node=my_remote_node, project_name=my_project_name,
+                                        filter_progress=filter_progress, progress=progress)
                 if not result:
                     set_of_errored_remotes.add(my_remote_node)
     else: # remote_node is not None
@@ -4357,12 +4437,14 @@ def display_operation_status(remote_node, project_name, extend=False):
             else:  # projects is not None:
                 for project in projects:
                     my_project_name = project["name"]
-                    result = get_operations(COLS, remote_node=remote_node, project_name=my_project_name)
+                    result = get_operations(COLS, remote_node=remote_node, project_name=my_project_name,
+                                            filter_progress=filter_progress, progress=progress)
                     if not result:
                         set_of_errored_remotes.add(remote_node)
         else: # remote_node is not None and project_name is not None
             # Get instances from the specified remote node and project
-            result = get_operations(COLS, remote_node=my_remote_node, project_name=my_project_name)
+            result = get_operations(COLS, remote_node=my_remote_node, project_name=my_project_name,
+                                    filter_progress=filter_progress, progress=progress)
             if not result:
                 set_of_errored_remotes.add(remote_node)
 
@@ -4370,8 +4452,6 @@ def display_operation_status(remote_node, project_name, extend=False):
 
     if set_of_errored_remotes:
         logger.error(f"Error: Failed to retrieve projects from remote(s): {', '.join(set_of_errored_remotes)}")
-
-
 
 #############################################
 ###### figo vpn command functions ###########
@@ -5425,7 +5505,7 @@ def handle_gpu_command(args, parser_dict):
 
         client = get_remote_client(remote)
         if client:
-            show_gpu_status(client, remote, extend=args.extend)
+            show_gpu_status(remote, extend=args.extend)
         else:
             logger.error(f"Failed to retrieve GPU status for remote '{remote}'.")
     elif args.gpu_command in ["list", "l"]:
@@ -6136,6 +6216,7 @@ def handle_project_command(args, parser_dict):
 def create_operation_parser(subparsers):
     operation_parser = subparsers.add_parser(
         "operation",
+        aliases=["op", "o"],
         help="Manage ongoing operations",
         description="Monitor and manage ongoing operations across all remotes, specific remotes, or specific projects.",
         formatter_class=argparse.RawTextHelpFormatter
@@ -6156,7 +6237,8 @@ def create_operation_parser(subparsers):
                "  figo operation status my_remote:\n"
                "  figo operation status my_remote:project_name\n"
                "  figo operation status my_remote:project_name.\n"
-               "  figo operation status my_remote --project project_name"
+               "  figo operation status my_remote --project project_name\n"
+               "  figo operation status --extend"
     )
     status_parser.add_argument(
         "scope",
@@ -6165,7 +6247,44 @@ def create_operation_parser(subparsers):
     )
     status_parser.add_argument(
         "-p", "--project",
-        help="Specify the project name to filter operations. Overrides the project inferred from the scope."
+        help="Specify the project name to filter operations. If both scope and project are provided, they must match; otherwise, an error is displayed."
+    )
+    status_parser.add_argument(
+        "-e", "--extend",
+        action="store_true",
+        help="Extend column width to fit the content for better readability."
+    )
+
+    # Progress command
+    progress_parser = operation_subparsers.add_parser(
+        "progress",
+        aliases=["p"],
+        help="Display the status of ongoing create instance operations.",
+        description="Display the status of ongoing create instance operations for all remotes, specific remotes, or specific projects.\n"
+                    "Specify the scope in the format 'remote:', 'remote:project', 'remote:project.', or leave blank for all.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  figo operation progress\n"
+               "  figo operation progress my_remote\n"
+               "  figo operation progress my_remote:\n"
+               "  figo operation progress my_remote:project_name\n"
+               "  figo operation progress my_remote:project_name.\n"
+               "  figo operation progress my_remote --project project_name\n"
+               "  figo operation progress --extend"
+    )
+    progress_parser.add_argument(
+        "scope",
+        nargs="?",
+        help="Scope in the format 'remote:project', 'remote:', 'remote:project.', or leave blank for all operations."
+    )
+    progress_parser.add_argument(
+        "-p", "--project",
+        help="Specify the project name to filter operations. If both scope and project are provided, they must match; otherwise, an error is displayed."
+    )
+    progress_parser.add_argument(
+        "-e", "--extend",
+        action="store_true",
+        help="Extend column width to fit the content for better readability."
     )
 
     return operation_parser
@@ -6214,13 +6333,16 @@ def handle_operation_command(args, parser_dict):
     if not args.operation_command:
         parser_dict['operation_parser'].print_help()
 
-    elif args.operation_command == "status":
+    elif args.operation_command in ["status", "s"] or args.operation_command in ["progress", "p"]: 
         try:
             # Parse the provided scope and ensure consistency with -p/--project
             remote, project = parse_operation_scope(args.scope, provided_project=args.project)
 
             # Call a function to display operations based on the parsed scope
-            display_operation_status(remote, project)
+            if args.operation_command in ["status", "s"]:
+                display_operation_status(remote, project, filter_progress=False, progress=True, extend=args.extend)
+            elif args.operation_command in ["progress", "p"]:
+                display_operation_status(remote, project, filter_progress=True, progress=True, extend=args.extend)
 
         except ValueError as e:
             logger.error(str(e))
@@ -6358,7 +6480,7 @@ def handle_command(args, parser, parser_dict):
         handle_remote_command(args, parser_dict)
     elif args.command in ["project"]:
         handle_project_command(args, parser_dict)
-    elif args.command in ["operation"]:
+    elif args.command in ["operation", "op", "o"]:
         handle_operation_command(args, parser_dict)
     elif args.command in ["vpn"]:
         handle_vpn_command(args, parser_dict)
