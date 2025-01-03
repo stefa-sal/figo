@@ -190,15 +190,15 @@ def add_header_line_to_output(COLS):
     header_row.append(COLS)
 
 def evaluate_output_rows_column_width():
-    column_widths = [0] * len(output_rows[0][0])
+    """Evaluate the width of the columns in the output rows."""
+    
+    column_widths = [0] * len(header_row[0])
     #evaluate the width of the columns in the header row
     for i, header in enumerate(header_row[0]):
         column_widths[i] = len(header[0])
-
     for row in output_rows:
         for i, value in enumerate(row[1]):
             column_widths[i] = max(column_widths[i], len(value))
-
     return column_widths
 
 def print_header_line(COLS, column_widths=None):
@@ -210,7 +210,6 @@ def flush_output(extend=False):
     
     If extend is True, adapt the output column width to the content
     """
-
     global header_row
     global output_rows
 
@@ -218,6 +217,7 @@ def flush_output(extend=False):
         column_widths = evaluate_output_rows_column_width() # Evaluate the column width based on the output rows
     else:
         column_widths = None
+    
 
     print_header_line(header_row[0], column_widths=column_widths) # Print the header row
 
@@ -4286,6 +4286,10 @@ def get_create_instance_progress(remote_node, project_name, operation_id):
         if operation is None:
             logger.error(f"Operation '{operation_id}' not found.")
             return "N/A"
+        if operation.metadata is None:
+            logger.error(f"Metadata for operation '{operation_id}' not found.")
+            return "N/A"
+        
         return operation.metadata.get("download_progress", "N/A")
 
     except Exception as e:
@@ -4319,6 +4323,9 @@ def get_operations(COLS, remote_node=None, project_name=None, output_format="csv
         if project_name and any(char in project_name for char in [":", "/", " "]):
             logger.error(f"Invalid project_name format: '{project_name}'. Project names must not contain ':', '/', or spaces.")
             return False
+        
+        if project_name == '':
+            logger.error(f"Invalid project_name format: '{project_name}'. Project names must not be empty.")
 
         # Validate output_format
         valid_formats = ["table", "compact", "csv"]
@@ -4409,7 +4416,7 @@ def display_operation_status(remote_node, project_name, filter_progress=False, p
 
     COLS = [('REMOTE:PROJECT',25),('OP ID',15),('TYPE',10),('DESCRIPTION',18),('STATE',8),('CANC.',6),('CREATED',20)]
     if progress:
-        COLS.append(('PROGRESS',10))
+        COLS.append(('PROGRESS',25))
    
     # Add header to output
     add_header_line_to_output(COLS)
@@ -4442,7 +4449,7 @@ def display_operation_status(remote_node, project_name, filter_progress=False, p
                         
             else: # project_name is not None
                 # Get instances for the specified project_name
-                result = get_operations(COLS, remote_node=my_remote_node, project_name=my_project_name,
+                result = get_operations(COLS, remote_node=my_remote_node, project_name=project_name,
                                         filter_progress=filter_progress, progress=progress)
                 if not result:
                     set_of_errored_remotes.add(my_remote_node)
@@ -4462,12 +4469,11 @@ def display_operation_status(remote_node, project_name, filter_progress=False, p
                         set_of_errored_remotes.add(remote_node)
         else: # remote_node is not None and project_name is not None
             # Get instances from the specified remote node and project
-            result = get_operations(COLS, remote_node=my_remote_node, project_name=my_project_name,
+            result = get_operations(COLS, remote_node=remote_node, project_name=project_name,
                                     filter_progress=filter_progress, progress=progress)
             if not result:
                 set_of_errored_remotes.add(remote_node)
-
-    flush_output(extend=extend)
+    flush_output(extend=extend) 
 
     if set_of_errored_remotes:
         logger.error(f"Error: Failed to retrieve projects from remote(s): {', '.join(set_of_errored_remotes)}")
@@ -6332,6 +6338,8 @@ def parse_operation_scope(scope, provided_project=None):
                 raise ValueError("Error: Remote name cannot be empty.")
             if project.endswith('.'):
                 project = project.rstrip('.')
+            if project == '':
+                project = None
         else:
             remote = scope  # Assume remote-only if no colon present
 
