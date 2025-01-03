@@ -1914,6 +1914,12 @@ def create_instance(instance_name, image, remote_name, project, instance_type,
 
 def delete_instance(instance_name, remote, project, force=False):
     """Delete a specific instance on the specified remote and project.
+
+    Args:
+    - instance_name: Name of the instance.
+    - remote: Remote server name.
+    - project: Project name.
+    - force: If True, stop the instance if it is running before deleting it.
     
     Returns:    True if the instance was deleted successfully, False otherwise.
     """
@@ -2239,6 +2245,11 @@ def remove_gpu_all_profiles(instance_name, remote='local', project='default'):
 def remove_gpu_profile(instance_name, remote='local', project='default'):
     """Remove a GPU profile from an instance.
     
+    Args:
+    - instance_name: The name of the instance from which to remove the GPU profile.
+    - remote: The remote server name.
+    - project: The project name.
+
     Returns: True if the GPU profile was removed successfully, False otherwise.
     """
     try:
@@ -2640,8 +2651,17 @@ def list_profiles(remote, project, profile_name=None, inherited=False, extend=Fa
 
 def copy_profile(source_remote, source_project, source_profile, target_remote, target_project, target_profile):
     """Copy a profile from one location to another with error handling, including the description.
+
+    Args:
+    - source_remote (str): The source remote name.
+    - source_project (str): The source project name.
+    - source_profile (str): The source profile name.
+    - target_remote (str): The target remote name.
+    - target_project (str): The target project name.
+    - target_profile (str): The target profile name.
     
     Return True if the profile was copied successfully, False otherwise.
+
     """
     try:
         # Get the source and target clients
@@ -2797,7 +2817,6 @@ def initialize_remote_profiles(remote, profiles_to_transfer=None):
 
     logger.info(f"Remote '{remote}' successfully initialized with profiles.")
     return True
-
 
 #############################################
 ###### figo user command functions ##########
