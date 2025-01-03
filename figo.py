@@ -5992,7 +5992,8 @@ def create_user_parser(subparsers):
 
     return user_parser
 
-def handle_user_command(args, client, parser_dict, client_name=None):
+def handle_user_command(args, parser_dict, client_name=None):
+    client = pylxd.Client()
     if not args.user_command:
         parser_dict['user_parser'].print_help()
     elif args.user_command in ["list", "l"]:
@@ -6501,8 +6502,7 @@ def handle_command(args, parser, parser_dict):
     elif args.command in ["profile", "pr", "p"]:
         handle_profile_command(args, parser_dict)
     elif args.command in ["user", "us", "u"]:
-        client = pylxd.Client()
-        handle_user_command(args, client, parser_dict, client_name="local")
+        handle_user_command(args, parser_dict, client_name="local")
     elif args.command in ["remote", "re", "r"]:
         handle_remote_command(args, parser_dict)
     elif args.command in ["project"]:
