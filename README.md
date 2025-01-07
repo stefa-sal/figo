@@ -47,7 +47,21 @@ Each command has its own set of subcommands and options.
 ### figo instance
 
 - **Aliases:** `in`, `i`
-- **Description:** Manage instances, including creating, listing, starting, stopping, setting IP addresses, setting keys, and executing bash commands.
+- **Description:** Manage instances with comprehensive control over creation, listing, starting, stopping, configuring IP addresses, setting user keys, and executing bash commands directly within instances.
+
+#### Features:
+- **Instance Creation:** Create instances with specified profiles, IP configurations, and user keys.
+- **Remote and Project Support:** Manage instances across remotes and projects with scoped commands.
+- **Key Management:** Add or view authorized keys for users in specific instances.
+- **Dynamic Network Configuration:** Assign static IP addresses or use automatic assignment for seamless networking.
+- **Instance Execution:** Execute bash commands directly within instances, with automatic start if required.
+- **Flexibility:** Supports containers, virtual machines (VMs), and multiple instance profiles.
+
+#### Example Use Cases:
+- Set up and manage instances in a federated environment with customizable configurations.
+- Integrate user-specific SSH keys into newly created instances for secure access.
+- Monitor and control instances across multiple remotes and projects with ease.
+- Dynamically assign IP addresses or manage networking configurations for isolated or shared environments.
 
 #### Subcommands:
 - [`figo instance list`](#figo-instance-list)

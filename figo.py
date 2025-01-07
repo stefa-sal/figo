@@ -4805,7 +4805,17 @@ def parse_instance_scope(instance_name, provided_remote, provided_project):
 
 def create_instance_parser(subparsers):
     instance_parser = subparsers.add_parser(
-        "instance", help="Manage instances", formatter_class=argparse.RawTextHelpFormatter
+        "instance",
+        help="Manage instances.",
+        description=(
+            "Manage instances, including creating, listing, starting, stopping, setting IP addresses, "
+            "adding public keys, and executing bash commands.\n\n"
+            "The `instance` command allows precise control of instance operations, with support for "
+            "remote and project scope specification. You can also create instances with custom profiles, "
+            "assign static IP addresses, and set up authorized keys for users."
+        ),
+        epilog="Use 'figo instance <command> -h' for detailed help on a specific subcommand.",
+        formatter_class=argparse.RawTextHelpFormatter,
     )
     instance_subparsers = instance_parser.add_subparsers(dest="instance_command")
 
@@ -4815,19 +4825,19 @@ def create_instance_parser(subparsers):
         parser.add_argument("-p", "--project", help="Specify the project name")
         parser.add_argument(
             "-u", "--user",
-            help="Used to infer the project (for list, start, stop, set_key, set_ip, bash)"
+            help="Specify the username to infer the project. Relevant for commands such as list, start, stop, and set_key."
         )
 
     # Add common options for IP, gateway, and NIC
     def add_common_ip_gw_nic_arguments(parser):
         parser.add_argument("-i", "--ip", help="Specify a static IP address for the instance")
-        parser.add_argument(
-            "-g", "--gw", help="Specify the gateway address for the instance"
-        )
+        parser.add_argument("-g", "--gw", help="Specify the gateway address for the instance")
         parser.add_argument(
             "-n", "--nic",
-            help="Specify the NIC name for the instance, used in create and set_ip subcommands.\n"
-                 "Default: eth0 for containers, enp5s0 for VMs"
+            help=(
+                "Specify the NIC name for the instance. Used in `create` and `set_ip` subcommands.\n"
+                "Default: 'eth0' for containers, 'enp5s0' for VMs."
+            )
         )
 
     # List command
