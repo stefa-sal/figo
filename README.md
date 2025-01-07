@@ -595,19 +595,22 @@ Each command has its own set of subcommands and options.
 
 - #### `figo user list`
 
-  - **Description:** List installed certificates, with options to show detailed information and extend column width for better readability.
+  - **Description:** List users, with options to show detailed information, include VPN IP addresses, and extend column width for better readability.
   - **Syntax:**
     ```bash
-    figo user list [-f | --full] [-e | --extend]
+    figo user list [-f | --full] [-e | --extend] [-i | --ip]
     ```
   - **Options:**
-    - `-f, --full`: Show full details of installed certificates.
+    - `-f, --full`: Show full details of users.
+    - `-i, --ip`: Include the WireGuard VPN IP address assigned to the user.
     - `-e, --extend`: Extend column width to fit the content.
   - **Examples:**
     ```bash
     figo user list
     figo user list --full
     figo user list --extend
+    figo user list --ip
+    figo user list --full --ip --extend
     ```
 
 - #### `figo user add`

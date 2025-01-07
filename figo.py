@@ -2822,8 +2822,44 @@ def initialize_remote_profiles(remote, profiles_to_transfer=None):
 ###### figo user command functions ##########
 #############################################
 
-def list_users(client, full=False, extend=False):
-    """List all installed certificates with optional full details, adding email, name, and org details with specified lengths."""
+def get_ip_address_of_user(username, fingerprint):
+    """Get the IP address of a user based on the WireGuard configuration file.
+
+    Args:
+    - username (str): The username of the user.
+    - fingerprint (str): The fingerprint of the user's certificate.
+
+    Returns:
+    - str: The IP address of the user or a string starting with "?" if it was not
+      possibile to find IP address.
+    """
+
+    # Construct the path to the WireGuard configuration file
+    file_path = os.path.join(os.path.expanduser(USER_DIR), f"{username}.conf")
+
+    # Check if the file exists
+    if not os.path.exists(file_path):
+        return f"?no file {username}.conf"
+
+    # Read the WireGuard configuration file
+    with open(file_path, 'r') as file:
+        for line in file:
+            if line.startswith('Address ='):
+                ip_address = line.split('=')[1].strip().split('/')[0]
+                return ip_address
+
+    return f"?no ip in {username}.conf"
+
+
+def list_users(client, full=False, extend=False, ip=False):
+    """List all users with optional full details (email, name, and org).
+    
+    Args:
+    - client: The client object associated with the remote node.
+    - full: If True, display full details (email, name, and org).
+    - extend: If True, adapt the output column width to the content.
+    - ip: If True, display the IP address of the user.
+    """
 
     certificates_info = []
 
@@ -2866,20 +2902,25 @@ def list_users(client, full=False, extend=False):
     certificates_info.sort(key=lambda x: x["name"])
 
     # Print headers
+    COLS = [('NAME', 20), ('FINGERPRINT', 12)]
+    if ip:
+        COLS += [('VPN IP', 15)]
     if full:
-        COLS= [('NAME', 18), ('FINGERPRINT', 12), ('TYPE', 4), ('ADMIN', 5), ('EMAIL', 30),
-               ('REAL NAME', 20), ('ORGANIZATION', 15), ('PROJECTS', 20)]
-    else:
-        COLS = [('NAME', 20), ('FINGERPRINT', 12)]
+        COLS += [('TYPE', 4), ('ADMIN', 5), ('EMAIL', 30), ('REAL NAME', 20),
+                      ('ORGANIZATION', 15), ('PROJECTS', 20)]
+        
     add_header_line_to_output(COLS)
 
     # Print sorted certificates
     for cert in certificates_info:
+        output_row = [cert["name"], cert["fingerprint"]]
+        if ip:
+            user_ip = get_ip_address_of_user(cert["name"], cert["fingerprint"])
+            output_row.append(user_ip if user_ip else "?")
         if full:
-            add_row_to_output(COLS, [cert["name"], cert["fingerprint"], cert["type"], cert["admin"],
-                             cert["email"], cert["real_name"], cert["org"], cert["projects"]])
-        else:
-            add_row_to_output(COLS, [cert["name"], cert["fingerprint"]])
+            output_row += [cert["type"], cert["admin"], cert["email"], cert["real_name"],
+                           cert["org"], cert["projects"]]    
+        add_row_to_output(COLS, output_row)
 
     flush_output(extend=extend)
 
@@ -5928,14 +5969,34 @@ class NoUnderscoreCheck(argparse.Action):
             setattr(namespace, self.dest, values)
 
 def create_user_parser(subparsers):
-    user_parser = subparsers.add_parser("user", help="Manage users")
+    user_parser = subparsers.add_parser(
+        "user", 
+        help="Manage users",
+        description="Manage and manipulate user accounts, including adding, editing, listing, granting access, and deleting users.",
+        epilog="Use 'figo user <command> -h' for more detailed help on a specific command.",
+        formatter_class=argparse.RawTextHelpFormatter
+        )
     user_subparsers = user_parser.add_subparsers(dest="user_command")
 
     # List subcommand
-    user_list_parser = user_subparsers.add_parser("list", aliases=["l"],
-                                                  help="List installed certificates (use -f or --full for more details)")
+    user_list_parser = user_subparsers.add_parser(
+        "list", aliases=["l"],
+        help="List user information (use -f or --full for more details)",
+        description="List all users.\n"
+                    "Use the -f/--full option to show full details of users.\n"
+                    "Use the -i/--ip option to include the WireGuard VPN IP address assigned to the user.\n"
+                    "Use the -e/--extend option to extend column width to fit the content.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+                "  figo user list\n"
+                "  figo user list -f\n"
+                "  figo user list -i\n"
+                "  figo user list -e"
+        )
     user_list_parser.add_argument("-f", "--full", action="store_true",
-                                  help="Show full details of installed certificates")
+                                  help="Show full details of users")
+    user_list_parser.add_argument("-i", "--ip", action="store_true",
+                                  help="Include the WireGuard VPN IP address assigned to the user")
     user_list_parser.add_argument("-e", "--extend", action="store_true",
                                   help="Extend column width to fit the content")
 
@@ -5997,7 +6058,7 @@ def handle_user_command(args, parser_dict, client_name=None):
     if not args.user_command:
         parser_dict['user_parser'].print_help()
     elif args.user_command in ["list", "l"]:
-        list_users(client, full=args.full, extend=args.extend)
+        list_users(client, full=args.full, extend=args.extend, ip=args.ip)
     elif args.user_command == "add":
         # Pass the 'keys' flag to the add_user function
         if args.ip_next and not args.wireguard:
