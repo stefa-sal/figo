@@ -336,7 +336,20 @@ Each command has its own set of subcommands and options.
 ### figo gpu
 
 - **Aliases:** `gp`, `g`
-- **Description:** Manage GPUs in instances within the federated testbed.
+- **Description:** Manage GPUs in instances within the federated testbed. This includes monitoring GPU status, managing GPU profiles, and retrieving hardware information for resource allocation.
+
+#### Features:
+- **Monitor GPU Status:** Check the availability and usage of GPUs on local or remote nodes.
+- **Manage GPU Profiles:** Add or remove GPU profiles to/from instances.
+- **Retrieve PCI Addresses:** Obtain detailed information about GPU PCI addresses for hardware-specific operations.
+- **Support for Scopes:** Perform GPU management tasks at the remote, project, or instance level.
+- **Flexible Options:** Extend column widths for better readability and specify users, projects, or remotes to customize operations.
+
+#### Example Use Cases:
+- **Resource Allocation:** Assign GPU resources to instances based on project requirements.
+- **Monitoring Utilization:** Keep track of GPU usage across multiple nodes in the testbed.
+- **Dynamic Scaling:** Add or remove GPU profiles dynamically to meet the changing workload demands of instances.
+- **Hardware Diagnostics:** Retrieve PCI addresses to debug hardware-specific issues or optimize configurations.
 
 #### Subcommands:
 - [`figo gpu status`](#figo-gpu-status)
@@ -359,8 +372,13 @@ Each command has its own set of subcommands and options.
       - `-e, --extend`: Extend column width for better readability.
   - **Examples**:
       ```bash
+      # Show GPU status for the local node
       figo gpu status
+
+      # Show GPU status for a specific remote
       figo gpu status my_remote:
+
+      # Show GPU status with extended column widths
       figo gpu status --extend
       ```
 
@@ -376,8 +394,13 @@ Each command has its own set of subcommands and options.
       - `-e, --extend`: Extend column width for better readability.
   - **Examples**:
       ```bash
+      # List GPU profiles on the local node
       figo gpu list
+
+      # List GPU profiles on a specific remote
       figo gpu list my_remote:
+
+      # List GPU profiles with extended column widths
       figo gpu list --extend
       ```
 
@@ -395,10 +418,25 @@ Each command has its own set of subcommands and options.
     - `-u, --user`: Specify the user to infer the project from.
   - **Examples:**
     ```bash
+    # Add a GPU profile to an instance in the default project on the local server
     figo gpu add my_instance
+
+    # Add a GPU profile to an instance on the local server in a specific project
+    figo gpu add instance_name -p my_project
+
+    # Add a GPU profile to an instance on a specific remote in the default project
+    figo gpu add instance_name -r my_remote    
+
+    # Add a GPU profile to an instance on a specific remote in a specific project
     figo gpu add my_project.instance_name -r my_remote
+    
+    # Add a GPU profile to an instance on a specific remote in a specific project
     figo gpu add my_remote:my_project.instance_name
+
+    # Add a GPU profile to an instance on a specific remote in a specific project
     figo gpu add instance_name -p my_project -r my_remote
+
+    # Add a GPU profile to an instance on the local server, inferring the project from the user name
     figo gpu add my_instance -u user_name
     ```
 
@@ -435,7 +473,10 @@ Each command has its own set of subcommands and options.
     - `remote`: Specify the remote name for displaying GPU PCI addresses. Defaults to `local` if omitted.
   - **Examples**:
     ```bash
+    # Display PCI addresses of GPUs on the local node
     figo gpu pci_addr
+
+    # Display PCI addresses of GPUs on a specific remote
     figo gpu pci_addr my_remote
     ```
 

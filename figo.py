@@ -5423,7 +5423,15 @@ def handle_instance_command(args, parser_dict):
 #############################################
 
 def create_gpu_parser(subparsers):
-    gpu_parser = subparsers.add_parser("gpu", help="Manage GPUs")
+    gpu_parser = subparsers.add_parser(
+        "gpu",
+        help="Manage GPUs and GPU profiles across instances and remotes.",
+        description="Perform various GPU management tasks, such as checking status, listing profiles, "
+                    "adding or removing GPU profiles from instances, and retrieving PCI addresses of available GPUs.\n"
+                    "Supports scoped operations with remote and project options.",
+        epilog="Use 'figo gpu <command> -h' for detailed help on a specific command.",
+        formatter_class=argparse.RawTextHelpFormatter
+    )
     gpu_subparsers = gpu_parser.add_subparsers(dest="gpu_command")
 
     # GPU Status with extended column option and optional remote
@@ -5431,7 +5439,8 @@ def create_gpu_parser(subparsers):
         "status",
         help="Show the current status of GPUs, including their availability and usage.",
         description="Show the status of GPUs on a specified remote, displaying their availability and usage.\n"
-                    "If no remote is specified, defaults to 'local'. Use the -e/--extend option to adjust column width for better readability.",
+                    "If no remote is specified, defaults to 'local'.\n"
+                    "Use the -e/--extend option to adjust column width for better readability.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
                "  figo gpu status\n"
@@ -5454,7 +5463,8 @@ def create_gpu_parser(subparsers):
         aliases=["l"],
         help="List GPU profiles configured in the system.",
         description="List all GPU profiles configured on a specified remote.\n"
-                    "If no remote is specified, defaults to 'local'. Use the -e/--extend option to adjust column width for better readability.",
+                    "If no remote is specified, defaults to 'local'.\n"
+                    "Use the -e/--extend option to adjust column width for better readability.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="Examples:\n"
                "  figo gpu list\n"
