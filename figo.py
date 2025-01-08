@@ -6469,8 +6469,8 @@ def create_vpn_parser(subparsers):
 
     # Add route subcommand
     vpn_add_parser = vpn_subparsers.add_parser("add", help="Add VPN configuration", 
-                                               description="Add configurations: see figo vpu add route -h",
-                                               formatter_class=argparse.RawTextHelp)
+                                               description="Supports adding routes, for help type: figo vpn add route -h",
+                                               formatter_class=argparse.RawTextHelpFormatter)
     vpn_add_subparsers = vpn_add_parser.add_subparsers(dest="vpn_add_command")
 
     # Route subcommand
