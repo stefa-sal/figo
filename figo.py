@@ -1534,10 +1534,11 @@ def set_ip(instance_name, remote, project, ip_address_and_prefix_len=None, gw_ad
             logger.error(f"Error: gw address '{gw_address}' is not a valid IP address.")
             return False
     else:
-        gw_address = get_gw_address(remote)
+        gw_address = get_gw_address(remap_remote)
 
     if gw_address is None:
-        logger.error(f"Error: Gateway address not found for remote '{remap_remote}'.")
+        logger.error(f"Error: Gateway address not found for remote '{remap_remote}'. "+
+                     f"Remapped from '{remote}'" if remap_remote != remote else "")
         return False
 
     # check that gw_address is in the same subnet as ip_address
