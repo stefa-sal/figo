@@ -4058,7 +4058,6 @@ def delete_user(user_name, client, purge=False, removefiles=False, removevpn=Fal
                         logger.info(f"  - Contains {len(storage_volumes)} storage volume(s)")
                 else:
                     # Delete the empty project
-                    #TODO
                     delete_project(remote_node, project_name)
                     logger.info(f"Project '{project_name}' on remote '{remote_node}' has been deleted.")
 
