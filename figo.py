@@ -1091,7 +1091,7 @@ def start_instance(instance_name, remote, project):
                         instance_profiles.append(new_profile)
                         logger.info(
                             f"Replaced GPU profile '{gpu_profile}' with '{new_profile}' "
-                            f"for instance {my_project}.'{instance_name}'"
+                            f"for instance {project}.{instance_name}"
                         )
                         break
 
