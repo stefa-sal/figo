@@ -41,7 +41,7 @@ SSH_LINUX_PORT = 22  # Default SSH port
 
 # Define a global dictionary for target lookups
 ACCESS_ROUTER_TARGETS = {
-    "mikrotik": (SSH_MIKROTIK_HOST, SSH_MIKROTIK_USER_NAME, SSH_MIKROTIK_PORT),
+    "mikrotik-rm2": (SSH_MIKROTIK_HOST, SSH_MIKROTIK_USER_NAME, SSH_MIKROTIK_PORT),
     "figo-2gpu": ("160.80.223.203", "ubuntu", 22),
     # Add more targets as needed
 }
@@ -6468,11 +6468,36 @@ def create_vpn_parser(subparsers):
     vpn_subparsers = vpn_parser.add_subparsers(dest="vpn_command")
 
     # Add route subcommand
-    vpn_add_parser = vpn_subparsers.add_parser("add", help="Add VPN configuration")
+    vpn_add_parser = vpn_subparsers.add_parser("add", help="Add VPN configuration", 
+                                               description="Add configurations: see figo vpu add route -h",
+                                               formatter_class=argparse.RawTextHelp)
     vpn_add_subparsers = vpn_add_parser.add_subparsers(dest="vpn_add_command")
 
     # Route subcommand
-    route_parser = vpn_add_subparsers.add_parser("route", help="Add a route to VPN")
+    route_parser = vpn_add_subparsers.add_parser(
+        "route", help="Add a route to VPN",
+        description="Add a route to the VPN configuration.\n"
+                    "Specify the destination address, gateway, device interface, and VPN type.\n"
+                    "The target or host must be provided for the route.\n"
+                    "If the target is provided, the host, user, and port are resolved"
+                    "from the target mapping contained in the global dictionary 'ACCESS_ROUTER_TARGETS'.\n"
+                    "If the host is provided, the user and port can be specified othewise they are set to default values.\n"
+                    "The device interface is required for Linux routers but not for MikroTik routers.",
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog="Examples:\n"
+               "  # Add a route using a target my-target-name to be found in ACCESS_ROUTER_TARGETS\n"
+               "  figo vpn add route 10.10.128.0/24 via 10.10.10.2 type mikrotik target my-target-name\n"
+               "\n"
+               "  # Add a route using a host address with explicit user and port\n"
+               "  figo vpn add route 10.10.128.0/24 via 10.10.10.2 type mikrotik host 160.80.10.2 --user myuser --port 22\n"
+               "\n"
+               "  # Add a route using a host address with default user and port\n"
+               "  figo vpn add route 10.10.128.0/24 via 10.10.10.2 type mikrotik host 160.80.10.2 \n"
+               "\n"
+               "  # Add a route to a network into a server my-linux to be found in ACCESS_ROUTER_TARGETS\n"
+               "  figo vpn add route 10.10.0.0/16 via 10.202.128.1 --dev wg128 type linux target my-linux\n"
+               "\n"
+    )    
 
     # Positional argument for destination
     route_parser.add_argument("dst_address", help="Destination address in CIDR format (e.g., 10.202.128.0/24)")

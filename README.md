@@ -964,7 +964,12 @@ Each command has its own set of subcommands and options.
 
 ### figo vpn
 
-- **Description:** Manage VPN configuration for secure communication and routing.
+- **Description:** Manage VPN configuration for secure communication and routing. The `figo vpn` command enables adding and configuring VPN routes for different device types, including Linux and MikroTik routers. This is essential for maintaining secure and efficient network operations across federated environments.
+
+#### Features:
+- Configure routes dynamically for different VPN device types (`mikrotik`, `linux`).
+- Support for target-based configuration using predefined settings from the ACCESS_ROUTER_TARGETS dictionary.
+- Host-based configuration with optional user and port settings.
 
 #### Subcommands:
 - [`figo vpn add route`](#figo-vpn-add-route)
@@ -989,11 +994,25 @@ Each command has its own set of subcommands and options.
     - `-d, --dev`: Device interface (e.g., `vlan403`). Required for Linux routers.
     - `-u, --user`: SSH username for logging into the node (default: configured SSH user).
     - `-p, --port`: SSH port for connecting to the VPN host (default: configured SSH port).
+
   - **Examples:**
     ```bash
-    figo vpn add route 10.202.128.0/24 via 10.202.9.2 type linux target target-name -d vlan403
-    figo vpn add route 192.168.0.0/16 via 192.168.1.1 type mikrotik host my-vpn-host
+    # Add a route using a target name found in ACCESS_ROUTER_TARGETS
+    figo vpn add route 10.10.128.0/24 via 10.10.10.2 type mikrotik target my-target-name
+
+    # Add a route using a host address with explicit user and port
+    figo vpn add route 10.10.128.0/24 via 10.10.10.2 type mikrotik host 160.80.10.2 --user myuser --port 22
+
+    # Add a route using a host address with default user and port
+    figo vpn add route 10.10.128.0/24 via 10.10.10.2 type mikrotik host 160.80.10.2
+
+    # Add a route to a network into a Linux router using device interface
+    figo vpn add route 10.10.0.0/16 via 10.202.128.1 --dev wg128 type linux target my-linux
+
+    # Add a route for extending a network to eln_cloud
+    figo vpn add route 10.202.10.0/24 via 10.202.9.2 type mikrotik target mikrotik-rm2
     ```
+
 ## Autocompletion
 
 The CLI supports autocompletion using the `argcomplete` library,
