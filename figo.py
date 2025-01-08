@@ -3643,8 +3643,7 @@ def add_user(
     email=None,
     name=None,
     org=None,
-    keys=False,
-    
+    keys=False,   
 ):
     """
     Add a user to Incus with a certificate and optionally generate an additional SSH key pair.
@@ -3660,7 +3659,7 @@ def add_user(
       (if wireguard is True) otherwise the first available hole in the IP range will be used.
     - set_vpn (bool, optional): Specifies if the user has to be added to the wireguard access node 
       (e.g. the MikroTik switch).
-    - project (str, optional): Name of the project to restrict the certificate to.
+    - project (str, optional): Name of the existing project to restrict the certificate to.
       if not provided, a project will be created with the name 'figo-<user_name>'.
     - email (str, optional): Email address of the user.
     - name (str, optional): Name of the user.
@@ -3763,6 +3762,7 @@ def add_user(
             return False
 
     # Create a project for the user in the main server (local)
+    # if the user is not an admin and the project is not provided
     project_created = False
     if not admin and project == None:
         if remote_name == None:
@@ -3779,8 +3779,10 @@ def add_user(
         client, user_name, crt_file, project_name, admin=admin, email=email, name=name, org=org
     )
 
-    if not admin and project == None and not certificate_added:
-        delete_project("local", project_name)
+    if not certificate_added:
+        logger.error(f"Error: Failed to add certificate to Incus.")
+        if project_created:
+            delete_project("local", project_name)
         return False
 
     if wireguard:
