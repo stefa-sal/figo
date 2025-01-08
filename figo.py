@@ -6103,7 +6103,10 @@ def handle_user_command(args, parser_dict, client_name=None):
 #############################################
 
 def create_remote_parser(subparsers):
-    remote_parser = subparsers.add_parser("remote", help="Manage remotes")
+    remote_parser = subparsers.add_parser("remote", help="Manage remotes",
+                                          description="Manage and manipulate remote Incus servers, including enrolling, listing, and deleting remotes.",
+                                          epilog="Use 'figo remote <command> -h' for more detailed help on a specific command.",
+                                          formatter_class=argparse.RawTextHelpFormatter)
     remote_subparsers = remote_parser.add_subparsers(dest="remote_command")
 
     # List subcommand with --full and --extend options
@@ -6187,7 +6190,10 @@ def handle_remote_command(args, parser_dict):
 #############################################
 
 def create_project_parser(subparsers):
-    project_parser = subparsers.add_parser("project", help="Manage projects")
+    project_parser = subparsers.add_parser("project", help="Manage projects",
+                                           description="Manage and manipulate projects, including listing, creating, and deleting projects.",
+                                           epilog="Use 'figo project <command> -h' for more detailed help on a specific command.",
+                                           formatter_class=argparse.RawTextHelpFormatter)
     project_subparsers = project_parser.add_subparsers(dest="project_command")
 
     # List projects
@@ -6326,6 +6332,7 @@ def create_operation_parser(subparsers):
         aliases=["op", "o"],
         help="Manage ongoing operations",
         description="Monitor and manage ongoing operations across all remotes, specific remotes, or specific projects.",
+        epilog="Use 'figo operation <subcommand> -h' for more detailed help on a specific subcommand.",
         formatter_class=argparse.RawTextHelpFormatter
     )
     operation_subparsers = operation_parser.add_subparsers(dest="operation_command")
@@ -6464,7 +6471,10 @@ def handle_operation_command(args, parser_dict):
 #############################################
 
 def create_vpn_parser(subparsers):
-    vpn_parser = subparsers.add_parser("vpn", help="Manage VPN configuration")
+    vpn_parser = subparsers.add_parser("vpn", help="Manage VPN configuration",
+                                       description="Manage VPN configuration, including adding routes and configuring VPN devices.",
+                                       epilog="Use 'figo vpn <subcommand> -h' for more detailed help on a specific subcommand.",
+                                       formatter_class=argparse.RawTextHelpFormatter)
     vpn_subparsers = vpn_parser.add_subparsers(dest="vpn_command")
 
     # Add route subcommand
