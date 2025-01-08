@@ -2,11 +2,39 @@
 # This script is a wrapper for the figo.py script. It activates the virtual
 # environment and runs the Python script with all passed arguments.
 
-# make a simlink of this script to /usr/local/bin/figo
+# make a symlink of this script to /usr/local/bin/figo
 # sudo ln -s $HOME/figo/figo /usr/local/bin/figo
 # or copy the script to /usr/local/bin
 # sudo cp figo /usr/local/bin/
 
+# Check if the $HOME/figo directory exists
+if [ ! -d "$HOME/figo" ]; then
+    echo "Error: The folder $HOME/figo does not exist."
+    echo "Please verify the directory path and ensure you are running this command as the correct user."
+    echo "If needed, switch to the appropriate user and try again."
+    exit 1
+fi
+
+# Check if the virtual environment's activate script exists
+if [ ! -f "$HOME/figo/venv/bin/activate" ]; then
+    echo "Error: The virtual environment activation script ($HOME/figo/venv/bin/activate) does not exist."
+    echo "Please ensure the virtual environment is properly set up in $HOME/figo."
+    exit 1
+fi
+
+# Check if /var/lib/incus exists
+if [ ! -d "/var/lib/incus" ]; then
+    echo "Error: The directory /var/lib/incus does not exist."
+    echo "Ensure that Incus is correctly installed and configured."
+    exit 1
+fi
+
+# Check if figo.py exists
+if [ ! -f "$HOME/figo/figo.py" ]; then
+    echo "Error: The file $HOME/figo/figo.py does not exist."
+    echo "Please verify that the figo.py script is located in $HOME/figo."
+    exit 1
+fi
 
 # Navigate to the directory containing the script
 cd "$HOME/figo"
@@ -19,3 +47,4 @@ export LXD_DIR=/var/lib/incus
 
 # Run the Python script with all passed arguments
 python3 figo.py "$@"
+
